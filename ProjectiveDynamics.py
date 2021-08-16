@@ -53,3 +53,11 @@ class pyPD(torch.nn.Module) :
         self.v = (xt - self.x)/self.dt
         self.x = xt   
         return  self.x
+
+    def __compute_R(self,x) :
+        Ji = torch.transpose(self.Ji_T,1,2)
+        F = torch.matmul(Ji,x)
+        u, s, v = torch.svd(F)
+        R = torch.matmul(torch.transpose(u,1,2),v)
+        return R
+        
