@@ -21,24 +21,6 @@ class pyPD(torch.nn.Module) :
 
         A = M + dt * dt * torch.sum(Li)         #Laplacian matrix: M + h*h*L
         self.U = torch.cholesky(A)   
-
-    def __compute_L_and_J(self) : 
-        G = torch.Tensor([  [1,0,0,-1],         #differential operator 
-                            [0,1,0,-1],
-                            [0,0,1,-1]])
-
-        Si = self.S.view(self.e,4,self.n)
-        GSi = torch.matmul(G,Si)
-        GSi = GSi.view(3*self.e,self.n)
-        Dmi = torch.matmul(GSi,self.x).view(self.e,3,3)
-        Dmi_inv = torch.inverse(Dmi)
-        GSi = GSi.view(self.e,3,self.n)
-        Dmi_inv_T = torch.transpose(Dmi_inv,1,2)
-        Ji = torch.matmul(Dmi_inv_T,GSi)
-        Ji_T = torch.transpose(Ji,1,2)
-        Li = torch.matmul(Ji_T,Ji)
-
-        return Li, Ji_T
     
     def forward(self) : 
         y = self.x + self.dt * self.v
