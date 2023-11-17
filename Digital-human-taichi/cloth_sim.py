@@ -31,7 +31,7 @@ total_frame_num = 1
 # static_mesh = Mesh(static_mesh_path + static_mesh_file, scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
 
 # mesh = Mesh("obj_models/clubbing_dress.obj", scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
-mesh = Mesh("obj_models/square_huge.obj", scale=0.05, trans=ti.math.vec3(0.5, 0.9, 0.5), rot=ti.math.vec3(0.0, 0.0, 90.0))
+mesh = Mesh("obj_models/square_huge.obj", scale=0.05, trans=ti.math.vec3(0.5, 0.7, 0.5), rot=ti.math.vec3(0.0, 0.0, 90.0))
 # mesh = Mesh("obj_models/square_16K.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 # mesh = Mesh("obj_models/square_16K.obj", scale=0.04, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/cube.obj", scale=0.8, trans=ti.math.vec3(0.5, 0.0, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
