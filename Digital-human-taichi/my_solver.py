@@ -29,7 +29,6 @@ class Solver:
         self.radius = 0.005
         # self.r = 0.01
         self.grid_size = 5 * self.radius
-        self.grid_size = 5 * self.radius
         self.grid_num = np.ceil(self.domain_size / self.grid_size).astype(int)
         print("grid size: ", self.grid_num)
         self.padding = self.grid_size
@@ -88,7 +87,7 @@ class Solver:
         self.grid_ids = ti.field(int, shape=self.max_num_verts)
         self.grid_ids_buffer = ti.field(int, shape=self.max_num_verts)
         self.grid_ids_new = ti.field(int, shape=self.max_num_verts)
-        self.cur2org = ti.field(int, shape=self.max_num_verts)
+        self.cur2org = ti.field(int, shape=self.max_num_verts)      # dynamic verts + static faces
 
         self.frame = 0
         self.frames = static_meshes
@@ -140,6 +139,7 @@ class Solver:
             else:
                 res = k * 2 * ti.pow(1 - q, 3.0)
         return res
+
     @ti.kernel
     def counting_sort(self):
         # FIXME: make it the actual particle num
@@ -164,8 +164,6 @@ class Solver:
 
     @ti.kernel
     def update_grid_id(self):
-
-
         #TODO: update the following two for-loops into a single one
         for I in ti.grouped(self.grid_particles_num):
             self.grid_particles_num[I] = 0
@@ -175,17 +173,17 @@ class Solver:
             self.grid_ids[v.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
+        # for v in self.verts_static:
+        #     grid_index = self.get_flatten_grid_index(v.x)
+        #     self.grid_ids[v.id + self.num_verts + self.num_faces_static] = grid_index
+        #     ti.atomic_add(self.grid_particles_num[grid_index], 1)
+
         for f in self.faces_static:
             center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
             grid_index = self.get_flatten_grid_index(center)
             self.grid_ids[f.id + self.num_verts] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
-        # for v in self.verts_static:
-        #     grid_index = self.get_flatten_grid_index(v.x)
-        #     self.grid_ids[v.id + self.num_verts + self.num_faces_static] = grid_index
-        #     ti.atomic_add(self.grid_particles_num[grid_index], 1)
-        #
         # for f in self.faces:
         #     center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
         #     grid_index = self.get_flatten_grid_index(center)
@@ -224,33 +222,32 @@ class Solver:
                 task2(p_i, p_j_cur - self.num_verts)
 
 
-
-    @ti.kernel
-    def reset_kernel(self):
-
-        for e in self.edges_static:
-            e.x = 0.5 * (e.verts[0].x + e.verts[1].x)
-            i, j = e.verts[0].id, e.verts[1].id
-            # self.adj[i, j] = 0
-            # self.adj[j, i] = 0
-
-        for e in self.edges:
-            i, j = e.verts[0].id, e.verts[1].id
-            self.adj[i, j] = 0
-            self.adj[j, i] = 0
-
-        for vi in range(0, self.num_verts):
-            i = 0
-            for vj in range(0, self.num_verts):
-                if vi != vj and i < self.num_max_neighbors:
-                    lij0 = (self.verts.x0[vi] - self.verts.x0[vj]).norm()
-                    if lij0 < self.support_radius:
-                        self.neighbor_ids[vi, i] = vj
-                        self.weights[vi, vj][0] = lij0
-                        self.weights[vi, vj][1] = self.cubic_kernel(lij0)
-                        i+=1
-
-            self.num_neighbor[vi] = i
+    # @ti.kernel
+    # def reset_kernel(self):
+    #
+    #     for e in self.edges_static:
+    #         e.x = 0.5 * (e.verts[0].x + e.verts[1].x)
+    #         i, j = e.verts[0].id, e.verts[1].id
+    #         # self.adj[i, j] = 0
+    #         # self.adj[j, i] = 0
+    #
+    #     for e in self.edges:
+    #         i, j = e.verts[0].id, e.verts[1].id
+    #         self.adj[i, j] = 0
+    #         self.adj[j, i] = 0
+    #
+    #     for vi in range(0, self.num_verts):
+    #         i = 0
+    #         for vj in range(0, self.num_verts):
+    #             if vi != vj and i < self.num_max_neighbors:
+    #                 lij0 = (self.verts.x0[vi] - self.verts.x0[vj]).norm()
+    #                 if lij0 < self.support_radius:
+    #                     self.neighbor_ids[vi, i] = vj
+    #                     self.weights[vi, vj][0] = lij0
+    #                     self.weights[vi, vj][1] = self.cubic_kernel(lij0)
+    #                     i+=1
+    #
+    #         self.num_neighbor[vi] = i
 
         # center = ti.math.vec3(0.5, -0.8, 0.5)
         # for v in self.verts:
@@ -278,19 +275,19 @@ class Solver:
         self.verts.deg.fill(0)
         self.verts.f_ext.fill([0.0, self.gravity, 0.0])
         self.adj.fill(1)
-        self.reset_kernel()
+        # self.reset_kernel()
 
         self.verts_static.v.fill(0.0)
         # print(self.num_neighbor)
 
-    @ti.kernel
-    def pre_stabilization(self):
-        for v in self.verts:
-            self.for_all_neighbors(v.id, self.resolve_self_pre, self.resolve_vt_vel)
-
-        for v in self.verts:
-            if v.nc > 0:
-                v.v += (v.dx / v.nc)
+    # @ti.kernel
+    # def pre_stabilization(self):
+    #     for v in self.verts:
+    #         self.for_all_neighbors(v.id, self.resolve_self_pre, self.resolve_vt_vel)
+    #
+    #     for v in self.verts:
+    #         if v.nc > 0:
+    #             v.v += (v.dx / v.nc)
 
     @ti.kernel
     def computeVtemp(self):
@@ -380,7 +377,6 @@ class Solver:
             p1 = center + 0.5 * e.l0 * normal
             p2 = center - 0.5 * e.l0 * normal
 
-
             e.verts[0].dx += (p1 - e.verts[0].x_k)
             e.verts[1].dx += (p2 - e.verts[1].x_k)
             e.verts[0].nc += 1
@@ -406,18 +402,21 @@ class Solver:
 
         # TODO: loop 1
         for v in self.verts:
+            # Resolve vertex triangle collisions
             center_cell = self.pos_to_index(self.verts.x_k[v.id])
-            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * 3)):
+            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * 3)):  # 3^3 neighbor cells
                 grid_index = self.flatten_grid_index(center_cell + offset)
                 for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
                     p_j_cur = self.cur2org[p_j]
 
+                    # vertex vs. static object's triangle case
                     if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
                         self.resolve_vt(v.id, p_j_cur - self.num_verts)
 
+                    # vertex vs. dynamic object's triangle case
                     elif p_j_cur >= self.num_verts + self.num_faces_static + self.num_verts_static:
                         tid = p_j_cur - self.num_verts - self.num_faces_static - self.num_verts_static
-                        if self.is_in_face(tid, v.id) != True :
+                        if self.is_in_face(tid, v.id) != True:
                             self.resolve_vt_dynamic(v.id, tid)
         #
         # for v in self.verts_static:
@@ -448,20 +447,19 @@ class Solver:
         for v in self.verts:
             v.x_k += w * (v.dx / v.nc)
 
-    @ti.kernel
-    def handle_contacts(self):
-
-        for v in self.verts:
-            self.for_all_neighbors(v.id, self.resolve_self, self.resolve, self.resolve_edge)
-
-
-        for v in self.verts:
-            if v.nc > 0:
-                v.x_k = v.dx / v.nc
-
-        # for v in self.verts:
-        #     v.x_k += (v.gc / v.hc)
-
+    # @ti.kernel
+    # def handle_contacts(self):
+    #
+    #     for v in self.verts:
+    #         self.for_all_neighbors(v.id, self.resolve_self, self.resolve, self.resolve_edge)
+    #
+    #
+    #     for v in self.verts:
+    #         if v.nc > 0:
+    #             v.x_k = v.dx / v.nc
+    #
+    #     for v in self.verts:
+    #         v.x_k += (v.gc / v.hc)
 
     @ti.func
     def resolve(self, i, j):
@@ -491,37 +489,30 @@ class Solver:
         d = self.dHat
         n = x0 - x0
         g0 = ti.math.vec3(0.)
+
         if dtype == 0:
             d = ipc_utils.d_PP(x0, x1)
             g0, g1 = ipc_utils.g_PP(x0, x1)
-
 
         elif dtype == 1:
             d = ipc_utils.d_PP(x0, x2)
             g0, g1 = ipc_utils.g_PP(x0, x2)
 
-
         elif dtype == 2:
             d = ipc_utils.d_PP(x0, x3)
             g0, g1 = ipc_utils.g_PP(x0, x3)
-
-
 
         elif dtype == 3:
             d = ipc_utils.d_PE(x0, x1, x2)
             g0, g1, g2 = ipc_utils.g_PE(x0, x1, x2)
 
-
         elif dtype == 4:
             d = ipc_utils.d_PE(x0, x2, x3)
             g0, g2, g3 = ipc_utils.g_PE(x0, x2, x3)
 
-
-
         elif dtype == 5:
             d = ipc_utils.d_PE(x0, x1, x3)
             g0, g1, g3 = ipc_utils.g_PE(x0, x1, x3)
-
 
         elif dtype == 6:
             d = ipc_utils.d_PT(x0, x1, x2, x3)
@@ -595,6 +586,7 @@ class Solver:
 
                     self.verts.nc[vi] += 1
                     self.verts.nc[v1] += 1
+
         elif dtype == 3:
             d = ipc_utils.d_PE(x0, x1, x2)
             g0, g1, g2 = ipc_utils.g_PE(x0, x1, x2)
@@ -612,7 +604,6 @@ class Solver:
                     self.verts.nc[v1] += 1
                     self.verts.nc[v2] += 1
 
-
         elif dtype == 4:
             d = ipc_utils.d_PE(x0, x2, x3)
             g0, g2, g3 = ipc_utils.g_PE(x0, x2, x3)
@@ -628,7 +619,6 @@ class Solver:
                     self.verts.nc[vi] += 1
                     self.verts.nc[v2] += 1
                     self.verts.nc[v3] += 1
-
 
         elif dtype == 5:
             d = ipc_utils.d_PE(x0, x1, x3)
@@ -703,8 +693,6 @@ class Solver:
 
                     self.verts.nc[v2] += 1
 
-
-
         elif dtype == 2:
             d = ipc_utils.d_PP(x0, x3)
             g0, g3 = ipc_utils.g_PP(x0, x3)
@@ -717,7 +705,6 @@ class Solver:
                     self.verts.dx[v3] += ld * g3
 
                     self.verts.nc[v3] += 1
-
 
         elif dtype == 3:
             d = ipc_utils.d_PE(x0, x1, x2)
@@ -746,7 +733,6 @@ class Solver:
                     self.verts.dx[v3] += ld * g3
                     self.verts.nc[v2] += 1
                     self.verts.nc[v3] += 1
-
 
         elif dtype == 5:
             d = ipc_utils.d_PE(x0, x1, x3)
