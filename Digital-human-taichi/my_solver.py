@@ -294,6 +294,9 @@ class Solver:
         for v in self.verts:
             v.v += (v.f_ext / v.m) * self.dt
 
+            if v.id == 68 or v.id == 61:
+                v.v = ti.math.vec3(0.0)
+
         # for v in self.verts_static:
         #     v.x += v.v * self.dt
 
@@ -356,6 +359,9 @@ class Solver:
         for v in self.verts:
             v.v = (v.x_k - v.x) / self.dt
             # v.x = v.x_k
+
+            if v.id == 68 or v.id == 61:
+                v.v = ti.math.vec3(0.0)
 
     @ti.kernel
     def apply_ccd(self):
