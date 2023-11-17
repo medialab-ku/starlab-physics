@@ -100,7 +100,7 @@ def init_color():
 
 init_color()
 
-sim = Solver(mesh, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=1)
+sim = Solver(mesh, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
 
 window = ti.ui.Window("Taichi Cloth Simulation on GGUI", (1024, 768), fps_limit=200)
 canvas = window.get_canvas()
@@ -141,7 +141,7 @@ while window.running:
     # scene.particles(sim.verts.x, radius=sim.radius, color=(1, 0.5, 0))
     # scene.lines()
 
-    scene.mesh(static_mesh.mesh.verts.x, indices=static_mesh.face_indices, show_wireframe=True)
+    # scene.mesh(static_mesh.mesh.verts.x, indices=static_mesh.face_indices, show_wireframe=True)
     # scene.lines(static_mesh.mesh.verts.x, indices=static_mesh.edge_indices, width=0.5,  color=(0, 0, 0))
     scene.mesh(sim.verts.x, indices=mesh.face_indices, color=(1, 0.5, 0), show_wireframe=True)
     # scene.lines(sim.verts.x, indices=mesh.edge_indices, width=0.5,  color=(0, 0, 0))

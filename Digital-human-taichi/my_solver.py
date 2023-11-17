@@ -65,7 +65,7 @@ class Solver:
 
         self.dHat = 2e-4
         self.contact_stiffness = 1e3
-        self.damping_factor = 1e-4
+        self.damping_factor = 1e-3
         self.batch_size = 10
         self.frictonal_coeff = 0.4
         self.num_bats = self.num_verts // self.batch_size
@@ -357,7 +357,7 @@ class Solver:
     def compute_velocity(self):
 
         for v in self.verts:
-            v.v = (v.x_k - v.x) / self.dt
+            v.v = (v.x_k - v.x) * (1-self.damping_factor) / self.dt
             # v.x = v.x_k
 
             if v.id == 68 or v.id == 61:
@@ -407,23 +407,23 @@ class Solver:
         #         self.verts.nc[j] += 1
 
         # TODO: loop 1
-        for v in self.verts:
-            # Resolve vertex triangle collisions
-            center_cell = self.pos_to_index(self.verts.x_k[v.id])
-            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * 3)):  # 3^3 neighbor cells
-                grid_index = self.flatten_grid_index(center_cell + offset)
-                for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
-                    p_j_cur = self.cur2org[p_j]
-
-                    # vertex vs. static object's triangle case
-                    if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
-                        self.resolve_vt(v.id, p_j_cur - self.num_verts)
-
-                    # vertex vs. dynamic object's triangle case
-                    elif p_j_cur >= self.num_verts + self.num_faces_static + self.num_verts_static:
-                        tid = p_j_cur - self.num_verts - self.num_faces_static - self.num_verts_static
-                        if self.is_in_face(tid, v.id) != True:
-                            self.resolve_vt_dynamic(v.id, tid)
+        # for v in self.verts:
+        #     # Resolve vertex triangle collisions
+        #     center_cell = self.pos_to_index(self.verts.x_k[v.id])
+        #     for offset in ti.grouped(ti.ndrange(*((-1, 2),) * 3)):  # 3^3 neighbor cells
+        #         grid_index = self.flatten_grid_index(center_cell + offset)
+        #         for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
+        #             p_j_cur = self.cur2org[p_j]
+        #
+        #             # vertex vs. static object's triangle case
+        #             if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
+        #                 self.resolve_vt(v.id, p_j_cur - self.num_verts)
+        #
+        #             # vertex vs. dynamic object's triangle case
+        #             elif p_j_cur >= self.num_verts + self.num_faces_static + self.num_verts_static:
+        #                 tid = p_j_cur - self.num_verts - self.num_faces_static - self.num_verts_static
+        #                 if self.is_in_face(tid, v.id) != True:
+        #                     self.resolve_vt_dynamic(v.id, tid)
         #
         # for v in self.verts_static:
         #     center_cell = self.pos_to_index(self.verts_static.x[v.id])
@@ -1471,7 +1471,7 @@ class Solver:
             self.computeY()
             self.verts.x_k.copy_from(self.verts.y)
 
-            for i in range(1):
+            for i in range(self.max_iter):
                 self.verts.dx.fill(0.0)
                 self.verts.nc.fill(0)
                 self.vt_active_set_num.fill(0)
@@ -1485,7 +1485,7 @@ class Solver:
             self.compute_velocity()
             self.verts.dx.fill(0.0)
             self.verts.nc.fill(0)
-            self.compute_friction_and_damping()
+            # self.compute_friction_and_damping()
             self.compute_next_positions()
 
 
