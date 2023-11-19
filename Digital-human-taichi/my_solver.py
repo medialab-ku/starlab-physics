@@ -358,13 +358,14 @@ class Solver:
             # v.x = v.x_k
 
     @ti.kernel
-    def apply_ccd(self):
-
+    def apply_ccd(self) -> ti.f32:
+        g_alpha = 0.0
         for v in self.verts:
             for i in range(self.vt_active_set_num[v.id]):
                 tid = self.vt_active_set[v.id, i]
                 alpha = self.ccd_vt(v.id, tid)
-                self.vt_alpha[v.id, i] = alpha
+                ti.atomic_min(g_alpha, alpha)
+        return g_alpha
 
     @ti.kernel
     def solve_constraints(self):
@@ -409,11 +410,9 @@ class Solver:
                 for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
                     p_j_cur = self.cur2org[p_j]
 
-                    # vertex vs. static object's triangle case
                     if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
                         self.resolve_vt(v.id, p_j_cur - self.num_verts)
 
-                    # vertex vs. dynamic object's triangle case
                     elif p_j_cur >= self.num_verts + self.num_faces_static + self.num_verts_static:
                         tid = p_j_cur - self.num_verts - self.num_faces_static - self.num_verts_static
                         if self.is_in_face(tid, v.id) != True:
@@ -1161,201 +1160,197 @@ class Solver:
 
         return alpha
 
-    @ti.kernel
-    def set_init_guess_pcg(self) -> ti.f32:
+    # @ti.kernel
+    # def set_init_guess_pcg(self) -> ti.f32:
+    #
+    #     # for v in self.verts:
+    #     #     v.dx = v.g / v.h
+    #
+    #     ti.mesh_local(self.Ap)
+    #     for v in self.verts:
+    #         self.Ap[v.id] = v.dx * v.m
+    #
+    #     for e in self.edges:
+    #         u = e.verts[0].id
+    #         v = e.verts[1].id
+    #
+    #         dx_u = e.verts[0].dx
+    #         dx_v = e.verts[2].dx
+    #
+    #         d = e.hij @ (dx_u - dx_v)
+    #         self.Ap[u] += d
+    #         self.Ap[v] -= d
+    #
+    #     ti.mesh_local(self.r, self.Ap)
+    #     for v in self.verts:
+    #         self.r[v.id] = v.g - self.Ap[v.id]
+    #
+    #     # self.r.copy_from(self.verts.g)
+    #
+    #     ti.mesh_local(self.z, self.r, self.p)
+    #     for v in self.verts:
+    #        self.p[v.id] = self.z[v.id] = self.r[v.id] / v.h
+    #
+    #     # r_2 = self.dot(self.z, self.r)
+    #
+    #     r_2 = ti.float32(0.0)
+    #     ti.loop_config(block_dim=64)
+    #     for i in range(self.num_verts):
+    #         r_2 += self.z[i].dot(self.r[i])
+    #
+    #     return r_2
 
-        # for v in self.verts:
-        #     v.dx = v.g / v.h
-
-        ti.mesh_local(self.Ap)
-        for v in self.verts:
-            self.Ap[v.id] = v.dx * v.m
-
-        for e in self.edges:
-            u = e.verts[0].id
-            v = e.verts[1].id
-
-            dx_u = e.verts[0].dx
-            dx_v = e.verts[2].dx
-
-            d = e.hij @ (dx_u - dx_v)
-            self.Ap[u] += d
-            self.Ap[v] -= d
-
-        ti.mesh_local(self.r, self.Ap)
-        for v in self.verts:
-            self.r[v.id] = v.g - self.Ap[v.id]
-
-        # self.r.copy_from(self.verts.g)
-
-        ti.mesh_local(self.z, self.r, self.p)
-        for v in self.verts:
-           self.p[v.id] = self.z[v.id] = self.r[v.id] / v.h
-
-        # r_2 = self.dot(self.z, self.r)
-
-        r_2 = ti.float32(0.0)
-        ti.loop_config(block_dim=64)
-        for i in range(self.num_verts):
-            r_2 += self.z[i].dot(self.r[i])
-
-        return r_2
-
-    @ti.func
-    def precond_value_z(self, z: ti.template(), r: ti.template()):
-
-        # 7 ~ 8 iter
-        for i in z:
-            z[i] = r[i] / self.verts.h[i]
+    # @ti.func
+    # def precond_value_z(self, z: ti.template(), r: ti.template()):
+    #
+    #     # 7 ~ 8 iter
+    #     for i in z:
+    #         z[i] = r[i] / self.verts.h[i]
 
         # 20 iter
         # for i in z:
         #     z[i] = r[i]
 
 
-    @ti.kernel
-    def apply_precondition(self, z: ti.template(), r: ti.template()):
+    # @ti.kernel
+    # def apply_precondition(self, z: ti.template(), r: ti.template()):
+    #     # ti.mesh_local(z, r)
+    #     for e in self.edges:
+    #         i, j = e.verts[0].id, e.verts[1].id
+    #         ri, rj = r[i], r[j]
+    #         rx = ti.math.vec2(ri.x, rj.x)
+    #         ry = ti.math.vec2(ri.y, rj.y)
+    #         rz = ti.math.vec2(ri.z, rj.z)
+    #
+    #         zx = e.hinv @ rx
+    #         zy = e.hinv @ ry
+    #         zz = e.hinv @ rz
+    #
+    #         zi = ti.math.vec3([zx[0], zy[0], zz[0]])
+    #         zj = ti.math.vec3([zx[1], zy[1], zz[1]])
+    #         z[i] += zi
+    #         z[j] += zj
+    #
+    #     ti.mesh_local(z)
+    #     for v in self.verts:
+    #         z[v.id] = z[v.id] / v.deg
+    #
+    #     for i in z:
+    #         z[i] = r[i] / self.verts.h[i]
 
-        # ti.mesh_local(z, r)
-        for e in self.edges:
-            i, j = e.verts[0].id, e.verts[1].id
-            ri, rj = r[i], r[j]
-            rx = ti.math.vec2(ri.x, rj.x)
-            ry = ti.math.vec2(ri.y, rj.y)
-            rz = ti.math.vec2(ri.z, rj.z)
+    # @ti.kernel
+    # def cg_iterate(self, r_2: ti.f32) -> ti.f32:
+    #
+    #     # Ap = A * x
+    #     ti.mesh_local(self.Ap, self.p)
+    #     for v in self.verts:
+    #         self.Ap[v.id] = self.p[v.id] * v.m + self.p[v.id] * v.hc
+    #
+    #     ti.mesh_local(self.Ap, self.p)
+    #     for e in self.edges:
+    #         u = e.verts[0].id
+    #         v = e.verts[1].id
+    #         d = e.hij @ (self.p[u] - self.p[v])
+    #         self.Ap[u] += d
+    #         self.Ap[v] -= d
+    #
+    #
+    #     pAp = ti.float32(0.0)
+    #     ti.loop_config(block_dim=64)
+    #     for i in range(self.num_verts):
+    #         pAp += self.p[i].dot(self.Ap[i])
+    #
+    #     alpha = r_2 / pAp
+    #
+    #     ti.mesh_local(self.Ap, self.r)
+    #     for v in self.verts:
+    #         v.dx += alpha * self.p[v.id]
+    #         self.r[v.id] -= alpha * self.Ap[v.id]
+    #
+    #     self.precond_value_z(self.z, self.r)
+    #
+    #     r_2_new = ti.float32(0.0)
+    #     ti.loop_config(block_dim=64)
+    #     for v in self.verts:
+    #         r_2_new += self.z[v.id].dot(self.r[v.id])
+    #
+    #     beta = r_2_new / r_2
+    #
+    #     ti.loop_config(block_dim=64)
+    #     for i in range(self.num_verts):
+    #         self.p[i] = self.z[i] + beta * self.p[i]
+    #
+    #     return r_2_new
 
-            zx = e.hinv @ rx
-            zy = e.hinv @ ry
-            zz = e.hinv @ rz
-
-            zi = ti.math.vec3([zx[0], zy[0], zz[0]])
-            zj = ti.math.vec3([zx[1], zy[1], zz[1]])
-            z[i] += zi
-            z[j] += zj
-
-
-        ti.mesh_local(z)
-        for v in self.verts:
-            z[v.id] = z[v.id] / v.deg
-
-        for i in z:
-            z[i] = r[i] / self.verts.h[i]
-
-    @ti.kernel
-    def cg_iterate(self, r_2: ti.f32) -> ti.f32:
-
-        # Ap = A * x
-        ti.mesh_local(self.Ap, self.p)
-        for v in self.verts:
-            self.Ap[v.id] = self.p[v.id] * v.m + self.p[v.id] * v.hc
-
-        ti.mesh_local(self.Ap, self.p)
-        for e in self.edges:
-            u = e.verts[0].id
-            v = e.verts[1].id
-            d = e.hij @ (self.p[u] - self.p[v])
-            self.Ap[u] += d
-            self.Ap[v] -= d
-
-
-        pAp = ti.float32(0.0)
-        ti.loop_config(block_dim=64)
-        for i in range(self.num_verts):
-            pAp += self.p[i].dot(self.Ap[i])
-
-        alpha = r_2 / pAp
-
-        ti.mesh_local(self.Ap, self.r)
-        for v in self.verts:
-            v.dx += alpha * self.p[v.id]
-            self.r[v.id] -= alpha * self.Ap[v.id]
-
-        self.precond_value_z(self.z, self.r)
-
-        r_2_new = ti.float32(0.0)
-        ti.loop_config(block_dim=64)
-        for v in self.verts:
-            r_2_new += self.z[v.id].dot(self.r[v.id])
-
-        beta = r_2_new / r_2
-
-        ti.loop_config(block_dim=64)
-        for i in range(self.num_verts):
-            self.p[i] = self.z[i] + beta * self.p[i]
-
-        return r_2_new
-
-
-
-    def newton_pcg(self, tol, max_iter):
-
-        self.verts.dx.fill(0.0)
-        r_2 = self.set_init_guess_pcg()
-        r_2_new = r_2
-
-        # ti.profiler.clear_kernel_profiler_info()
-        for iter in range(max_iter):
-
-            self.z.fill(0.0)
-            r_2_new = self.cg_iterate(r_2_new)
-
-            if r_2_new <= tol:
-                break
-
-        # query_result1 = ti.profiler.query_kernel_profiler_info(self.cg_iterate.__name__)
-        # print("kernel exec. #: ", query_result1.counter)
-
-        # self.add(self.verts.x_k, self.verts.x_k, -1.0, self.verts.dx)
+    # def newton_pcg(self, tol, max_iter):
+    #
+    #     self.verts.dx.fill(0.0)
+    #     r_2 = self.set_init_guess_pcg()
+    #     r_2_new = r_2
+    #
+    #     # ti.profiler.clear_kernel_profiler_info()
+    #     for iter in range(max_iter):
+    #
+    #         self.z.fill(0.0)
+    #         r_2_new = self.cg_iterate(r_2_new)
+    #
+    #         if r_2_new <= tol:
+    #             break
+    #
+    #     # query_result1 = ti.profiler.query_kernel_profiler_info(self.cg_iterate.__name__)
+    #     # print("kernel exec. #: ", query_result1.counter)
+    #
+    #     # self.add(self.verts.x_k, self.verts.x_k, -1.0, self.verts.dx)
 
 
-    @ti.kernel
-    def diag_hessian(self):
-        for v in self.verts:
-            v.dx = (v.g + v.gc) / (v.h + v.hc)
+    # @ti.kernel
+    # def diag_hessian(self):
+    #     for v in self.verts:
+    #         v.dx = (v.g + v.gc) / (v.h + v.hc)
 
-    @ti.kernel
-    def edge_wise_jacobi(self):
-        coef = self.dtSq * self.k
-        for e in self.edges:
-            hii, hjj = e.verts[0].h, e.verts[1].h
-            # hiic, hjjc = e.verts[0].hc, e.verts[1].hc
-            # hii += hiic
-            # hjj += hjjc
-            gi, gj = e.verts[0].g, e.verts[1].g
-            det = hii * hjj - (coef ** 2)
-            hinv = ti.math.mat2([[hjj, coef], [coef, hii]]) / det
-            gx = ti.math.vec2(gi.x, gj.x)
-            gy = ti.math.vec2(gi.y, gj.y)
-            gz = ti.math.vec2(gi.z, gj.z)
+    # @ti.kernel
+    # def edge_wise_jacobi(self):
+    #     coef = self.dtSq * self.k
+    #     for e in self.edges:
+    #         hii, hjj = e.verts[0].h, e.verts[1].h
+    #         # hiic, hjjc = e.verts[0].hc, e.verts[1].hc
+    #         # hii += hiic
+    #         # hjj += hjjc
+    #         gi, gj = e.verts[0].g, e.verts[1].g
+    #         det = hii * hjj - (coef ** 2)
+    #         hinv = ti.math.mat2([[hjj, coef], [coef, hii]]) / det
+    #         gx = ti.math.vec2(gi.x, gj.x)
+    #         gy = ti.math.vec2(gi.y, gj.y)
+    #         gz = ti.math.vec2(gi.z, gj.z)
+    #
+    #         dx = hinv @ gx
+    #         dy = hinv @ gy
+    #         dz = hinv @ gz
+    #
+    #         dxi = ti.math.vec3(dx[0], dy[0], dz[0])
+    #         dxj = ti.math.vec3(dx[1], dy[1], dz[1])
+    #
+    #         e.verts[0].dx += dxi
+    #         e.verts[1].dx += dxj
+    #
+    #     for v in self.verts:
+    #         v.dx /= v.deg
 
-            dx = hinv @ gx
-            dy = hinv @ gy
-            dz = hinv @ gz
-
-            dxi = ti.math.vec3(dx[0], dy[0], dz[0])
-            dxj = ti.math.vec3(dx[1], dy[1], dz[1])
-
-            e.verts[0].dx += dxi
-            e.verts[1].dx += dxj
-
-        for v in self.verts:
-            v.dx /= v.deg
-    def evaluate_search_dir(self, policy):
-
-        if policy == 0:
-            self.newton_pcg(tol=1e-4, max_iter=100)
-        elif policy == 1:
-            self.diag_hessian()
-        elif policy == 2:
-            self.edge_wise_jacobi()
+    # def evaluate_search_dir(self, policy):
+    #
+    #     if policy == 0:
+    #         self.newton_pcg(tol=1e-4, max_iter=100)
+    #     elif policy == 1:
+    #         self.diag_hessian()
+    #     elif policy == 2:
+    #         self.edge_wise_jacobi()
 
 
     # def line_search(self):
-    #
     #     alpha = 1.0
     #     e_cur = self.evaluate_current_energy()
     #     for i in range(10):
-    #
+
     # @ti.kernel
     # def evaluate_current_energy(self) -> ti.f32:
     #
@@ -1385,14 +1380,27 @@ class Solver:
             self.static_mesh.mesh.verts.x[v] = rotated_pos
             self.verts_static.x[v] = rotated_pos
 
-
     @ti.kernel
-    def update_edge_particle_pos(self):
+    def static_mesh_move(self, dir: int, dx: ti.f32):
+        vel = ti.math.vec3(0.0, 0.0, 0.0)
+        if dir == 0:    # right
+            vel = ti.math.vec3(dx, 0.0, 0.0)
+        elif dir == 1:  # left
+            vel = ti.math.vec3(-dx, 0.0, 0.0)
+        elif dir == 2:  # up
+            vel = ti.math.vec3(0.0, dx, 0.0)
+        elif dir == 3:  # down
+            vel = ti.math.vec3(0.0, -dx, 0.0)
 
-        for e in self.edges_static:
-            e.x = 0.5 * (e.verts[0].x + e.verts[1].x)
-            e.v = 0.5 * (e.verts[0].v + e.verts[1].v)
+        for v in self.verts_static:
+            v.x += vel
 
+    # @ti.kernel
+    # def update_edge_particle_pos(self):
+    #
+    #     for e in self.edges_static:
+    #         e.x = 0.5 * (e.verts[0].x + e.verts[1].x)
+    #         e.v = 0.5 * (e.verts[0].v + e.verts[1].v)
 
     @ti.kernel
     def compute_friction_and_damping(self):
@@ -1436,26 +1444,23 @@ class Solver:
             #         alpha = a_i
             v.x += alpha * v.v * self.dt
 
-    @ti.kernel
-    def update_static_mesh_test(self):
-        center = ti.math.vec3(0., 0, 0.)
-        spin_rate = ti.math.vec3(0, 0, 40) * self.dt
-        trans = ti.math.vec3(0, 0, 0) * self.dt
-        for v in self.verts_static:
-            x_prev = v.x
-            dx = v.x - center
-            rot_rad = ti.math.radians(spin_rate)
-            r3d = ti.math.rotation3d(rot_rad[0], rot_rad[1], rot_rad[2])
-            v_4d = ti.Vector([dx[0], dx[1], dx[2], 1])
-            rv = r3d @ v_4d
-            rotated_pos = ti.Vector([rv[0], rv[1], rv[2]])
-            v.x = rotated_pos + center + trans
-            v.v = (v.x - x_prev) / self.dt
-
-
+    # @ti.kernel
+    # def update_static_mesh_test(self):
+    #     center = ti.math.vec3(0., 0, 0.)
+    #     spin_rate = ti.math.vec3(0, 0, 40) * self.dt
+    #     trans = ti.math.vec3(0, 0, 0) * self.dt
+    #     for v in self.verts_static:
+    #         x_prev = v.x
+    #         dx = v.x - center
+    #         rot_rad = ti.math.radians(spin_rate)
+    #         r3d = ti.math.rotation3d(rot_rad[0], rot_rad[1], rot_rad[2])
+    #         v_4d = ti.Vector([dx[0], dx[1], dx[2], 1])
+    #         rv = r3d @ v_4d
+    #         rotated_pos = ti.Vector([rv[0], rv[1], rv[2]])
+    #         v.x = rotated_pos + center + trans
+    #         v.v = (v.x - x_prev) / self.dt
 
     def update(self, dt, num_sub_steps):
-
         self.dt = dt / num_sub_steps
         self.dtSq = self.dt ** 2
 

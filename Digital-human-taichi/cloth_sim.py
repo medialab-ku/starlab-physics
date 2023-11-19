@@ -24,11 +24,16 @@ debug_edge_indices[0] = 0
 debug_edge_indices[1] = 1
 static_mesh_path = "seq_models/Kyra_DVStandClubbing/"
 static_mesh_file = "Kyra_DVStandClubbing_" + str(0).zfill(4) + ".obj"
+# static_mesh_path = "seq_models/movingBox/"
+# static_mesh_file = "box1_" + str(1) + ".obj"
 total_frame_num = 1
+s_scale = 0.8
+s_trans = ti.math.vec3(0.5, -0.8, 0.5)
+s_rot = ti.math.vec3(00.0, 0.0, 0.0)
 
 #
 # mesh = Mesh("obj_models/poncho_8K.obj", scale=0.2, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
-# static_mesh = Mesh(static_mesh_path + static_mesh_file, scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
+static_mesh = Mesh(static_mesh_path + static_mesh_file, scale=s_scale, trans=s_trans, rot=s_rot)
 
 # mesh = Mesh("obj_models/clubbing_dress.obj", scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
 mesh = Mesh("obj_models/square_huge.obj", scale=0.05, trans=ti.math.vec3(0.5, 0.7, 0.5), rot=ti.math.vec3(0.0, 0.0, 90.0))
@@ -37,7 +42,7 @@ mesh = Mesh("obj_models/square_huge.obj", scale=0.05, trans=ti.math.vec3(0.5, 0.
 # static_mesh = Mesh("obj_models/cube.obj", scale=0.8, trans=ti.math.vec3(0.5, 0.0, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/sphere1K.obj", scale=1.0, trans=ti.math.vec3(0.5, -0.2, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/Kyra_DVStandClubbing_0000.obj", scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
-static_mesh = Mesh("obj_models/square_huge.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
+static_mesh = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 
 # dynamic vert vs. static face
 # mesh = Mesh("obj_models/tetrahedron.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 180.0, 0.0))
@@ -70,6 +75,7 @@ if not use_single_static_mesh:
     progress = tqdm(np.arange(total_frame_num))
     for f in progress:
         static_mesh_file = "Kyra_DVStandClubbing_" + str(f).zfill(4) + ".obj"
+        # static_mesh_file = "box1_" + str(f+1) + ".obj"
         new_verts_static = read_verts_only(static_mesh_path + static_mesh_file)
         static_meshes_pos_np[f] = new_verts_static
         progress.update(1)
@@ -110,6 +116,7 @@ camera = ti.ui.Camera()
 camera.position(1., 2.0, 3.5)
 camera.fov(30)
 camera.up(0, 1, 0)
+camera.lookat(0.5, 0.5, 0.5)
 
 run_sim = True
 frame = 0
@@ -121,19 +128,29 @@ while window.running:
 
         if window.event.key == 'r':
             if not use_single_static_mesh:
-                sim.update_static_mesh(frame=0, frame_rate=frame_rate, scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
+                sim.update_static_mesh(frame=0, frame_rate=frame_rate, scale=s_scale, trans=s_trans, rot=s_rot)
             sim.reset()
             frame = 0
             run_sim = False
 
+        dx = 0.02
+        if window.event.key == ti.ui.RIGHT:
+            sim.static_mesh_move(0, dx)
+        if window.event.key == ti.ui.LEFT:
+            sim.static_mesh_move(1, dx)
+        if window.event.key == ti.ui.UP:
+            sim.static_mesh_move(2, dx)
+        if window.event.key == ti.ui.DOWN:
+            sim.static_mesh_move(3, dx)
+
     if run_sim:
         if not use_single_static_mesh and frame < frame_rate * total_frame_num:
-            sim.update_static_mesh(frame=frame, frame_rate=frame_rate, scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
+            sim.update_static_mesh(frame=frame, frame_rate=frame_rate, scale=s_scale, trans=s_trans, rot=s_rot)
         sim.update(dt=dt, num_sub_steps=1)
         # print('frame:', frame)
         frame += 1
     camera.track_user_inputs(window, movement_speed=0.05, hold_key=ti.ui.RMB)
-    camera.lookat(0.5, 0.5, 0.5)
+
     scene.set_camera(camera)
     scene.ambient_light((0.5, 0.5, 0.5))
     scene.point_light(pos=(0.5, 1.5, 0.5), color=(0.3, 0.3, 0.3))
