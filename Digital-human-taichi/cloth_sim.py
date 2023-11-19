@@ -33,16 +33,17 @@ s_rot = ti.math.vec3(00.0, 0.0, 0.0)
 
 #
 # mesh = Mesh("obj_models/poncho_8K.obj", scale=0.2, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
-static_mesh = Mesh(static_mesh_path + static_mesh_file, scale=s_scale, trans=s_trans, rot=s_rot)
+# static_mesh = Mesh(static_mesh_path + static_mesh_file, scale=s_scale, trans=s_trans, rot=s_rot)
 
 # mesh = Mesh("obj_models/clubbing_dress.obj", scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
-mesh = Mesh("obj_models/square_huge.obj", scale=0.05, trans=ti.math.vec3(0.5, 0.7, 0.5), rot=ti.math.vec3(0.0, 0.0, 90.0))
+mesh = Mesh("obj_models/square_huge.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.7, 0.5), rot=ti.math.vec3(0.0, 0.0, 90.0))
 # mesh = Mesh("obj_models/square_16K.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 # mesh = Mesh("obj_models/square_16K.obj", scale=0.04, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/cube.obj", scale=0.8, trans=ti.math.vec3(0.5, 0.0, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/sphere1K.obj", scale=1.0, trans=ti.math.vec3(0.5, -0.2, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/Kyra_DVStandClubbing_0000.obj", scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
-static_mesh = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
+static_mesh = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.8, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
+static_mesh2 = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.2, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 
 # dynamic vert vs. static face
 # mesh = Mesh("obj_models/tetrahedron.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 180.0, 0.0))
@@ -106,7 +107,7 @@ def init_color():
 
 init_color()
 
-sim = Solver(mesh, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
+sim = Solver(mesh, static_mesh=static_mesh, static_mesh2=static_mesh2, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
 
 window = ti.ui.Window("Taichi Cloth Simulation on GGUI", (1024, 768), fps_limit=200)
 canvas = window.get_canvas()
@@ -159,6 +160,7 @@ while window.running:
     # scene.lines()
 
     scene.mesh(static_mesh.mesh.verts.x, indices=static_mesh.face_indices, show_wireframe=True)
+    scene.mesh(static_mesh2.mesh.verts.x, indices=static_mesh2.face_indices, show_wireframe=True)
     # scene.lines(static_mesh.mesh.verts.x, indices=static_mesh.edge_indices, width=0.5,  color=(0, 0, 0))
     scene.mesh(sim.verts.x, indices=mesh.face_indices, color=(1, 0.5, 0), show_wireframe=True)
     # scene.lines(sim.verts.x, indices=mesh.edge_indices, width=0.5,  color=(0, 0, 0))

@@ -13,12 +13,14 @@ class Solver:
     def __init__(self,
                  my_mesh,
                  static_mesh,
+                 static_mesh2,
                  static_meshes,
                  k=1e6,
                  dt=1e-3,
                  max_iter=1000):
         self.my_mesh = my_mesh
         self.static_mesh = static_mesh
+        self.static_mesh2 = static_mesh2
         self.grid_origin = ti.math.vec3([-3, -3, -3])
         self.grid_size = ti.math.vec3([6, 6, 6])
         # self.grid_min = ti.math.vec3(min_range[0], min_range[1], min_range[2])
@@ -63,6 +65,14 @@ class Solver:
         self.face_indices_static = self.static_mesh.face_indices
         self.num_faces_static = len(self.static_mesh.mesh.faces)
 
+        self.verts_static2 = self.static_mesh2.mesh.verts
+        self.num_verts_static2 = len(self.static_mesh2.mesh.verts)
+        self.edges_static2 = self.static_mesh2.mesh.edges
+        self.num_edges_static2 = len(self.edges_static2)
+        self.faces_static2 = self.static_mesh2.mesh.faces
+        self.face_indices_static2 = self.static_mesh2.face_indices
+        self.num_faces_static2 = len(self.static_mesh2.mesh.faces)
+
         self.dHat = 2e-4
         self.contact_stiffness = 1e3
         self.damping_factor = 1e-4
@@ -83,7 +93,9 @@ class Solver:
         self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0] * self.grid_num[1] * self.grid_num[2]))
         self.prefix_sum_executor = ti.algorithms.PrefixSumExecutor(self.grid_particles_num.shape[0])
 
-        self.max_num_verts = self.num_verts + self.num_faces_static + self.num_verts_static + self.num_faces
+        # self.max_num_verts = self.num_verts + self.num_verts_static + self.num_faces + self.num_faces_static
+        # 1. mesh verts, 2. static mesh verts, 3. static mesh 2 verts, 4. mesh faces, 5. static mesh faces, 6. static mesh 2 faces
+        self.max_num_verts = self.num_verts + self.num_verts_static * 2 + self.num_faces + self.num_faces_static * 2
         self.grid_ids = ti.field(int, shape=self.max_num_verts)
         self.grid_ids_buffer = ti.field(int, shape=self.max_num_verts)
         self.grid_ids_new = ti.field(int, shape=self.max_num_verts)
@@ -140,20 +152,6 @@ class Solver:
                 res = k * 2 * ti.pow(1 - q, 3.0)
         return res
 
-    @ti.kernel
-    def counting_sort(self):
-        # FIXME: make it the actual particle num
-        for i in range(self.max_num_verts):
-            I = self.max_num_verts - 1 - i
-            base_offset = 0
-            if self.grid_ids[I] - 1 >= 0:
-                base_offset = self.grid_particles_num[self.grid_ids[I] - 1]
-            self.grid_ids_new[I] = ti.atomic_sub(self.grid_particles_num_temp[self.grid_ids[I]], 1) - 1 + base_offset
-
-        for i in self.grid_ids:
-            new_index = self.grid_ids_new[i]
-            self.cur2org[new_index] = i
-
     @ti.func
     def flatten_grid_index(self, grid_index):
         return grid_index[0] * self.grid_num[1] * self.grid_num[2] + grid_index[1] * self.grid_num[2] + grid_index[2]
@@ -181,7 +179,13 @@ class Solver:
         for f in self.faces_static:
             center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
             grid_index = self.get_flatten_grid_index(center)
-            self.grid_ids[f.id + self.num_verts] = grid_index
+            self.grid_ids[self.num_verts + f.id] = grid_index
+            ti.atomic_add(self.grid_particles_num[grid_index], 1)
+
+        for f in self.faces_static2:
+            center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
+            grid_index = self.get_flatten_grid_index(center)
+            self.grid_ids[self.num_verts + self.num_faces_static + f.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
         # for f in self.faces:
@@ -197,6 +201,21 @@ class Solver:
 
         for I in ti.grouped(self.grid_particles_num):
             self.grid_particles_num_temp[I] = self.grid_particles_num[I]
+
+    @ti.kernel
+    def counting_sort(self):
+        # FIXME: make it the actual particle num
+        for i in range(self.max_num_verts):
+            I = self.max_num_verts - 1 - i
+            base_offset = 0
+            if self.grid_ids[I] - 1 >= 0:
+                base_offset = self.grid_particles_num[self.grid_ids[I] - 1]
+            self.grid_ids_new[I] = ti.atomic_sub(self.grid_particles_num_temp[self.grid_ids[I]], 1) - 1 + base_offset
+
+        for i in self.grid_ids:
+            new_index = self.grid_ids_new[i]
+            self.cur2org[new_index] = i
+
 
     def initialize_particle_system(self):
         self.update_grid_id()
@@ -279,6 +298,9 @@ class Solver:
 
         self.verts_static.v.fill(0.0)
         # print(self.num_neighbor)
+
+        self.verts_static2.x.copy_from(self.verts_static2.x0)
+        self.verts_static2.v.fill(0.0)
 
     # @ti.kernel
     # def pre_stabilization(self):
@@ -410,13 +432,18 @@ class Solver:
                 for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
                     p_j_cur = self.cur2org[p_j]
 
+                    # if p_j_cur is index of a mesh triangle (mesh triangle's center is in this cell)
                     if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
                         self.resolve_vt(v.id, p_j_cur - self.num_verts)
+                        # TODO: ????
 
-                    elif p_j_cur >= self.num_verts + self.num_faces_static + self.num_verts_static:
-                        tid = p_j_cur - self.num_verts - self.num_faces_static - self.num_verts_static
+                    elif p_j_cur >= self.num_verts + self.num_faces_static \
+                            and p_j_cur < self.num_verts + self.num_faces_static + self.num_faces_static2:
+                        tid = p_j_cur - self.num_verts - self.num_faces_static
                         if self.is_in_face(tid, v.id) != True:
                             self.resolve_vt_dynamic(v.id, tid)
+
+
         #
         # for v in self.verts_static:
         #     center_cell = self.pos_to_index(self.verts_static.x[v.id])
@@ -462,7 +489,13 @@ class Solver:
 
     @ti.func
     def resolve(self, i, j):
-        dx = self.verts.x_k[i] - self.verts_static.x[j]
+        dx = self.verts.x_k[i]
+        jx = self.verts.x_k[j]
+        if self.num_verts <= j < self.num_verts + self.num_faces_static:
+            jx = self.verts_static.x[j - self.num_verts]
+        elif self.num_verts + self.num_faces_static <= j < self.num_verts + self.num_faces_static + self.num_verts_static:
+            jx = self.verts_static2.x[j - self.num_verts - self.num_faces_static]
+        dx -= jx
         d = dx.norm()
         coef = self.dtSq * self.contact_stiffness
         if d < 2.0 * self.radius:  # in contact
@@ -529,6 +562,7 @@ class Solver:
 
     @ti.func
     def resolve_vt_dynamic(self, vi, fi):
+        print(f'vt dynamic: {vi}, {fi}')
         x0 = self.verts.x_k[vi]
         v1 = self.face_indices[3 * fi + 0]
         v2 = self.face_indices[3 * fi + 1]
