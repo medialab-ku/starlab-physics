@@ -1,7 +1,7 @@
 # Digital human clothing project
 
 ## Introduction
-A project to dress a human character mesh created with RGB video using physics simulation.
+A project to dress a human character mesh created with RGB video using physics based simulation.
 
 ## Requirements (Recommended)
 - Python 3.8
@@ -11,6 +11,11 @@ A project to dress a human character mesh created with RGB video using physics s
 - Taichi 1.6.0
 
 For other settings, please refer to the README.md file.
+
+## Current status
+[//]: # ([sewing.mp4]&#40;sewing.mp4&#41;)
+[//]: # ([sw3.mp4]&#40;sw3.mp4&#41;)
+<img src="sewing.gif" alt="image" width="50%" height="auto"><img src="sw3.gif" alt="image" width="50%" height="auto">
 
 ## Problems
 The current human character mesh from deep learning model is not stable enough to be used in physics simulation.
@@ -29,17 +34,17 @@ This causes the clothes to dig into the body rather than maintaining a stable co
 3. **Interpenetration**
 
 Currently, the model SMPL has a problem that it is not possible to prevent interpenetration between the body parts of the character.
-But this problem is not a big problem because it can be solved by using the legendary collision detection method, untangling cloth [Baraff et al. 2003].
+But this problem is not a big problem because it can be solved by using the legendary paper, Untangling cloth [Baraff et al. 2003].
 (https://dl.acm.org/doi/pdf/10.1145/882262.882357)
 
-These issues cause characters to be unable to wear clothes reliably. 
+These issues cause a character to be unable to wear the cloth reliably. 
 
 ## Existing methods
 - **CCD (Continous Collision Detection)**
 
 CCD is a method of detecting collisions between objects by checking the trajectory of the object between frames.
 Current thinking is that CCD cannot use perfect time steps, so character movement must be limited. 
-However, in the current situation, this method is not appropriate because character information is determined by model output.
+However, in the current situation, this method is not appropriate in our case where the character information cannot be modified.
 
 - **Velocity correction**
 
