@@ -42,7 +42,7 @@ mesh = Mesh("obj_models/square_huge.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.7
 # static_mesh = Mesh("obj_models/cube.obj", scale=0.8, trans=ti.math.vec3(0.5, 0.0, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/sphere1K.obj", scale=1.0, trans=ti.math.vec3(0.5, -0.2, 0.5), rot=ti.math.vec3(45.0, 0.0, 0.0))
 # static_mesh = Mesh("obj_models/Kyra_DVStandClubbing_0000.obj", scale=0.8, trans=ti.math.vec3(0.5, -0.8, 0.5), rot=ti.math.vec3(90.0, 0.0, 0.0))
-static_mesh = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.8, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
+static_mesh = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 static_mesh2 = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.2, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 
 # dynamic vert vs. static face
@@ -134,7 +134,7 @@ while window.running:
             frame = 0
             run_sim = False
 
-        dx = 0.02
+        dx = 0.005
         if window.event.key == ti.ui.RIGHT:
             sim.static_mesh_move(0, dx)
         if window.event.key == ti.ui.LEFT:
@@ -159,10 +159,10 @@ while window.running:
     # scene.particles(sim.verts.x, radius=sim.radius, color=(1, 0.5, 0))
     # scene.lines()
 
-    scene.mesh(static_mesh.mesh.verts.x, indices=static_mesh.face_indices, show_wireframe=True)
-    scene.mesh(static_mesh2.mesh.verts.x, indices=static_mesh2.face_indices, show_wireframe=True)
+    scene.mesh(static_mesh.mesh.verts.x, indices=static_mesh.face_indices, show_wireframe=False)
+    # scene.mesh(static_mesh2.mesh.verts.x, indices=static_mesh2.face_indices, show_wireframe=True)
     # scene.lines(static_mesh.mesh.verts.x, indices=static_mesh.edge_indices, width=0.5,  color=(0, 0, 0))
-    scene.mesh(sim.verts.x, indices=mesh.face_indices, color=(1, 0.5, 0), show_wireframe=True)
+    scene.mesh(sim.verts.x, indices=mesh.face_indices, color=(1, 0.5, 0), show_wireframe=False)
     # scene.lines(sim.verts.x, indices=mesh.edge_indices, width=0.5,  color=(0, 0, 0))
     # scene.particles(static_mesh.mesh.verts.x, radius=sim.radius, color=(0, 1, 0))
     # scene.particles(static_mesh.mesh.edges.x, radius=sim.radius, color=(1, 0, 0))

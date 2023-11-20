@@ -562,7 +562,6 @@ class Solver:
 
     @ti.func
     def resolve_vt_dynamic(self, vi, fi):
-        print(f'vt dynamic: {vi}, {fi}')
         x0 = self.verts.x_k[vi]
         v1 = self.face_indices[3 * fi + 0]
         v2 = self.face_indices[3 * fi + 1]
