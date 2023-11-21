@@ -128,7 +128,16 @@ class Solver:
         self.ee_active_set = ti.field(int, shape=(self.num_edges, self.num_max_neighbors))
         self.ee_active_set_num = ti.field(int, shape=(self.num_edges))
 
+        self.button = ti.Vector.field(3, dtype=ti.f32, shape=1)
+        self.b_size = ti.field(ti.f32, shape=1)
+        self.b_status = ti.field(bool, shape=1)
+
         self.reset()
+
+    @ti.kernel
+    def add_button(self, pos: ti.template(), size: ti.f32):
+        self.button[0] = pos[0]
+        self.b_size[0] = size
 
     @ti.func
     def is_in_face(self, fid, vid):
@@ -176,15 +185,15 @@ class Solver:
             self.grid_ids[v.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
-        # for v in self.verts_static:
-        #     grid_index = self.get_flatten_grid_index(v.x)
-        #     self.grid_ids[v.id + self.num_verts + self.num_faces_static] = grid_index
-        #     ti.atomic_add(self.grid_particles_num[grid_index], 1)
+        for v in self.verts_static:
+            grid_index = self.get_flatten_grid_index(v.x)
+            self.grid_ids[self.num_verts + v.id] = grid_index
+            ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
         for f in self.faces_static:
             center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
             grid_index = self.get_flatten_grid_index(center)
-            self.grid_ids[self.num_verts + f.id] = grid_index
+            self.grid_ids[self.num_verts + self.num_verts_static + f.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
         # for f in self.faces_static2:
@@ -196,7 +205,7 @@ class Solver:
         for e in self.edges_static:
             center = 0.5 * (e.verts[0].x + e.verts[1].x)
             grid_index = self.get_flatten_grid_index(center)
-            self.grid_ids[self.num_verts + self.num_faces_static + e.id] = grid_index
+            self.grid_ids[self.num_verts + self.num_verts_static + self.num_faces_static + e.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
         # for f in self.faces:
@@ -300,14 +309,16 @@ class Solver:
 
     def reset(self):
         self.verts.x.copy_from(self.verts.x0)
-        self.verts_static.x.copy_from(self.verts_static.x0)
+
         self.verts.v.fill(0.0)
         self.verts.deg.fill(0)
         self.verts.f_ext.fill([0.0, self.gravity, 0.0])
         self.adj.fill(1)
         # self.reset_kernel()
 
-        self.verts_static.v.fill(0.0)
+        if not self.b_status[0]:
+            self.verts_static.x.copy_from(self.verts_static.x0)
+            self.verts_static.v.fill(0.0)
         # print(self.num_neighbor)
 
         # self.verts_static2.x.copy_from(self.verts_static2.x0)
@@ -428,9 +439,10 @@ class Solver:
                     p_j_cur = self.cur2org[p_j]
 
                     # collision with mesh edge(e.id) and static edge
-                    if p_j_cur >= self.num_verts + self.num_faces_static and \
-                        p_j_cur < self.num_verts + self.num_faces_static + self.num_edges_static:
-                        self.resolve_ee(e.id, p_j_cur - self.num_verts - self.num_faces_static)
+                    id_offset = self.num_verts + self.num_verts_static + self.num_faces_static
+                    if p_j_cur >= id_offset and \
+                        p_j_cur < id_offset + self.num_edges_static:
+                        self.resolve_ee(e.id, p_j_cur - id_offset)
 
         # TODO: update the following two for-loops into a single one
         # TODO: loop 1
@@ -460,8 +472,10 @@ class Solver:
                     p_j_cur = self.cur2org[p_j]
 
                     # if p_j_cur is index of a static triangle
-                    if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
-                        self.resolve_vt(v.id, p_j_cur - self.num_verts)
+                    id_offset = self.num_verts + self.num_verts_static
+                    if p_j_cur >= id_offset and \
+                            p_j_cur < id_offset + self.num_faces_static:
+                        self.resolve_vt(v.id, p_j_cur - id_offset)
 
                     # elif p_j_cur >= self.num_verts + self.num_faces_static \
                     #         and p_j_cur < self.num_verts + self.num_faces_static + self.num_faces_static2:
@@ -469,7 +483,17 @@ class Solver:
                     #     if self.is_in_face(tid, v.id) != True:
                     #         self.resolve_vt_dynamic(v.id, tid)
 
-
+        reset_button_pos = self.button[0]
+        reset_button_size = self.b_size[0]
+        reset_cell = self.pos_to_index(reset_button_pos)
+        for v in self.verts_static:
+            center_cell = self.pos_to_index(v.x)
+            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * 3)):
+                grid_index = center_cell + offset
+                if grid_index[0] == reset_cell[0] and grid_index[1] == reset_cell[1] and grid_index[2] == reset_cell[2]:
+                    d = ipc_utils.d_PP(v.x, reset_button_pos)
+                    if d < reset_button_size:
+                        self.b_status[0] = True
         #
         # for v in self.verts_static:
         #     center_cell = self.pos_to_index(self.verts_static.x[v.id])
@@ -1680,7 +1704,9 @@ class Solver:
             self.compute_next_positions()
             self.clearStaticVel()
 
-
+        if self.b_status[0]:
+            self.reset()
+            self.b_status[0] = False
 
         self.frame += 1
 

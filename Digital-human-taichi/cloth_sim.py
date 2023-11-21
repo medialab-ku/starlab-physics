@@ -45,6 +45,7 @@ mesh = Mesh("obj_models/square_huge.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.7
 static_mesh = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 static_mesh2 = Mesh("obj_models/cylinder_dense.obj", scale=0.5, trans=ti.math.vec3(0.2, 0.4, 0.5), rot=ti.math.vec3(0.0, 0.0, 0.0))
 
+
 # dynamic vert vs. static face
 # mesh = Mesh("obj_models/tetrahedron.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.8, 0.5), rot=ti.math.vec3(0.0, 180.0, 0.0))
 # static_mesh = Mesh("obj_models/tetrahedron.obj", scale=0.1, trans=ti.math.vec3(0.5, 0.4, 0.5), rot=ti.math.vec3(0.0, 180.0, 0.0))
@@ -109,6 +110,10 @@ init_color()
 
 sim = Solver(mesh, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
 
+button_size = 0.05
+button_pos = ti.Vector.field(3, dtype=ti.f32, shape=1)
+button_pos[0] = ti.math.vec3(1.5, 0.5, 0.0)
+sim.add_button(button_pos, button_size)
 window = ti.ui.Window("Taichi Cloth Simulation on GGUI", (1024, 768), fps_limit=200)
 canvas = window.get_canvas()
 canvas.set_background_color((1, 1, 1))
@@ -166,6 +171,8 @@ while window.running:
     # scene.lines(sim.verts.x, indices=mesh.edge_indices, width=0.5,  color=(0, 0, 0))
     # scene.particles(static_mesh.mesh.verts.x, radius=sim.radius, color=(0, 1, 0))
     # scene.particles(static_mesh.mesh.edges.x, radius=sim.radius, color=(1, 0, 0))
+    if sim.button.shape[0] > 0:
+        scene.particles(sim.button, radius=sim.b_size[0], color=(0, 0, 1))
     canvas.scene(scene)
     window.show()
     # window.save_image(f'results/test/{step:06d}.jpg')
