@@ -107,7 +107,7 @@ def init_color():
 
 init_color()
 
-sim = Solver(mesh, static_mesh=static_mesh, static_mesh2=static_mesh2, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
+sim = Solver(mesh, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
 
 window = ti.ui.Window("Taichi Cloth Simulation on GGUI", (1024, 768), fps_limit=200)
 canvas = window.get_canvas()

@@ -49,31 +49,35 @@ def d_type_PT(v0: ti.math.vec3, v1: ti.math.vec3, v2: ti.math.vec3, v3: ti.math.
 def d_type_EE(v0: ti.math.vec3, v1: ti.math.vec3, v2: ti.math.vec3, v3: ti.math.vec3) -> ti.int32:
     u, v, w = v1 - v0, v3 - v2, v0 - v2
 
-    a = u.dot(u)
+    a = u.dot(u)    # always >= 0
     b = u.dot(v)
-    c = v.dot(v)
+    c = v.dot(v)    # always >= 0
     d = u.dot(w)
     e = v.dot(w)
 
-    D = a * c - b * b
-    tD = D
+    D = a * c - b * b   # always >= 0
+    tD = D              # tc = tN / tD, default tD = D >= 0
     sN = 0.0
     tN = 0.0
     default_case = 8
 
+    # compute the line parameters of the two closest points
     sN = b * e - c * d
-    if sN <= 0.0:
+    if sN <= 0.0:   # sc < 0 => the s=0 edge is visible
         tN = e
         tD = c
         default_case = 2
 
-    elif sN >= D:
+    elif sN >= D:   # sc > 1 => the s=1 edge is visible
         tN = e + b
         tD = c
         default_case = 5
     else:
         tN = (a * e - b * d)
         if tN > 0.0 and tN < tD and (u.cross(v).dot(w) < 1e-4 or u.cross(v).dot(u.cross(v)) < 1.0e-20 * a * c):
+            # if (tN > 0.0 && tN < tD && (u.cross(v).dot(w) == 0.0 || u.cross(v).squaredNorm() == 0.0)) {
+            # std::cout << u.cross(v).squaredNorm() / (a * c) << ": " << sN << " " << D << ", " << tN << " " << tD << std::endl;
+            # avoid coplanar or nearly parallel EE
             if sN < D / 2:
                 tN = e
                 tD = c
@@ -82,15 +86,15 @@ def d_type_EE(v0: ti.math.vec3, v1: ti.math.vec3, v2: ti.math.vec3, v3: ti.math.
                 tN = e + b
                 tD = c
                 default_case = 5
+        # else defaultCase stays as 8
 
-
-    if tN <= 0.0:
+    if tN <= 0.0:       # tc < 0 => the tc=0 edge is visible
+        # recompute sc for this edge
         if -d <= 0.0: default_case = 0
         elif -d >= a: default_case = 3
         else: default_case = 6
-
-
-    elif tN >= tD:
+    elif tN >= tD:      # tc > 1 => the t=1 edge is visible
+        # recompute sc for this edge
         if (-d + b) <= 0.0: default_case = 1
         elif (-d + b) >= a: default_case = 4
         else: default_case = 7

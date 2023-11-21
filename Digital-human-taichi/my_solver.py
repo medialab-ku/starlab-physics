@@ -13,14 +13,14 @@ class Solver:
     def __init__(self,
                  my_mesh,
                  static_mesh,
-                 static_mesh2,
+                 # static_mesh2,
                  static_meshes,
                  k=1e6,
                  dt=1e-3,
                  max_iter=1000):
         self.my_mesh = my_mesh
         self.static_mesh = static_mesh
-        self.static_mesh2 = static_mesh2
+        # self.static_mesh2 = static_mesh2
         self.grid_origin = ti.math.vec3([-3, -3, -3])
         self.grid_size = ti.math.vec3([6, 6, 6])
         # self.grid_min = ti.math.vec3(min_range[0], min_range[1], min_range[2])
@@ -56,22 +56,24 @@ class Solver:
          
         self.num_faces = len(self.my_mesh.mesh.faces)
         self.face_indices = self.my_mesh.face_indices
+        self.edge_indices = self.my_mesh.edge_indices
 
         self.verts_static = self.static_mesh.mesh.verts
         self.num_verts_static = len(self.static_mesh.mesh.verts)
         self.edges_static = self.static_mesh.mesh.edges
+        self.edge_indices_static = self.static_mesh.edge_indices
         self.num_edges_static = len(self.edges_static)
         self.faces_static = self.static_mesh.mesh.faces
         self.face_indices_static = self.static_mesh.face_indices
         self.num_faces_static = len(self.static_mesh.mesh.faces)
 
-        self.verts_static2 = self.static_mesh2.mesh.verts
-        self.num_verts_static2 = len(self.static_mesh2.mesh.verts)
-        self.edges_static2 = self.static_mesh2.mesh.edges
-        self.num_edges_static2 = len(self.edges_static2)
-        self.faces_static2 = self.static_mesh2.mesh.faces
-        self.face_indices_static2 = self.static_mesh2.face_indices
-        self.num_faces_static2 = len(self.static_mesh2.mesh.faces)
+        # self.verts_static2 = self.static_mesh2.mesh.verts
+        # self.num_verts_static2 = len(self.static_mesh2.mesh.verts)
+        # self.edges_static2 = self.static_mesh2.mesh.edges
+        # self.num_edges_static2 = len(self.edges_static2)
+        # self.faces_static2 = self.static_mesh2.mesh.faces
+        # self.face_indices_static2 = self.static_mesh2.face_indices
+        # self.num_faces_static2 = len(self.static_mesh2.mesh.faces)
 
         self.dHat = 2e-4
         self.contact_stiffness = 1e3
@@ -95,7 +97,7 @@ class Solver:
 
         # self.max_num_verts = self.num_verts + self.num_verts_static + self.num_faces + self.num_faces_static
         # 1. mesh verts, 2. static mesh verts, 3. static mesh 2 verts, 4. mesh faces, 5. static mesh faces, 6. static mesh 2 faces
-        self.max_num_verts = self.num_verts + self.num_verts_static * 2 + self.num_faces + self.num_faces_static * 2
+        self.max_num_verts = self.num_verts + self.num_faces_static + self.num_edges_static
         self.grid_ids = ti.field(int, shape=self.max_num_verts)
         self.grid_ids_buffer = ti.field(int, shape=self.max_num_verts)
         self.grid_ids_new = ti.field(int, shape=self.max_num_verts)
@@ -122,6 +124,9 @@ class Solver:
 
         self.tv_active_set = ti.field(int, shape=(self.num_faces, self.num_max_neighbors))
         self.tv_active_set_num = ti.field(int, shape=(self.num_faces))
+
+        self.ee_active_set = ti.field(int, shape=(self.num_edges, self.num_max_neighbors))
+        self.ee_active_set_num = ti.field(int, shape=(self.num_edges))
 
         self.reset()
 
@@ -182,10 +187,16 @@ class Solver:
             self.grid_ids[self.num_verts + f.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
-        for f in self.faces_static2:
-            center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
+        # for f in self.faces_static2:
+        #     center = (f.verts[0].x + f.verts[1].x + f.verts[2].x) / 3.0
+        #     grid_index = self.get_flatten_grid_index(center)
+        #     self.grid_ids[self.num_verts + self.num_faces_static + f.id] = grid_index
+        #     ti.atomic_add(self.grid_particles_num[grid_index], 1)
+
+        for e in self.edges_static:
+            center = 0.5 * (e.verts[0].x + e.verts[1].x)
             grid_index = self.get_flatten_grid_index(center)
-            self.grid_ids[self.num_verts + self.num_faces_static + f.id] = grid_index
+            self.grid_ids[self.num_verts + self.num_faces_static + e.id] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
         # for f in self.faces:
@@ -299,8 +310,8 @@ class Solver:
         self.verts_static.v.fill(0.0)
         # print(self.num_neighbor)
 
-        self.verts_static2.x.copy_from(self.verts_static2.x0)
-        self.verts_static2.v.fill(0.0)
+        # self.verts_static2.x.copy_from(self.verts_static2.x0)
+        # self.verts_static2.v.fill(0.0)
 
     # @ti.kernel
     # def pre_stabilization(self):
@@ -410,6 +421,17 @@ class Solver:
             e.verts[0].nc += 1
             e.verts[1].nc += 1
 
+            center_cell = self.pos_to_index(center)
+            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * 3)):  # 3^3 neighbor cells
+                grid_index = self.flatten_grid_index(center_cell + offset)
+                for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
+                    p_j_cur = self.cur2org[p_j]
+
+                    # collision with mesh edge(e.id) and static edge
+                    if p_j_cur >= self.num_verts + self.num_faces_static and \
+                        p_j_cur < self.num_verts + self.num_faces_static + self.num_edges_static:
+                        self.resolve_ee(e.id, p_j_cur - self.num_verts - self.num_faces_static)
+
         # TODO: update the following two for-loops into a single one
         # TODO: loop 1
         # for v in self.verts:
@@ -437,16 +459,15 @@ class Solver:
                 for p_j in range(self.grid_particles_num[ti.max(0, grid_index - 1)], self.grid_particles_num[grid_index]):
                     p_j_cur = self.cur2org[p_j]
 
-                    # if p_j_cur is index of a mesh triangle (mesh triangle's center is in this cell)
+                    # if p_j_cur is index of a static triangle
                     if p_j_cur >= self.num_verts and p_j_cur < self.num_verts + self.num_faces_static:
                         self.resolve_vt(v.id, p_j_cur - self.num_verts)
-                        # TODO: ????
 
-                    elif p_j_cur >= self.num_verts + self.num_faces_static \
-                            and p_j_cur < self.num_verts + self.num_faces_static + self.num_faces_static2:
-                        tid = p_j_cur - self.num_verts - self.num_faces_static
-                        if self.is_in_face(tid, v.id) != True:
-                            self.resolve_vt_dynamic(v.id, tid)
+                    # elif p_j_cur >= self.num_verts + self.num_faces_static \
+                    #         and p_j_cur < self.num_verts + self.num_faces_static + self.num_faces_static2:
+                    #     tid = p_j_cur - self.num_verts - self.num_faces_static
+                    #     if self.is_in_face(tid, v.id) != True:
+                    #         self.resolve_vt_dynamic(v.id, tid)
 
 
         #
@@ -524,7 +545,6 @@ class Solver:
 
         dtype = ipc_utils.d_type_PT(x0, x1, x2, x3)
         d = self.dHat
-        n = x0 - x0
         g0 = ti.math.vec3(0.)
 
         if dtype == 0:
@@ -800,6 +820,27 @@ class Solver:
                     self.verts.nc[v1] += 1
                     self.verts.nc[v2] += 1
                     self.verts.nc[v3] += 1
+
+
+    @ti.func
+    def resolve_ee(self, i, j):
+        # collision between dynamic edge and static edge
+        e0 = self.edge_indices[2 * i + 0]
+        e1 = self.edge_indices[2 * i + 1]
+        e2 = self.edge_indices_static[2 * j + 0]
+        e3 = self.edge_indices_static[2 * j + 1]
+
+        x0 = self.verts.x_k[e0]
+        x1 = self.verts.x_k[e1]
+        x2 = self.verts_static.x[e2]
+        x3 = self.verts_static.x[e3]
+
+        dtype = ipc_utils.d_type_EE(x0, x1, x2, x3)
+
+        # if dtype == 0:
+        #
+        # elif dtype == 1:
+
 
 
     @ti.func
