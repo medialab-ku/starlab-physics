@@ -734,7 +734,7 @@ class Solver:
                     ti.atomic_add(self.tv_active_set_num[fi], 1)
                     schur = g1.dot(g1) + 1e-6
                     ld = (self.dHat - d) / schur
-                    self.verts.dx[v2] += ld * g1
+                    self.verts.dx[v1] += ld * g1
                     self.verts.nc[v1] += 1
 
         elif dtype == 1:
@@ -836,12 +836,122 @@ class Solver:
         x3 = self.verts_static.x[e3]
 
         dtype = ipc_utils.d_type_EE(x0, x1, x2, x3)
+        d = 0.0
+        if dtype == 0:
+            d = ipc_utils.d_PP(x0, x2)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g0, g2 = ipc_utils.g_PP(x0, x2)
+                    schur = g0.dot(g0) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e0] += ld * g0
+                    self.verts.nc[e0] += 1
 
-        # if dtype == 0:
-        #
-        # elif dtype == 1:
+        elif dtype == 1:
+            d = ipc_utils.d_PP(x0, x1)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g0, g1 = ipc_utils.g_PP(x0, x1)
+                    schur = g0.dot(g0) + g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e0] += ld * g0
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e0] += 1
+                    self.verts.nc[e1] += 1
 
+        elif dtype == 2:
+            d = ipc_utils.d_PE(x0, x2, x3)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g0, g2, g3 = ipc_utils.g_PE(x0, x2, x3)
+                    schur = g0.dot(g0) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e0] += ld * g0
+                    self.verts.nc[e0] += 1
 
+        elif dtype == 3:
+            d = ipc_utils.d_PP(x1, x2)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g1, g2 = ipc_utils.g_PP(x1, x2)
+                    schur = g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e1] += 1
+
+        elif dtype == 4:
+            d = ipc_utils.d_PP(x1, x3)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g1, g3 = ipc_utils.g_PP(x1, x3)
+                    schur = g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e1] += 1
+
+        elif dtype == 5:
+            d = ipc_utils.d_PE(x1, x2, x3)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g1, g2, g3 = ipc_utils.g_PE(x1, x2, x3)
+                    schur = g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e1] += 1
+
+        elif dtype == 6:
+            d = ipc_utils.d_PE(x2, x0, x1)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g2, g0, g1 = ipc_utils.g_PE(x2, x0, x1)
+                    schur = g0.dot(g0) + g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e0] += ld * g0
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e0] += 1
+                    self.verts.nc[e1] += 1
+
+        elif dtype == 7:
+            d = ipc_utils.d_PE(x3, x0, x1)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g3, g0, g1 = ipc_utils.g_PE(x3, x0, x1)
+                    schur = g0.dot(g0) + g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e0] += ld * g0
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e0] += 1
+                    self.verts.nc[e1] += 1
+
+        elif dtype == 8:
+            d = ipc_utils.d_EE(x0, x1, x2, x3)
+            if d < self.dHat:
+                if self.ee_active_set_num[i] < self.num_max_neighbors:
+                    self.ee_active_set[i, self.ee_active_set_num[i]] = j
+                    ti.atomic_add(self.ee_active_set_num[i], 1)
+                    g0, g1, g2, g3 = ipc_utils.g_EE(x0, x1, x2, x3)
+                    schur = g0.dot(g0) + g1.dot(g1) + 1e-6
+                    ld = (self.dHat - d) / schur
+                    self.verts.dx[e0] += ld * g0
+                    self.verts.dx[e1] += ld * g1
+                    self.verts.nc[e0] += 1
+                    self.verts.nc[e1] += 1
 
     @ti.func
     def resolve_edge(self, i, j):
