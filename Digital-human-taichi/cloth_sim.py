@@ -134,7 +134,7 @@ while window.running:
             frame = 0
             run_sim = False
 
-        dx = 0.005
+        dx = 50
         if window.event.key == ti.ui.RIGHT:
             sim.static_mesh_move(0, dx)
         if window.event.key == ti.ui.LEFT:

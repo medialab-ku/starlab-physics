@@ -319,7 +319,6 @@ class Solver:
         # for v in self.verts_static:
         #     v.x += v.v * self.dt
 
-
         # v.nc += 1
 
         # for v in self.verts:
@@ -328,6 +327,12 @@ class Solver:
         # for v in self.verts:
         #     if v.nc > 0:
         #         v.v += (v.dx / v.nc)
+
+    @ti.kernel
+    def clearStaticVel(self):
+        for v in self.verts_static:
+            v.v.fill(0.0)
+
     @ti.kernel
     def add(self, ans: ti.template(), a: ti.template(), k: ti.f32, b: ti.template()):
         for i in ans:
@@ -1426,7 +1431,7 @@ class Solver:
             vel = ti.math.vec3(0.0, -dx, 0.0)
 
         for v in self.verts_static:
-            v.x += vel
+            v.v = vel
 
     # @ti.kernel
     # def update_edge_particle_pos(self):
@@ -1477,6 +1482,9 @@ class Solver:
             #         alpha = a_i
             v.x += alpha * v.v * self.dt
 
+        for v in self.verts_static:
+            v.x += v.v * self.dt
+
     # @ti.kernel
     # def update_static_mesh_test(self):
     #     center = ti.math.vec3(0., 0, 0.)
@@ -1519,6 +1527,7 @@ class Solver:
             self.verts.nc.fill(0)
             self.compute_friction_and_damping()
             self.compute_next_positions()
+            self.clearStaticVel()
 
 
 
