@@ -75,7 +75,7 @@ class Solver:
         # self.face_indices_static2 = self.static_mesh2.face_indices
         # self.num_faces_static2 = len(self.static_mesh2.mesh.faces)
 
-        self.dHat = 2e-4
+        self.dHat = 1e-4
         self.contact_stiffness = 1e3
         self.damping_factor = 1e-4
         self.batch_size = 10
