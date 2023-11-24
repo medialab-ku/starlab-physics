@@ -109,7 +109,6 @@ def init_color():
 init_color()
 
 sim = Solver(mesh, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
-sim2 = Solver(mesh2, static_mesh=static_mesh, static_meshes=static_meshes_pos_ti, dt=dt, max_iter=10)
 
 button_size = 0.05
 button_pos = ti.Vector.field(3, dtype=ti.f32, shape=1)
@@ -150,9 +149,6 @@ while window.running:
             sim.static_mesh_move(2, dx)
         if window.event.key == ti.ui.DOWN:
             sim.static_mesh_move(3, dx)
-
-        if window.event.key == 'n':
-            sim = sim2
 
     if run_sim:
         if not use_single_static_mesh and frame < frame_rate * total_frame_num:
