@@ -53,7 +53,7 @@ class Solver:
         self.edges = self.my_mesh.mesh.edges
         self.num_edges = len(self.edges)
         self.faces = self.my_mesh.mesh.faces
-         
+
         self.num_faces = len(self.my_mesh.mesh.faces)
         self.face_indices = self.my_mesh.face_indices
         self.edge_indices = self.my_mesh.edge_indices
@@ -75,7 +75,7 @@ class Solver:
         # self.face_indices_static2 = self.static_mesh2.face_indices
         # self.num_faces_static2 = len(self.static_mesh2.mesh.faces)
 
-        self.dHat = 1e-4
+        self.dHat = 2e-4
         self.contact_stiffness = 1e3
         self.damping_factor = 1e-4
         self.batch_size = 10
@@ -416,6 +416,52 @@ class Solver:
                 ti.atomic_min(g_alpha, alpha)
         return g_alpha
 
+    @ti.func
+    def compute_triangle_cells(self):
+        for f in range(self.num_faces):
+            p1I = self.face_indices[f * 3 + 0]
+            p2I = self.face_indices[f * 3 + 1]
+            p3I = self.face_indices[f * 3 + 2]
+
+            p1 = self.verts[p1I].x_k
+            p2 = self.verts[p2I].x_k
+            p3 = self.verts[p3I].x_k
+
+            normal = (p2 - p1).cross(p3 - p1).normalized(1e-12)
+
+            p1g = ti.floor(p1 * self.grid_size, int)
+            p2g = ti.floor(p2 * self.grid_size, int)
+            p3g = ti.floor(p3 * self.grid_size, int)
+
+            minI = ti.min(p1g, p2g, p3g)
+            maxI = ti.max(p1g, p2g, p3g)
+
+            for i, j, k in ti.ndrange((minI[0], maxI[0] + 1), (minI[1], maxI[1] + 1), (minI[2], maxI[2] + 1)):
+                p = ti.Vector([(i + 0.5) / self.grid_size, (j + 0.5) / self.grid_size, (k + 0.5) / self.grid_size])
+                dist = (p - p1).dot(normal)
+                if abs(dist) < (1 / self.grid_size) * 2:
+                    print(i, j, k, f, dist)
+                    # ti.append(grid_triangle_list.parent(), ti.Vector([i, j, k]), f)
+
+    @ti.func
+    def compute_edge_cells(self):
+        for e in range(self.num_edges):
+            e1I, e2I = self.edge_indices[e * 2 + 0], self.edge_indices[e * 2 + 1]
+            e1, e2 = self.edges[e1I].x_k, self.edges[e2I].x_k
+
+            e1g = ti.floor(e1 * self.grid_size, int)
+            e2g = ti.floor(e2 * self.grid_size, int)
+
+            minI = ti.min(e1g, e2g)
+            maxI = ti.max(e1g, e2g)
+
+            for i, j, k in ti.ndrange((minI[0], maxI[0] + 1), (minI[1], maxI[1] + 1), (minI[2], maxI[2] + 1)):
+                p = ti.Vector([(i + 0.5) / self.grid_size, (j + 0.5) / self.grid_size, (k + 0.5) / self.grid_size])
+                dist = ((e2 - e1).cross((e1 - p))).norm() / (e2 - e1).norm()
+                if abs(dist) < (1 / self.grid_size) * 2:
+                    print(i, j, k, e, dist)
+                    # ti.append(grid_edge_list.parent(), ti.Vector([i, j, k]), e)
+
     @ti.kernel
     def solve_constraints(self):
         for e in self.edges:
@@ -603,11 +649,13 @@ class Solver:
         if d < self.dHat:
             if self.vt_active_set_num[vi] < self.num_max_neighbors:
                 self.vt_active_set[vi, self.vt_active_set_num[vi]] = fi
-                schur = g0.dot(g0) + 1e-4
+                schur = g0.dot(g0) + 1e-6
                 ld = (self.dHat - d) / schur
                 ti.atomic_add(self.vt_active_set_num[vi], 1)
-                self.verts.dx[vi] += self.w * ld * g0
+                self.verts.dx[vi] += self.w * ld * g0 * 5
                 self.verts.nc[vi] += 1
+
+                # print(f'{vi}, {fi}, {d}, {g0}, {ld}')
 
     @ti.func
     def resolve_vt_dynamic(self, vi, fi):
