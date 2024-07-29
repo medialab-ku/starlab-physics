@@ -7,7 +7,6 @@ from ..collision.lbvh_cell import LBVH_CELL
 @ti.data_oriented
 class Solver:
     def __init__(self,
-                 enable_profiler,
                  mesh_dy,
                  mesh_st,
                  dHat,
@@ -28,9 +27,8 @@ class Solver:
         self.padding = 0.05
 
         self.enable_velocity_update = False
-        self.enable_collision_handling = False
+        self.enable_collision_handling = True
         self.enable_move_obstacle = False
-        self.enable_profiler = enable_profiler
         self.export_mesh = False
 
 
@@ -76,11 +74,13 @@ class Solver:
         self.vt_dy_pair_schur = ti.field(dtype=ti.f32, shape=(self.max_num_verts_dy, self.vt_st_pair_cache_size))
 
 
-        # self.ee_static_pair_cache_size = 40
-        # self.ee_static_pair = ti.field(dtype=ti.int32, shape=(self.max_num_edges_dynamic, self.ee_static_pair_cache_size, 2))
-        # self.ee_static_pair_num = ti.field(dtype=ti.int32, shape=self.max_num_edges_dynamic)
-        # self.ee_static_pair_g = ti.Vector.field(n=3, dtype=ti.f32, shape=(self.max_num_edges_dynamic, self.ee_static_pair_cache_size, 4))
-        # self.ee_static_pair_schur = ti.field(dtype=ti.f32, shape=(self.max_num_edges_dynamic, self.ee_static_pair_cache_size))
+        self.ee_static_pair_cache_size = 40
+        self.ee_st_candidates = ti.field(dtype=ti.int32, shape=(self.max_num_edges_dy, self.ee_static_pair_cache_size))
+        self.ee_st_candidates_num = ti.field(dtype=ti.int32, shape=self.ee_static_pair_cache_size)
+        self.ee_static_pair = ti.field(dtype=ti.int32, shape=(self.max_num_edges_dy, self.ee_static_pair_cache_size, 2))
+        self.ee_static_pair_num = ti.field(dtype=ti.int32, shape=self.max_num_edges_dy)
+        self.ee_static_pair_g = ti.Vector.field(n=3, dtype=ti.f32, shape=(self.max_num_edges_dy, self.ee_static_pair_cache_size, 4))
+        self.ee_static_pair_schur = ti.field(dtype=ti.f32, shape=(self.max_num_edges_dy, self.ee_static_pair_cache_size))
         #
         # self.tv_dynamic_pair_cache_size = 40
         # self.tv_dynamic_pair = ti.field(dtype=ti.int32, shape=(self.max_num_faces_dynamic, self.tv_dynamic_pair_cache_size, 2))
@@ -190,7 +190,7 @@ class Solver:
                 self.mesh_dy.verts.nc[v1] += 1.0
 
     @ti.kernel
-    def broadphase_lbvh(self, cell_size_st: ti.math.vec3, origin_st: ti.math.vec3, cell_size_dy: ti.math.vec3, origin_dy: ti.math.vec3):
+    def broadphase_lbvh(self, padding: ti.f32, cell_size_st: ti.math.vec3, origin_st: ti.math.vec3, cell_size_dy: ti.math.vec3, origin_dy: ti.math.vec3):
 
         self.vt_st_candidates_num.fill(0)
         self.tv_st_candidates_num.fill(0)
@@ -201,23 +201,32 @@ class Solver:
             if i < self.max_num_verts_dy:
                 vid = i
                 y = self.mesh_dy.verts.y[vid]
-                aabb_min = y - self.padding * ti.math.vec3(1.0)
-                aabb_max = y + self.padding * ti.math.vec3(1.0)
+                aabb_min = y - padding * ti.math.vec3(1.0)
+                aabb_max = y + padding * ti.math.vec3(1.0)
                 self.lbvh_st.traverse_cell_bvh_single(cell_size_st, origin_st, aabb_min, aabb_max, vid, self.vt_st_candidates, self.vt_st_candidates_num)
 
             elif i < 2 * self.max_num_verts_dy:
                 vid = i - self.max_num_verts_dy
                 y = self.mesh_dy.verts.y[vid]
-                aabb_min = y - self.padding * ti.math.vec3(1.0)
-                aabb_max = y + self.padding * ti.math.vec3(1.0)
+                aabb_min = y - padding * ti.math.vec3(1.0)
+                aabb_max = y + padding * ti.math.vec3(1.0)
                 self.lbvh_dy.traverse_cell_bvh_single(cell_size_dy, origin_dy, aabb_min, aabb_max, vid, self.vt_dy_candidates, self.vt_dy_candidates_num)
 
             else:
                 vid = i - 2 * self.max_num_verts_dy
                 x = self.mesh_st.verts.x[vid]
-                aabb_min = x - self.padding * ti.math.vec3(1.0)
-                aabb_max = x + self.padding * ti.math.vec3(1.0)
+                aabb_min = x - padding * ti.math.vec3(1.0)
+                aabb_max = x + padding * ti.math.vec3(1.0)
                 self.lbvh_dy.traverse_cell_bvh_single(cell_size_dy, origin_dy, aabb_min, aabb_max, vid, self.tv_st_candidates, self.tv_st_candidates_num)
+
+        self.ee_st_candidates_num.fill(0)
+        for i in range(self.max_num_edges_dy):
+            v0, v1 = self.mesh_dy.edge_indices[2 * i], self.mesh_dy.edge_indices[2 * i + 1]
+            aabb_min = ti.math.min(self.mesh_dy.verts.y[v0], self.mesh_dy.verts.y[v1])
+            aabb_max = ti.math.max(self.mesh_dy.verts.y[v0], self.mesh_dy.verts.y[v1])
+            self.lbvh_st.traverse_cell_bvh_single(cell_size_st, origin_st, aabb_min, aabb_max, i, self.ee_st_candidates, self.ee_st_candidates_num)
+
+
 
     @ti.kernel
     def solve_collision_constraints_x(self, compliance_col: ti.f32):
@@ -240,12 +249,21 @@ class Solver:
                 for j in range(self.vt_dy_candidates_num[vid]):
                     fi_d = self.vt_dy_candidates[vid, j]
                     if self.is_in_face(vid, fi_d) != True:
-                        collision_constraints_x.__vt_dy(vid, fi_d, self.mesh_dy, d, self.vt_st_pair_cache_size, self.vt_dy_pair, self.vt_dy_pair_num, self.vt_dy_pair_g, self.vt_dy_pair_schur)
+                        collision_constraints_x.__vt_dy(compliance_col, vid, fi_d, self.mesh_dy, d, self.vt_st_pair_cache_size, self.vt_dy_pair, self.vt_dy_pair_num, self.vt_dy_pair_g, self.vt_dy_pair_schur)
             else:
                 vis = i - 2 * self.max_num_verts_dy
                 for j in range(self.tv_st_candidates_num[vis]):
                     fi_d = self.tv_st_candidates[vis, j]
                     collision_constraints_x.__tv_st(compliance_col, fi_d, vis, self.mesh_dy, self.mesh_st, d, self.vt_st_pair_cache_size, self.tv_st_pair, self.tv_st_pair_num, self.tv_st_pair_g, self.tv_st_pair_schur)
+
+        for eid in range(self.max_num_edges_dy):
+            # for j in range(self.ee_st_candidates_num[eid]):
+            #     fis = self.ee_st_candidates[eid, j]
+            #     for k in range(3):
+            for eis in range(self.max_num_edges_st):
+                    # eis = self.mesh_st.face_edge_indices[3 * fis + k]
+                    collision_constraints_x.__ee_st(compliance_col, eid, eis, self.mesh_dy, self.mesh_st, d)
+
 
     @ti.kernel
     def solve_collision_constraints_v(self, mu: ti.f32):
@@ -306,7 +324,7 @@ class Solver:
 
         if self.enable_collision_handling:
 
-            self.broadphase_lbvh(self.lbvh_st.cell_size, self.lbvh_st.origin, self.lbvh_dy.cell_size, self.lbvh_dy.origin)
+            self.broadphase_lbvh(self.padding, self.lbvh_st.cell_size, self.lbvh_st.origin, self.lbvh_dy.cell_size, self.lbvh_dy.origin)
             compliance_collision = 1e8
             self.solve_collision_constraints_x(compliance_collision)
 
@@ -363,7 +381,6 @@ class Solver:
     def copy_sewing_pairs_to_taichi_field(self, data_np: ti.types.ndarray(), length: ti.i32):
         for i in range(length):
             self.sewing_pairs[i] = ti.Vector([data_np[i, 0], data_np[i, 1]])
-
 
     @ti.kernel
     def solve_sewing_constraints_x(self, compliance: ti.f32):

@@ -3,6 +3,7 @@ import sys
 import igl
 import os
 import numpy as np
+from pathlib import Path
 
 # def rot2mat(rot):
 #
@@ -46,10 +47,12 @@ def concat_mesh(concat_model_name, model_dir, model_names, translations, scales)
     v_concat = np.concatenate(v_list, axis=0)
     f_concat = np.concatenate(f_list, axis=0)
 
-    model_directory_cat = "../models/"
+    # model_directory_cat = "../models/"
     # model_name_concat = "concat.obj"
-
-    model_path_concat = os.path.join(model_directory_cat, concat_model_name)
+    model_path = Path(__file__).resolve().parent.parent.parent / "models"
+    # print(model_path)
+    model_path_concat = str(model_path / concat_model_name)
+    # model_path_concat = os.path.join(model_path, concat_model_name)
     igl.write_obj(model_path_concat, v_concat, f_concat)
 
     return vtx_id_offsets

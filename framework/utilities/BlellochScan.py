@@ -8,7 +8,6 @@ class BlellochScan:
         self.num_steps = int(math.log2(self.num_array))
         self.prefix_sum_temp = ti.field(ti.i32, shape=self.num_array)
 
-
     @ti.kernel
     def upsweep(self, prefix_sum: ti.template(), step: ti.int32, size: ti.int32):
         offset = step - 1

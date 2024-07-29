@@ -17,7 +17,7 @@ class MeshTaichiWrapper:
                  is_static=False):
 
         self.is_static = is_static
-        self.mesh = patcher.load_mesh(model_path, relations=["FV", "EV"])
+        self.mesh = patcher.load_mesh(model_path, relations=["FV", "EV", "FE"])
         self.mesh.verts.place({'fixed': ti.f32,
                                'm_inv': ti.f32,
                                'x0': ti.math.vec3,
@@ -48,10 +48,12 @@ class MeshTaichiWrapper:
         self.face_indices = ti.field(dtype=ti.int32, shape=len(self.mesh.faces) * 3)
         self.edge_indices = ti.field(dtype=ti.int32, shape=len(self.mesh.edges) * 2)
 
+        self.face_edge_indices = ti.field(dtype=ti.int32, shape=len(self.mesh.faces) * 3)
+        self.init_face_edge_indices()
+
         self.colors = ti.Vector.field(n=3, dtype=ti.f32, shape=len(self.mesh.verts))
         self.init_color()
         # self.colors.fill(0.1)
-
         self.verts = self.mesh.verts
         self.faces = self.mesh.faces
         self.edges = self.mesh.edges
@@ -76,6 +78,15 @@ class MeshTaichiWrapper:
 
         self.render_bending_vert = ti.Vector.field(3, dtype=ti.f32, shape=(len(self.mesh.verts),))
         self.init_render_bending_vert()
+
+
+    @ti.kernel
+    def init_face_edge_indices(self):
+
+        for f in self.mesh.faces:
+            for d in range(3):
+                self.face_edge_indices[3 * f.id + d] = f.edges[d].id
+
 
 
     @ti.kernel
