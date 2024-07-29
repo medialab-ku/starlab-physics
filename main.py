@@ -13,7 +13,11 @@ canvas = window.get_canvas()
 canvas.set_background_color((1., 1., 1.))
 scene = window.get_scene()
 camera = ti.ui.Camera()
-camera.position(2., 4.0, 7.0)
+
+init_x = 2.0
+init_y = 4.0
+init_z = 7.0
+camera.position(init_x, init_y, init_z)
 camera.fov(40)
 camera.up(0, 1, 0)
 
@@ -177,6 +181,7 @@ while window.running:
 
         if window.event.key == 'r':
             frame_cpu = 0
+            camera.position(init_x, init_y, init_z)
             sim.reset()
             g_selector.is_selected.fill(0.0)
             sim.set_fixed_vertices(g_selector.is_selected)
@@ -231,18 +236,24 @@ while window.running:
     if mesh_export and run_sim and frame_cpu < frame_end:
         sim.mesh_dy.export(os.path.basename(scene1.__file__), frame_cpu)
 
-    scene.mesh(sim.mesh_dy.verts.x,  indices=sim.mesh_dy.face_indices, per_vertex_color=sim.mesh_dy.colors)
-    scene.mesh(sim.mesh_dy.verts.x, indices=sim.mesh_dy.face_indices, color=(0, 0.0, 0.0), show_wireframe=True)
-
-    if sim.mesh_st != None:
-        scene.mesh(sim.mesh_st.verts.x, indices=sim.mesh_st.face_indices, color=(0, 0.0, 0.0), show_wireframe=True)
-        scene.mesh(sim.mesh_st.verts.x, indices=sim.mesh_st.face_indices, color=(1, 1.0, 1.0))
+    # scene.mesh(sim.mesh_dy.verts.x,  indices=sim.mesh_dy.face_indices, per_vertex_color=sim.mesh_dy.colors)
+    # scene.mesh(sim.mesh_dy.verts.x, indices=sim.mesh_dy.face_indices, color=(0, 0.0, 0.0), show_wireframe=True)
+    #
+    # if sim.mesh_st != None:
+    #     scene.mesh(sim.mesh_st.verts.x, indices=sim.mesh_st.face_indices, color=(0, 0.0, 0.0), show_wireframe=True)
+    #     scene.mesh(sim.mesh_st.verts.x, indices=sim.mesh_st.face_indices, color=(1, 1.0, 1.0))
 
     g_selector.renderTestPos()
 
     #draw selected particles
     scene.particles(g_selector.renderTestPosition, radius=0.01, color=(1, 0, 1))
     canvas.lines(g_selector.ti_mouse_click_pos, width=0.002, indices=g_selector.ti_mouse_click_index, color=(1, 0, 1) if g_selector.MODE_SELECTION else (0, 0, 1))
+
+    scene.particles(sim.x_test, radius=0.05, per_vertex_color=sim.color_test)
+    scene.mesh(sim.x_test, indices=sim.face_indices_test, color=(0.0, 0.0, 0.0), show_wireframe=True)
+
+    scene.particles(sim.x_test_st, radius=0.05, color=(0.5, 0.5, 0.5))
+    scene.mesh(sim.x_test_st, indices=sim.face_indices_test, color=(0.0, 0.0, 0.0), show_wireframe=True)
 
     camera.track_user_inputs(window, movement_speed=0.8, hold_key=ti.ui.RMB)
     canvas.scene(scene)

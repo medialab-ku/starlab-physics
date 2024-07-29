@@ -40,6 +40,18 @@ class Solver:
         self.max_num_edges_st = 0
         self.max_num_faces_st = 0
 
+
+        self.x_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+        self.x_test_st = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+        self.v_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+        self.color_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+        self.y_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+
+        self.edge_indices_test = ti.Vector.field(n=2, dtype=ti.i32, shape=3)
+        self.face_indices_test = ti.field(dtype=ti.i32, shape=3)
+        self.l0_test = ti.field(dtype=ti.f32, shape=3)
+
+
         self.lbvh_st = None
         if self.mesh_st != None:
             self.lbvh_st = LBVH_CELL(len(self.mesh_st.faces))
@@ -111,8 +123,76 @@ class Solver:
         self.sewing_pairs_num = ti.field(dtype=ti.int32, shape=())
         self.sewing_pairs_num[None] = 0
 
-    def reset(self):
+        self.init_test()
 
+    @ti.kernel
+    def init_test(self):
+        size = 2.0
+        self.x_test[0] = ti.math.vec3([0.0, 0.0, 0.0])
+        self.x_test[1] = ti.math.vec3([size, 0.0, 0.0])
+        self.x_test[2] = ti.math.vec3([0.5 * size, 0.0, 0.5 * ti.sqrt(3.0) * size])
+
+        center = ti.math.vec3([0.0, 0.0, 0.0])
+        for i in range(3):
+            center += self.x_test[i]
+
+        center /= 3.0
+
+        for i in range(3):
+            self.x_test[i] -= center
+
+
+        translate = ti.math.vec3([0.0, -2.0, 0.0])
+        self.x_test_st[0] = ti.math.vec3([0.0, 0.0, 0.0])
+        self.x_test_st[1] = ti.math.vec3([size, 0.0, 0.0])
+        self.x_test_st[2] = ti.math.vec3([0.5 * size, 0.0, 0.5 * ti.sqrt(3.0) * size])
+
+        rotate = ti.math.vec3([0.0, 0.0, 60.0])
+        for i in range(3):
+            xi = self.x_test[i]
+            v_4d = ti.math.vec4([xi, 1.0])
+            rot_rad_x = ti.math.radians(rotate[0])
+            rot_rad_y = ti.math.radians(rotate[1])
+            rot_rad_z = ti.math.radians(rotate[2])
+            rotated_x = ti.math.rotation3d(rot_rad_x, rot_rad_y, rot_rad_z) @ v_4d
+            self.x_test[i] = ti.math.vec3([rotated_x[0], rotated_x[1], rotated_x[2]])
+
+        center = ti.math.vec3([0.0, 0.0, 0.0])
+        for i in range(3):
+            center += self.x_test_st[i]
+
+        center /= 3.0
+
+        for i in range(3):
+            self.x_test_st[i] -= center
+
+        for i in range(3):
+            self.x_test_st[i] += translate
+
+
+        self.edge_indices_test[0][0] = 0
+        self.edge_indices_test[0][1] = 1
+        self.edge_indices_test[1][0] = 1
+        self.edge_indices_test[1][1] = 2
+        self.edge_indices_test[2][0] = 2
+        self.edge_indices_test[2][1] = 0
+
+        self.l0_test.fill(size)
+
+        self.color_test[0] = ti.math.vec3([1.0, 0.0, 0.0])
+        self.color_test[1] = ti.math.vec3([0.0, 1.0, 0.0])
+        self.color_test[2] = ti.math.vec3([0.0, 0.0, 1.0])
+
+        self.v_test.fill(0.0)
+
+        self.face_indices_test[3 * 0 + 0] = 0
+        self.face_indices_test[3 * 0 + 1] = 1
+        self.face_indices_test[3 * 0 + 2] = 2
+
+
+
+    def reset(self):
+        self.init_test()
         self.mesh_dy.reset()
         if self.mesh_st != None:
             self.mesh_st.reset()
@@ -122,6 +202,11 @@ class Solver:
     def compute_y(self, dt: ti.f32):
         for v in self.mesh_dy.verts:
             v.y = v.x + v.fixed * v.v * dt + self.g * dt * dt
+
+    @ti.kernel
+    def compute_y_test(self, dt: ti.f32):
+        for i in range(3):
+            self.y_test[i] = self.x_test[i] + self.v_test[i]  * dt + self.g * dt * dt
 
     @ti.func
     def is_in_face(self, vid, fid):
@@ -246,15 +331,15 @@ class Solver:
 
             elif i < 2 * self.max_num_verts_dy:
                 vid = i - self.max_num_verts_dy
-                for j in range(self.vt_dy_candidates_num[vid]):
-                    fi_d = self.vt_dy_candidates[vid, j]
-                    if self.is_in_face(vid, fi_d) != True:
-                        collision_constraints_x.__vt_dy(compliance_col, vid, fi_d, self.mesh_dy, d, self.vt_st_pair_cache_size, self.vt_dy_pair, self.vt_dy_pair_num, self.vt_dy_pair_g, self.vt_dy_pair_schur)
+                # for j in range(self.vt_dy_candidates_num[vid]):
+                #     fi_d = self.vt_dy_candidates[vid, j]
+                #     if self.is_in_face(vid, fi_d) != True:
+                #         collision_constraints_x.__vt_dy(compliance_col, vid, fi_d, self.mesh_dy, d, self.vt_st_pair_cache_size, self.vt_dy_pair, self.vt_dy_pair_num, self.vt_dy_pair_g, self.vt_dy_pair_schur)
             else:
                 vis = i - 2 * self.max_num_verts_dy
-                for j in range(self.tv_st_candidates_num[vis]):
-                    fi_d = self.tv_st_candidates[vis, j]
-                    collision_constraints_x.__tv_st(compliance_col, fi_d, vis, self.mesh_dy, self.mesh_st, d, self.vt_st_pair_cache_size, self.tv_st_pair, self.tv_st_pair_num, self.tv_st_pair_g, self.tv_st_pair_schur)
+                # for j in range(self.tv_st_candidates_num[vis]):
+                #     fi_d = self.tv_st_candidates[vis, j]
+                #     collision_constraints_x.__tv_st(compliance_col, fi_d, vis, self.mesh_dy, self.mesh_st, d, self.vt_st_pair_cache_size, self.tv_st_pair, self.tv_st_pair_num, self.tv_st_pair_g, self.tv_st_pair_schur)
 
         for eid in range(self.max_num_edges_dy):
             # for j in range(self.ee_st_candidates_num[eid]):
@@ -308,6 +393,13 @@ class Solver:
         for v in self.mesh_dy.verts:
             v.v = (1.0 - damping) * v.fixed * (v.y - v.x) / dt
 
+    @ti.kernel
+    def compute_velocity_test(self, damping: ti.f32, dt: ti.f32):
+        for i in range(3):
+            self.v_test[i] = (1.0 - damping) * (self.y_test[i] - self.x_test[i]) / dt
+            self.x_test[i] = self.y_test[i]
+
+
     def init_variables(self):
 
         self.mesh_dy.verts.dx.fill(0.0)
@@ -322,13 +414,16 @@ class Solver:
 
         self.solve_spring_constraints_x(compliance_stretch, compliance_bending)
 
+        self.update_dx()
+
+        self.init_variables()
         if self.enable_collision_handling:
 
             self.broadphase_lbvh(self.padding, self.lbvh_st.cell_size, self.lbvh_st.origin, self.lbvh_dy.cell_size, self.lbvh_dy.origin)
             compliance_collision = 1e8
             self.solve_collision_constraints_x(compliance_collision)
 
-        self.update_dx()
+        # self.update_dx()
 
         # compliance_sewing = 0.5 * self.YM * dt * dt
         # self.solve_sewing_constraints_x(compliance_sewing)
@@ -345,7 +440,8 @@ class Solver:
     @ti.kernel
     def update_dx(self):
         for v in self.mesh_dy.verts:
-            v.y += v.fixed * (v.dx / v.nc)
+            if v.nc > 0:
+                v.y += v.fixed * (v.dx / v.nc)
 
     @ti.kernel
     def set_fixed_vertices(self, fixed_vertices: ti.template()):
@@ -404,26 +500,27 @@ class Solver:
 
         # self.load_sewing_pairs()
         dt_sub = self.dt / n_substeps
-
-        if self.enable_collision_handling:
-
-            self.mesh_dy.computeAABB_faces(padding=self.padding)
-            aabb_min_dy, aabb_max_dy = self.mesh_dy.computeAABB(padding=self.padding)
-            self.lbvh_dy.build(self.mesh_dy, aabb_min_dy, aabb_max_dy)
-
-            if self.mesh_st != None:
-
-                self.mesh_st.computeAABB_faces(padding=self.padding)
-                aabb_min_st, aabb_max_st = self.mesh_st.computeAABB(padding=self.padding)
-                self.lbvh_st.build(self.mesh_st, aabb_min_st, aabb_max_st)
+        #
+        # if self.enable_collision_handling:
+        #
+        #     self.mesh_dy.computeAABB_faces(padding=self.padding)
+        #     aabb_min_dy, aabb_max_dy = self.mesh_dy.computeAABB(padding=self.padding)
+        #     self.lbvh_dy.build(self.mesh_dy, aabb_min_dy, aabb_max_dy)
+        #
+        #     if self.mesh_st != None:
+        #
+        #         self.mesh_st.computeAABB_faces(padding=self.padding)
+        #         aabb_min_st, aabb_max_st = self.mesh_st.computeAABB(padding=self.padding)
+        #         self.lbvh_st.build(self.mesh_st, aabb_min_st, aabb_max_st)
 
         for _ in range(n_substeps):
+            self.compute_y_test(dt_sub)
 
-            self.compute_y(dt_sub)
-            self.solve_constraints_jacobi_x(dt_sub)
-            self.compute_velocity(damping=self.damping, dt=dt_sub)
-
-            if self.enable_velocity_update:
-                self.solve_constraints_v()
-
-            self.update_x(dt_sub)
+            # self.compute_y(dt_sub)
+            # self.solve_constraints_jacobi_x(dt_sub)
+            # self.compute_velocity(damping=self.damping, dt=dt_sub)
+            self.compute_velocity_test(damping=self.damping, dt=dt_sub)
+            # if self.enable_velocity_update:
+            #     self.solve_constraints_v()
+            #
+            # self.update_x(dt_sub)
