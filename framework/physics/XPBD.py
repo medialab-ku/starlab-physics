@@ -1,7 +1,7 @@
 import csv
 import taichi as ti
 import numpy as np
-from ..physics import collision_constraints_x, collision_constraints_v
+from ..physics import collision_constraints_x, collision_constraints_v, col_test
 from ..collision.lbvh_cell import LBVH_CELL
 
 @ti.data_oriented
@@ -44,6 +44,8 @@ class Solver:
         self.x_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
         self.x_test_st = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
         self.v_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+        self.dx_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
+        self.nc_test = ti.field(dtype=ti.f32, shape=3)
         self.color_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
         self.y_test = ti.Vector.field(n=3, dtype=ti.f32, shape=3)
 
@@ -206,7 +208,17 @@ class Solver:
     @ti.kernel
     def compute_y_test(self, dt: ti.f32):
         for i in range(3):
-            self.y_test[i] = self.x_test[i] + self.v_test[i]  * dt + self.g * dt * dt
+            self.y_test[i] = self.x_test[i] + self.v_test[i] * dt + self.g * dt * dt
+
+
+    @ti.kernel
+    def solve_constraints_test(self):
+
+        compliance = 1e7
+
+        for i in range(3):
+            for j in range(3):
+                col_test.__ee_st(compliance, i, j, self.edge_indices_test, self.edge_indices_test, self.y_test, self.x_test_st, self.dx_test, self.nc_test, self.dHat)
 
     @ti.func
     def is_in_face(self, vid, fid):
@@ -443,6 +455,14 @@ class Solver:
             if v.nc > 0:
                 v.y += v.fixed * (v.dx / v.nc)
 
+
+    @ti.kernel
+    def update_dx_test(self):
+        for i in range(3):
+            if self.nc_test[i] > 0:
+                self.y_test[i] += (self.dx_test[i] / self.nc_test[i])
+
+
     @ti.kernel
     def set_fixed_vertices(self, fixed_vertices: ti.template()):
         for v in self.mesh_dy.verts:
@@ -516,6 +536,11 @@ class Solver:
         for _ in range(n_substeps):
             self.compute_y_test(dt_sub)
 
+            self.nc_test.fill(0)
+            self.dx_test.fill(0.)
+
+            self.solve_constraints_test()
+            self.update_dx_test()
             # self.compute_y(dt_sub)
             # self.solve_constraints_jacobi_x(dt_sub)
             # self.compute_velocity(damping=self.damping, dt=dt_sub)
