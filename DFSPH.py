@@ -388,8 +388,8 @@ class DFSPHSolver(SPHBase):
     def substep(self):
         self.compute_densities()
         self.compute_DFSPH_factor()
-        # if self.enable_divergence_solver:
-        #     self.divergence_solve()
+        if self.enable_divergence_solver:
+            self.divergence_solve()
         self.compute_non_pressure_forces()
         self.predict_velocity()
         self.pressure_solve()

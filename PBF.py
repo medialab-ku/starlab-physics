@@ -22,9 +22,11 @@ class PBFSolver(SPHBase):
         self.div = ti.field(dtype=float, shape = self.ps.fluid_particle_num)
         self.tol = 3
         self.toggle = True
-        self.max_iteration = 1000
+        self.max_iteration = 1
 
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+
+        self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -78,6 +80,25 @@ class PBFSolver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
+                x_j = self.ps.x[p_j]
+                den += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
+
+            # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
+            self.ps.density[p_i] += den
+            # self.ps.density[p_i] *= self.density_0
+
+    @ti.kernel
+    def compute_schur(self):
+        # for p_i in range(self.ps.particle_num[None]):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
+            den = 0.0
+            x_i = self.ps.x[p_i]
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 den += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
 
@@ -309,14 +330,30 @@ class PBFSolver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
+            # ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
             # ret = 0.0
-            self.ps.for_all_neighbors(p_i, self.compute_lambdas_task, ret)
+            Aii = 0.0
+            dc_dxi = ti.math.vec3(0.0)
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                x_j = self.ps.x[p_j]
+                nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
+                Aii += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
 
-            schur = ret[3]
-            dc_dxi = ti.Vector([ret[0], ret[1], ret[2]])
-            schur += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
-            self.ps.pressure[p_i] = - self.b[p_i] / (schur + eps)
+                # for i in range(3):
+                dc_dxi -= nabla_cij
+                # tmp_i += self.ps.m[p_j] * (x[p_i] / self.ps.density0[p_i] + x[p_j] / self.ps.density0[p_j]) * self.nablaWij(x_i - x_j)
+
+
+            # self.ps.for_all_neighbors(p_i, self.compute_lambdas_task, ret)
+
+            # schur = ret[3]
+            # dc_dxi = ti.Vector([ret[0], ret[1], ret[2]])
+            Aii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
+
+            self.Aii[p_i] = Aii + eps
+            # self.ps.pressure[p_i] = - self.b[p_i] / (schur + eps)
 
 
     @ti.func
@@ -449,27 +486,33 @@ class PBFSolver(SPHBase):
                 v_tmp = (self.ps.x[p_i] - self.ps.x_old[p_i]) / self.dt[None]
                 self.ps.acceleration[p_i] += (v_tmp - self.ps.v_old[p_i]) / self.dt[None]
 
-    
+
+    @ti.kernel
+    def apply_precondition(self, z: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            z[p_i] = x[p_i] / self.Aii[p_i]
+
     @ti.kernel
     def compute_matrix_free_Ax(self, Ax: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
             tmp_i = ti.math.vec3(0.0)
             x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbours_num[p_i]):
-                p_j = self.ps.fluid_neighbours[p_i, j]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 tmp_i += self.ps.m[p_j] * (x[p_i] / self.ps.density0[p_i] + x[p_j] / self.ps.density0[p_j]) * self.nablaWij(x_i - x_j)
 
             self.tmp[p_i] = tmp_i
 
-        for p_i in ti.grouped(x):
-            Ax[p_i] = 0.0
-            x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbours_num[p_i]):
-                p_j = self.ps.fluid_neighbours[p_i, j]
-                x_j = self.ps.x[p_j]
-                self.Ax[p_i] += 
+        # for p_i in ti.grouped(x):
+        #     Ax[p_i] = 0.0
+        #     x_i = self.ps.x[p_i]
+        #     for j in range(self.ps.fluid_neighbors_num[p_i]):
+        #         p_j = self.ps.fluid_neighbors[p_i, j]
+        #         x_j = self.ps.x[p_j]
+        #         Ax[p_i] += self.ps.m[p_i] * self.ps.m[p_j] * self.nablaWij(x_i - x_j).dot(self.tmp[p_i] - self.tmp[p_j])
 
 
     def pressure_solve(self):
@@ -479,40 +522,55 @@ class PBFSolver(SPHBase):
         for i in range(self.max_iteration):
 
             self.enforce_boundary_3D(self.ps.material_fluid)
+
+            self.ps.search_neighbours(self.ps.x)
             self.compute_density()
             # self.compute_divergence()
 
             if self.toggle:
                 avg_density_err = self.compute_source()
 
-                # tol = 1e-3 
-            
-                # self.x.copy_from(self.ps.pressure)
+                # tol = 1e-3
+                #
+                # # self.x.copy_from(self.ps.pressure)
+                #
+                # self.x.fill(0.0)
                 # self.r.copy_from(self.b)
                 # # add(self.r, self.b, -1.0, self.Ax)
                 # self.p.copy_from(self.r)
-                # rs_old = dot(self.r, self.r)
-                
-                # for i in range(5):
-                    
-                #     self.compute_matrix_free_Ax(self.Ap, self.p)
-                #     alpha = rs_old / dot(self.p, self.Ap)
-                #     add(self.x, self.x, +alpha, self.p)
-                    
-                #     add(self.r, self.r, -alpha, self.Ap)
-                #     r_norm = dot(self.r, self.r)
-
-                #     if r_norm < tol:
-                #         break  
-                #     rs_new = dot(self.r, self.r)
-                #     beta = rs_new / rs_old
-                #     add(self.p, self.r, beta, self.p)
-                #     rs_old = rs_new 
-
+                # rs_old = dot2(self.r, self.r)
+                #
+                # if rs_old > tol:
+                #
+                #     iter = 0
+                #     for i in range(1000):
+                #
+                #         self.compute_matrix_free_Ax(self.Ap, self.p)
+                #         alpha = rs_old / dot2(self.p, self.Ap)
+                #         add(self.x, self.x, +alpha, self.p)
+                #
+                #         add(self.r, self.r, -alpha, self.Ap)
+                #         r_norm = dot2(self.r, self.r)
+                #
+                #         if r_norm < tol:
+                #             break
+                #         rs_new = dot2(self.r, self.r)
+                #         beta = rs_new / rs_old
+                #         add(self.p, self.r, beta, self.p)
+                #         rs_old = rs_new
+                #
+                #         iter += 1
+                #
+                #     print(iter)
 
                 self.compute_lambdas_p()
+                self.apply_precondition(self.ps.pressure, self.b)
+                self.compute_matrix_free_Ax(self.Ap, self.ps.pressure)
+                add(self.ps.x, self.ps.x, -1.0, self.tmp)
+
+                # self.ps.pressure.copy_from(self.x)
                 data.append(avg_density_err)
-                self.step_forward_x()
+                # self.step_forward_x()
             else:
                 avg_density_err = self.compute_lambdas_p2()
                 data.append(avg_density_err)

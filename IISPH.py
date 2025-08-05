@@ -11,11 +11,11 @@ class IISPHSolver(SPHBase):
         self.last_pressure = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.avg_density_error = ti.field(dtype=float, shape=())
 
-        self.ps.acceleration = ti.Vector.field(self.ps.dim, dtype=float)
+        # self.ps.acceleration = ti.Vector.field(self.ps.dim, dtype=float)
         self.pressure_accel = ti.Vector.field(self.ps.dim, dtype=float)
         particle_node = ti.root.dense(ti.i, self.ps.particle_max_num)
-        particle_node.place(self.ps.acceleration, self.pressure_accel)
-        self.dt[None] = 2e-4
+        particle_node.place(self.pressure_accel)
+        # self.dt[None] = 2e-4
 
     @ti.kernel
     def predict_advection(self):
@@ -50,21 +50,21 @@ class IISPHSolver(SPHBase):
 
             # Boundary neighbors
             ## Akinci2012
-            for j in range(self.ps.solid_neighbors_num[p_i]):
-                p_j = self.ps.solid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                sum_neighbor_inner = ti.Vector([0.0 for _ in range(self.ps.dim)])
-                for k in range(self.ps.solid_neighbors_num[p_i]):
-                    density_k = self.ps.density[k]
-                    density_k2 = density_k * density_k
-                    p_k = self.ps.solid_neighbors[p_i, j]
-                    x_k = self.ps.x[p_k]
-                    sum_neighbor_inner += self.ps.m_V[p_k] * self.cubic_kernel_derivative(x_i - x_k) / density_k2
-
-                kernel_grad_ij = self.cubic_kernel_derivative(x_i - x_j)
-                sum_neighbor -= (self.ps.m_V[p_j] * sum_neighbor_inner).dot(kernel_grad_ij)
-
-                sum_neighbor_of_neighbor -= (self.ps.m_V[p_j] * kernel_grad_ij).dot(kernel_grad_ij)
+            # for j in range(self.ps.solid_neighbors_num[p_i]):
+            #     p_j = self.ps.solid_neighbors[p_i, j]
+            #     x_j = self.ps.x[p_j]
+            #     sum_neighbor_inner = ti.Vector([0.0 for _ in range(self.ps.dim)])
+            #     for k in range(self.ps.solid_neighbors_num[p_i]):
+            #         density_k = self.ps.density[k]
+            #         density_k2 = density_k * density_k
+            #         p_k = self.ps.solid_neighbors[p_i, j]
+            #         x_k = self.ps.x[p_k]
+            #         sum_neighbor_inner += self.ps.m_V[p_k] * self.cubic_kernel_derivative(x_i - x_k) / density_k2
+            #
+            #     kernel_grad_ij = self.cubic_kernel_derivative(x_i - x_j)
+            #     sum_neighbor -= (self.ps.m_V[p_j] * sum_neighbor_inner).dot(kernel_grad_ij)
+            #
+            #     sum_neighbor_of_neighbor -= (self.ps.m_V[p_j] * kernel_grad_ij).dot(kernel_grad_ij)
             sum_neighbor_of_neighbor *= m_Vi / density_i2
             self.a_ii[p_i] += (sum_neighbor + sum_neighbor_of_neighbor) * self.dt[None] * self.dt[None] * density_02
 
@@ -86,10 +86,10 @@ class IISPHSolver(SPHBase):
 
             # Boundary neighbors
             ## Akinci2012
-            for j in range(self.ps.solid_neighbors_num[p_i]):
-                p_j = self.ps.solid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                divergence += self.ps.m_V[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
+            # for j in range(self.ps.solid_neighbors_num[p_i]):
+            #     p_j = self.ps.solid_neighbors[p_i, j]
+            #     x_j = self.ps.x[p_j]
+            #     divergence += self.ps.m_V[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
 
             self.density_deviation[p_i] = self.density_0 - density_i - self.dt[None] * divergence * self.density_0
 
@@ -110,6 +110,7 @@ class IISPHSolver(SPHBase):
             if self.avg_density_error[None] < 1e-3:
                 # print(f'Stop criterion satisfied at iter {iteration}, density err {self.avg_density_error[None]}')
                 break
+        print(iteration)
 
     @ti.kernel
     def pressure_solve_iteration(self):
@@ -135,12 +136,12 @@ class IISPHSolver(SPHBase):
             # Boundary neighbors
             dpj = self.last_pressure[p_i] / self.density_0 ** 2
             ## Akinci2012
-            for j in range(self.ps.solid_neighbors_num[p_i]):
-                p_j = self.ps.solid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                # Compute the pressure force contribution, Symmetric Formula
-                d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) \
-                       * self.cubic_kernel_derivative(x_i - x_j)
+            # for j in range(self.ps.solid_neighbors_num[p_i]):
+            #     p_j = self.ps.solid_neighbors[p_i, j]
+            #     x_j = self.ps.x[p_j]
+            #     # Compute the pressure force contribution, Symmetric Formula
+            #     d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) \
+            #            * self.cubic_kernel_derivative(x_i - x_j)
             self.pressure_accel[p_i] += d_v
 
         # Compute Ap and compute new pressure
@@ -156,10 +157,10 @@ class IISPHSolver(SPHBase):
                 Ap += self.ps.m_V[p_j] * (accel_p_i - self.pressure_accel[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
             # Boundary neighbors
             ## Akinci2012
-            for j in range(self.ps.solid_neighbors_num[p_i]):
-                p_j = self.ps.solid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                Ap += self.ps.m_V[p_j] * (accel_p_i - self.pressure_accel[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
+            # for j in range(self.ps.solid_neighbors_num[p_i]):
+            #     p_j = self.ps.solid_neighbors[p_i, j]
+            #     x_j = self.ps.x[p_j]
+            #     Ap += self.ps.m_V[p_j] * (accel_p_i - self.pressure_accel[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
             Ap *= dt2 * self.density_0
             # print(self.a_ii[1])
             if abs(self.a_ii[p_i]) > 1e-6:
@@ -193,10 +194,10 @@ class IISPHSolver(SPHBase):
                 self.ps.density[p_i] += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
             # Boundary neighbors
             ## Akinci2012
-            for j in range(self.ps.solid_neighbors_num[p_i]):
-                p_j = self.ps.solid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                self.ps.density[p_i] += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
+            # for j in range(self.ps.solid_neighbors_num[p_i]):
+            #     p_j = self.ps.solid_neighbors[p_i, j]
+            #     x_j = self.ps.x[p_j]
+            #     self.ps.density[p_i] += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
             self.ps.density[p_i] *= self.density_0
 
     @ti.kernel
@@ -222,11 +223,11 @@ class IISPHSolver(SPHBase):
             dpj = self.ps.pressure[p_i] / self.density_0 ** 2
             # dpj = 0.0
             ## Akinci2012
-            for j in range(self.ps.solid_neighbors_num[p_i]):
-                p_j = self.ps.solid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                # Compute the pressure force contribution, Symmetric Formula
-                d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
+            # for j in range(self.ps.solid_neighbors_num[p_i]):
+            #     p_j = self.ps.solid_neighbors[p_i, j]
+            #     x_j = self.ps.x[p_j]
+            #     # Compute the pressure force contribution, Symmetric Formula
+            #     d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
 
             self.pressure_accel[p_i] = d_v
 
@@ -239,7 +240,7 @@ class IISPHSolver(SPHBase):
             x_i = self.ps.x[p_i]
             # Add body force
             d_v = ti.Vector([0.0 for _ in range(self.ps.dim)])
-            d_v[1] = self.g
+            d_v[1] = self.g[1]
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
@@ -255,6 +256,12 @@ class IISPHSolver(SPHBase):
                 self.ps.x[p_i] += self.dt[None] * self.ps.v[p_i]
 
     def substep(self):
+
+
+        # print(self.dt[None])
+
+        # self.dt[None] = 2e-4
+        self.ps.search_neighbours(self.ps.x)
         self.compute_densities()
         self.compute_non_pressure_forces()
 

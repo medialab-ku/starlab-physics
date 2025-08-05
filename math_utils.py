@@ -10,6 +10,15 @@ def dot(a: ti.template(), b: ti.template()) -> float:
     return ret
 
 @ti.kernel
+def dot2(a: ti.template(), b: ti.template()) -> float:
+
+    ret = 0.0
+    for i in a:
+        ret += (a[i] * b[i])
+
+    return ret
+
+@ti.kernel
 def add(ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
     for i in ret:
         ret[i] = v0[i] + scale * v1[i]

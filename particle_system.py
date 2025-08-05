@@ -416,7 +416,7 @@ class ParticleSystem:
             for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
                 grid_index = self.flatten_grid_index(center_cell + offset)
                 for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
-                    if p_i[0] != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
+                    if p_i != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
                         if self.fluid_neighbors_num[p_i] < self.cache_size:
                             self.fluid_neighbors[p_i, self.fluid_neighbors_num[p_i]] = p_j 
                             self.fluid_neighbors_num[p_i] += 1 
