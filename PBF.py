@@ -26,6 +26,7 @@ class PBFSolver(SPHBase):
 
         self.Ax = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.x  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.p  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.b  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.z  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -440,6 +441,16 @@ class PBFSolver(SPHBase):
                 v_tmp = (self.ps.x[p_i] - self.ps.x_old[p_i]) / self.dt[None]
                 self.ps.acceleration[p_i] += (v_tmp - self.ps.v_old[p_i]) / self.dt[None]
 
+    
+    @ti.kernel
+    def compute_matrix_free_Ax(self, Ax: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(self.ps.x):
+            m_i = (self.density_0 * self.ps.m_V[p_i])
+            dv = ti.Vector([0.0 for _ in range(self.ps.dim)])
+            self.ps.for_all_neighbors(p_i, self.compute_matrix_free_Ax_task, dv)
+            self.ps.Ax[p_i] += dv
+
 
     def pressure_solve(self):
 
@@ -453,6 +464,31 @@ class PBFSolver(SPHBase):
 
             if self.toggle:
                 avg_density_err = self.compute_source()
+
+                # tol = 1e-3 
+            
+                # self.x.copy_from(self.ps.pressure)
+                # self.r.copy_from(self.b)
+                # # add(self.r, self.b, -1.0, self.Ax)
+                # self.p.copy_from(self.r)
+                # rs_old = dot(self.r, self.r)
+                
+                # for i in range(5):
+                    
+                #     self.compute_matrix_free_Ax(self.Ap, self.p)
+                #     alpha = rs_old / dot(self.p, self.Ap)
+                #     add(self.x, self.x, +alpha, self.p)
+                    
+                #     add(self.r, self.r, -alpha, self.Ap)
+                #     r_norm = dot(self.r, self.r)
+
+                #     if r_norm < tol:
+                #         break  
+                #     rs_new = dot(self.r, self.r)
+                #     beta = rs_new / rs_old
+                #     add(self.p, self.r, beta, self.p)
+                #     rs_old = rs_new 
+
 
                 self.compute_lambdas_p()
                 data.append(avg_density_err)
@@ -487,6 +523,7 @@ class PBFSolver(SPHBase):
 
     def substep(self):
 
+        self.ps.search_neighbours(self.ps.x)
         self.ps.x_old.copy_from(self.ps.x)
         self.compute_density()
         self.compute_non_pressure_forces()
