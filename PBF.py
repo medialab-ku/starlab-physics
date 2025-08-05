@@ -24,13 +24,13 @@ class PBFSolver(SPHBase):
         self.toggle = True
         self.max_iteration = 1000
 
-        self.Ax = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Ap = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.x  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.r   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         print("method: PBF")
 
@@ -453,11 +453,23 @@ class PBFSolver(SPHBase):
     @ti.kernel
     def compute_matrix_free_Ax(self, Ax: ti.template(), x: ti.template()):
 
-        for p_i in ti.grouped(self.ps.x):
-            m_i = (self.density_0 * self.ps.m_V[p_i])
-            dv = ti.Vector([0.0 for _ in range(self.ps.dim)])
-            self.ps.for_all_neighbors(p_i, self.compute_matrix_free_Ax_task, dv)
-            self.ps.Ax[p_i] += dv
+        for p_i in ti.grouped(x):
+            tmp_i = ti.math.vec3(0.0)
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbours_num[p_i]):
+                p_j = self.ps.fluid_neighbours[p_i, j]
+                x_j = self.ps.x[p_j]
+                tmp_i += self.ps.m[p_j] * (x[p_i] / self.ps.density0[p_i] + x[p_j] / self.ps.density0[p_j]) * self.nablaWij(x_i - x_j)
+
+            self.tmp[p_i] = tmp_i
+
+        for p_i in ti.grouped(x):
+            Ax[p_i] = 0.0
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbours_num[p_i]):
+                p_j = self.ps.fluid_neighbours[p_i, j]
+                x_j = self.ps.x[p_j]
+                self.Ax[p_i] += 
 
 
     def pressure_solve(self):
