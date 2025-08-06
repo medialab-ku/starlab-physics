@@ -121,8 +121,9 @@ class ParticleSystem:
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
 
         self.cache_size = 50 
-        self.fluid_neighbors_num = ti.field(dtype=int, shape=self.particle_max_num)
-        self.fluid_neighbors  = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
+        self.fluid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
+        self.fluid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
+        self.fluid_neighbors_values = ti.Vector.field(n=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
 
         if self.cfg.get_cfg("simulationMethod") == 4:
             self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)

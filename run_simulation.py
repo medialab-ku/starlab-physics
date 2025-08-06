@@ -78,19 +78,23 @@ if __name__ == "__main__":
     for i, val in enumerate([0, 1, 0, 2, 1, 3, 2, 3, 4, 5, 4, 6, 5, 7, 6, 7, 0, 4, 1, 5, 2, 6, 3, 7]):
         box_lines_indices[i] = val
 
+    frame_cnt = 0
+    export_ply = False
+    end_frame = 1000
 
     def show_options():
         global ps
         # global frame_cnt
         # global solver
         global method
-        # global end_frame
+        global end_frame
         # global stop_frame
         # global output_obj
         # global output_ply
         # global output_vtk
         # global is_plot_option
         # global animate
+        global export_ply
 
         with gui.sub_window("Settings", 0., 0., 0.4, 0.4) as w:
             # dt_ui = w.slider_float("dt", dt_ui, 0.001, 0.101)
@@ -100,12 +104,12 @@ if __name__ == "__main__":
             if method == 1:
                 solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
-                solver.toggle = w.checkbox("test", solver.toggle)
-
-                if solver.toggle:
-                    gui.text("mass weighted")
-                else:
-                    gui.text("vanilla")
+                # solver.toggle = w.checkbox("test", solver.toggle)
+                #
+                # if solver.toggle:
+                #     gui.text("mass weighted")
+                # else:
+                #     gui.text("vanilla")
 
             #     solver.k_rho = w.slider_float("k rho", solver.k_rho, 0.0, 1e6)
             #     solver.da_ratio = w.slider_float("da_ratio", solver.da_ratio, 0.0, 2.0)
@@ -116,18 +120,18 @@ if __name__ == "__main__":
             # # solver_type = w.slider_int("solver type", solver_type, 0, 2)
             #
             # stop_frame = w.checkbox("stop frame ?", stop_frame)
-            # output_ply = w.checkbox("output_ply", output_ply)
+            export_ply = w.checkbox("export", export_ply)
             # output_obj = w.checkbox("output_obj", output_obj)
             # output_vtk = w.checkbox("output_vtk", output_vtk)
             # is_plot_option = w.checkbox("plot option", is_plot_option)
             # animate = w.checkbox("animate", animate)
             #
-            # if stop_frame:
-            #     end_frame = w.slider_int("end frame", end_frame, 0, int(1e5))
+            if export_ply:
+                end_frame = w.slider_int("end frame", end_frame, 0, int(1e3))
             #
-            # gui.text(f"# particle: {ps.particle_num}")
+            gui.text(f"# particle: {ps.fluid_particle_num}")
             # gui.text(f"# face: {ps.faces_dy.shape[0] // 3}")
-            # gui.text(f"Current frame: {frame_cnt}")
+            gui.text(f"Current frame: {frame_cnt}")
 
     cnt = 0
     cnt_ply = 0
@@ -148,9 +152,14 @@ if __name__ == "__main__":
                 ps.v.fill(0.0)
                 runSim = False
 
+        if frame_cnt > end_frame:
+            runSim = False
+
         if runSim:
             for i in range(substeps):
                 solver.step()
+
+            frame_cnt += 1
 
         ps.copy_to_vis_buffer(invisible_objects=invisible_objects)
         if ps.dim == 2:
