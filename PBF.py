@@ -28,7 +28,7 @@ class PBFSolver(SPHBase):
 
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.z   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -284,8 +284,8 @@ class PBFSolver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            self.b[p_i] = (self.ps.m[p_i] / self.ps.density0[p_i]) * ti.max(self.ps.density[p_i] - self.ps.density0[p_i], 0.0)
-            avg_density_err += (self.b[p_i] / self.ps.m[p_i])
+            self.b[p_i] = (self.ps.m[p_i] / self.ps.density0[p_i]) * (self.ps.density[p_i] - self.ps.density0[p_i])
+            avg_density_err += (ti.max(self.b[p_i], 0.0) / self.ps.m[p_i])
 
         avg_density_err /= self.ps.fluid_particle_num
         return avg_density_err
@@ -321,7 +321,7 @@ class PBFSolver(SPHBase):
 
 
     @ti.kernel
-    def compute_lambdas_p(self):
+    def compute_Aii(self):
 
         eps = 1e-6
         avg_density_err = 0.0
@@ -330,8 +330,6 @@ class PBFSolver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            # ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
-            # ret = 0.0
             Aii = 0.0
             dc_dxi = ti.math.vec3(0.0)
             x_i = self.ps.x[p_i]
@@ -343,13 +341,6 @@ class PBFSolver(SPHBase):
 
                 # for i in range(3):
                 dc_dxi -= nabla_cij
-                # tmp_i += self.ps.m[p_j] * (x[p_i] / self.ps.density0[p_i] + x[p_j] / self.ps.density0[p_j]) * self.nablaWij(x_i - x_j)
-
-
-            # self.ps.for_all_neighbors(p_i, self.compute_lambdas_task, ret)
-
-            # schur = ret[3]
-            # dc_dxi = ti.Vector([ret[0], ret[1], ret[2]])
             Aii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
 
             self.Aii[p_i] = Aii + eps
@@ -479,6 +470,11 @@ class PBFSolver(SPHBase):
                 self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i])/ self.dt[None]
 
     @ti.kernel
+    def project(self, p: ti.template()):
+        for p_i in ti.grouped(p):
+            p[p_i] = ti.max(p[p_i], 0.0)
+
+    @ti.kernel
     def update_pressure_acceleration(self):
 
         for p_i in ti.grouped(self.ps.x):
@@ -494,7 +490,7 @@ class PBFSolver(SPHBase):
             z[p_i] = x[p_i] / self.Aii[p_i]
 
     @ti.kernel
-    def compute_matrix_free_Ax(self, Ax: ti.template(), x: ti.template()):
+    def compute_matrix_free_Ax_step_1(self, tmp: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
             tmp_i = ti.math.vec3(0.0)
@@ -504,15 +500,18 @@ class PBFSolver(SPHBase):
                 x_j = self.ps.x[p_j]
                 tmp_i += self.ps.m[p_j] * (x[p_i] / self.ps.density0[p_i] + x[p_j] / self.ps.density0[p_j]) * self.nablaWij(x_i - x_j)
 
-            self.tmp[p_i] = tmp_i
+            tmp[p_i] = tmp_i
 
-        # for p_i in ti.grouped(x):
-        #     Ax[p_i] = 0.0
-        #     x_i = self.ps.x[p_i]
-        #     for j in range(self.ps.fluid_neighbors_num[p_i]):
-        #         p_j = self.ps.fluid_neighbors[p_i, j]
-        #         x_j = self.ps.x[p_j]
-        #         Ax[p_i] += self.ps.m[p_i] * self.ps.m[p_j] * self.nablaWij(x_i - x_j).dot(self.tmp[p_i] - self.tmp[p_j])
+    @ti.kernel
+    def compute_matrix_free_Ax_step_2(self, Ax: ti.template(), z: ti.template()):
+
+        for p_i in ti.grouped(z):
+            Ax[p_i] = 0.0
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                x_j = self.ps.x[p_j]
+                Ax[p_i] += self.ps.m[p_i] * self.ps.m[p_j] * self.nablaWij(x_i - x_j).dot(z[p_i] - z[p_j])
 
 
     def pressure_solve(self):
@@ -563,12 +562,32 @@ class PBFSolver(SPHBase):
                 #
                 #     print(iter)
 
-                self.compute_lambdas_p()
-                self.apply_precondition(self.ps.pressure, self.b)
-                self.compute_matrix_free_Ax(self.Ap, self.ps.pressure)
+                self.compute_Aii()
+
+                # self.project(self.b)
+                self.apply_precondition(self.p, self.b)
+                self.project(self.p)
+
+
+                # for i in range(5):
+                #     self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
+                #     self.compute_matrix_free_Ax_step_2(self.Ap, self.tmp)
+                # #
+                # #     # r = b - Ap
+                #     add(self.r, self.b, -1.0, self.Ap)
+                #     self.apply_precondition(self.z, self.r)
+                #
+                #     # p += diag(A)^-1 (b - Ap)
+                #     add(self.p, self.p, 0.001, self.z)
+                #     self.project(self.p)
+
+
+                self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
                 add(self.ps.x, self.ps.x, -1.0, self.tmp)
 
-                # self.ps.pressure.copy_from(self.x)
+                # self.ps.pressure.copy_from(self.p)
+
+
                 data.append(avg_density_err)
                 # self.step_forward_x()
             else:
@@ -577,8 +596,8 @@ class PBFSolver(SPHBase):
                 self.step_forward_x2()
 
             num_iter += 1
-            if avg_density_err < 0.001:
-                break
+            # if avg_density_err < 0.001:
+            #     break
 
         return num_iter
 
