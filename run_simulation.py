@@ -152,7 +152,7 @@ if __name__ == "__main__":
                 ps.v.fill(0.0)
                 runSim = False
 
-        if frame_cnt > end_frame:
+        if export_ply and frame_cnt > end_frame:
             runSim = False
 
         if runSim:

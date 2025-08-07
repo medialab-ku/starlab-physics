@@ -10,7 +10,7 @@ class SPHBase:
         self.g = ti.Vector([0.0, -9.81, 0.0])  # Gravity
         if self.ps.dim == 2:
             self.g = ti.Vector([0.0, -9.81])
-        self.g = np.array(self.ps.cfg.get_cfg("gravitation"))
+        # self.g = np.array(self.ps.cfg.get_cfg("gravitation"))
 
         self.viscosity = 0.01  # viscosity
 
@@ -19,6 +19,8 @@ class SPHBase:
 
         self.dt = ti.field(float, shape=())
         self.dt[None] = 1e-4
+        self.nablaWij = self.spiky_kernel_derivative
+
 
     @ti.func
     def cubic_kernel(self, r_norm):
@@ -97,6 +99,16 @@ class SPHBase:
             r.norm()**2 + 0.01 * self.ps.support_radius**2) * self.cubic_kernel_derivative(
                 r)
         return res
+
+    @ti.kernel
+    def precompute_values(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                x_j = self.ps.x[p_j]
+                self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
 
     def initialize(self):
         self.ps.initialize_particle_system()

@@ -1,25 +1,42 @@
 import taichi as ti
 from sph_base import SPHBase
+from math_utils import *
 
 
 class PBF2Solver(SPHBase):
     def __init__(self, particle_system):
         super().__init__(particle_system)
+        # Pressure state function parameters(WCSPH)
+        self.exponent = 7.0
+        self.exponent = self.ps.cfg.get_cfg("exponent")
+
+        self.stiffness = 50000.0
+        self.stiffness = self.ps.cfg.get_cfg("stiffness")
 
         self.surface_tension = 0.0
         self.dt[None] = self.ps.cfg.get_cfg("timeStepSize")
 
-        self.enable_divergence_solver = True
+        self.nablaWij = self.spiky_kernel_derivative
+        self.lda = self.ps.pressure
 
-        self.m_max_iterations_v = 100
-        self.m_max_iterations = 100
+        self.tol = 3
+        self.toggle = True
+        self.max_iteration = 20
 
-        self.m_eps = 1e-5
+        self.div = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
 
-        self.max_error_V = 0.1
-        self.max_error = 0.05
-        self.alpha = ti.field(ti.f32, shape=self.ps.fluid_particle_num)
-        self.density_adv = ti.field(ti.f32, shape=self.ps.fluid_particle_num)
+        self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.r   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+
+        print("method: PBF2")
+
 
     @ti.func
     def compute_densities_task(self, p_i, p_j, ret: ti.template()):
@@ -27,24 +44,157 @@ class PBF2Solver(SPHBase):
         if self.ps.material[p_j] == self.ps.material_fluid:
             # Fluid neighbors
             x_j = self.ps.x[p_j]
-            ret += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
+            ret += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
         elif self.ps.material[p_j] == self.ps.material_solid:
             # Boundary neighbors
             ## Akinci2012
             x_j = self.ps.x[p_j]
             ret += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
 
+    @ti.func
+    def compute_divergence_task(self, p_i, p_j, ret: ti.template()):
+        x_i = self.ps.x[p_i]
+        v_i = self.ps.v[p_i]
+        y_i = self.ps.y[p_i]
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            # Fluid neighbors
+            x_j = self.ps.x[p_j]
+            v_j = self.ps.v[p_j]
+            y_j = self.ps.y[p_j]
+            ret += (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.spiky_kernel_derivative(x_i - x_j).dot(v_i - v_j)
+        # elif self.ps.material[p_j] == self.ps.material_solid:
+        #     # Boundary neighbors
+        #     ## Akinci2012
+        #     x_j = self.ps.x[p_j]
+        #     ret += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
+
     @ti.kernel
-    def compute_densities(self):
+    def precompute_values(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                x_j = self.ps.x[p_j]
+                self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
+
+    @ti.kernel
+    def compute_density(self):
         # for p_i in range(self.ps.particle_num[None]):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-            self.ps.density[p_i] = self.ps.m_V[p_i] * self.cubic_kernel(0.0)
+            self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
             den = 0.0
-            self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
+            x_i = self.ps.x[p_i]
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                # Fluid neighbors
+                x_j = self.ps.x[p_j]
+                den += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
+
+            # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
             self.ps.density[p_i] += den
-            self.ps.density[p_i] *= self.density_0
+            # self.ps.density[p_i] *= self.density_0
+
+    @ti.kernel
+    def compute_schur(self):
+        # for p_i in range(self.ps.particle_num[None]):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
+            den = 0.0
+            x_i = self.ps.x[p_i]
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                x_j = self.ps.x[p_j]
+                den += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
+
+            # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
+            self.ps.density[p_i] += den
+            # self.ps.density[p_i] *= self.density_0
+
+    @ti.kernel
+    def compute_divergence(self):
+        # for p_i in range(self.ps.particle_num[None]):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            den = 0.0
+            self.ps.for_all_neighbors(p_i, self.compute_divergence_task, den)
+            # self.div[p_i] = ti.max(den, 0.0)
+
+
+    @ti.func
+    def compute_lambdas_v_task(self, p_i, p_j, ret: ti.template()):
+
+
+        x_i = self.ps.x[p_i]
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            x_j = self.ps.x[p_j]
+            # m_j = self.density_0 * self.ps.m_V[p_j]
+            nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
+            ret[3] += nabla_cij.dot(nabla_cij) /self.ps.m[p_j]
+
+            for i in range(3):
+                ret[i] -= nabla_cij[i]
+
+    @ti.func
+    def compute_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
+        x_i = self.ps.x[p_i]
+        lambda_i = self.ps.pressure[p_i]
+        m_i = (self.density_0 * self.ps.m_V[p_i])
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            x_j = self.ps.x[p_j]
+            m_j = self.density_0 * self.ps.m_V[p_j]
+            density_j = self.ps.density[p_j]  # TODO: The density_0 of the neighbor may be different when the fluid density is different
+            lambda_j = self.ps.pressure[p_j]
+            # Compute the pressure force contribution, Symmetric Formula
+            ret += self.ps.m[p_j] * (lambda_i / self.ps.density0[p_i] + lambda_j / self.ps.density0[p_j]) * self.nablaWij(x_i - x_j)
+        # elif self.ps.material[p_j] == self.ps.material_solid:
+        #     # Boundary neighbors
+        #     dpj = self.ps.pressure[p_i] / self.density_0 ** 2
+        #     ## Akinci2012
+        #     x_j = self.ps.x[p_j]
+        #     # Compute the pressure force contribution, Symmetric Formula
+        #     f_p = -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) \
+        #           * self.cubic_kernel_derivative(x_i - x_j)
+        #     ret += f_p
+        #     if self.ps.is_dynamic_rigid_body(p_j):
+        #         self.ps.acceleration[p_j] += -f_p * self.density_0 / self.ps.density[p_j]
+
+    @ti.func
+    def compute_divergence_forces_task(self, p_i, p_j, ret: ti.template()):
+        x_i = self.ps.x[p_i]
+        lambda_i = self.ps.pressure[p_i]
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            x_j = self.ps.x[p_j]
+            m_j = self.density_0 * self.ps.m_V[p_j]
+
+            lambda_j = self.ps.pressure[p_j]
+            # Compute the pressure force contribution, Symmetric Formula
+            ret += m_j * (lambda_i / self.ps.density0[p_i] + lambda_j / self.ps.density0[p_j]) * self.spiky_kernel_derivative(x_i - x_j)
+
+
+    @ti.kernel
+    def compute_pressure_forces(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            self.ps.density[p_i] = ti.max(self.ps.density[p_i], self.density_0)
+            self.ps.pressure[p_i] = self.stiffness * (ti.pow(self.ps.density[p_i] / self.density_0, self.exponent) - 1.0)
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_static_rigid_body(p_i):
+                self.ps.acceleration[p_i].fill(0)
+                continue
+            elif self.ps.is_dynamic_rigid_body(p_i):
+                continue
+            dv = ti.Vector([0.0 for _ in range(self.ps.dim)])
+            self.ps.for_all_neighbors(p_i, self.compute_pressure_forces_task, dv)
+            self.ps.acceleration[p_i] += dv
 
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
@@ -83,7 +233,7 @@ class PBF2Solver(SPHBase):
                     r.norm() ** 2 + 0.01 * self.ps.support_radius ** 2) * self.cubic_kernel_derivative(r)
             ret += f_v
             if self.ps.is_dynamic_rigid_body(p_j):
-                self.ps.acceleration[p_j] += -f_v * self.ps.density[p_i] / self.ps.density[p_j]
+                self.ps.acceleration[p_j] += -f_v * self.density_0 / self.ps.density[p_j]
 
     @ti.kernel
     def compute_non_pressure_forces(self):
@@ -94,6 +244,7 @@ class PBF2Solver(SPHBase):
             ############## Body force ###############
             # Add body force
             d_v = ti.Vector(self.g)
+            # d_v = ti.Vector([0.0, 0.0, 0.0])
             self.ps.acceleration[p_i] = d_v
             if self.ps.material[p_i] == self.ps.material_fluid:
                 self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
@@ -114,292 +265,497 @@ class PBF2Solver(SPHBase):
                 # self.ps.v[p_i] += self.dt[None] * self.ps.acceleration[p_i]
                 self.ps.x[p_i] += self.dt[None] * self.ps.v[p_i]
 
+
+    @ti.func
+    def compute_lambdas_task(self, p_i, p_j, ret: ti.template()):
+
+        # schur = 0.0
+        m_i = (self.density_0 * self.ps.m_V[p_i])
+        # dc_dxi = ti.math.vec3(0.0)
+        x_i = self.ps.x[p_i]
+        # Fluid neighbors
+        # dc_drho_i = self.density_0 * self.ps.m_V[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            x_j = self.ps.x[p_j]
+            # m_j = self.density_0 * self.ps.m_V[p_j]
+            nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
+            # dc_dxi -= nabla_cij
+            ret[3] += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
+
+            for i in range(3):
+                ret[i] -= nabla_cij[i]
+
     @ti.kernel
-    def compute_DFSPH_factor(self):
+    def compute_source(self) -> float:
 
         eps = 1e-6
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            m_i = self.density_0 * self.ps.m_V[p_i]
-            grad_p_i = ti.Vector([0.0 for _ in range(self.ps.dim)])
-            ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
-
-            self.ps.for_all_neighbors(p_i, self.compute_DFSPH_factor_task, ret)
-
-            schur = eps
-            schur += ret[3]
-            for i in ti.static(range(3)):
-                grad_p_i[i] = ret[i]
-            schur += grad_p_i.norm_sqr() / m_i
-
-            # Compute pressure stiffness denominator
-            self.alpha[p_i] = 1.0 / schur
-
-    @ti.func
-    def compute_DFSPH_factor_task(self, p_i, p_j, ret: ti.template()):
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            # Fluid neighbors
-            m_j = self.density_0 * self.ps.m_V[p_j]
-            grad_p_j = m_j * self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j])
-            ret[3] += grad_p_j.norm_sqr() / m_j  # sum_grad_p_k
-            for i in ti.static(range(3)):  # grad_p_i
-                ret[i] -= grad_p_j[i]
-        elif self.ps.material[p_j] == self.ps.material_solid:
-            # Boundary neighbors
-            ## Akinci2012
-            grad_p_j = -self.ps.m_V[p_j] * self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j])
-            for i in ti.static(range(3)):  # grad_p_i
-                ret[i] -= grad_p_j[i]
-
-    @ti.kernel
-    def compute_density_change(self):
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-            ret = ti.Struct(density_adv=0.0, num_neighbors=0)
-            self.ps.for_all_neighbors(p_i, self.compute_density_change_task, ret)
-
-            # only correct positive divergence
-            density_adv = ti.max(ret.density_adv, 0.0)
-            num_neighbors = ret.num_neighbors
-
-            # Do not perform divergence solve when paritlce deficiency happens
-            if self.ps.dim == 3:
-                if num_neighbors < 20:
-                    density_adv = 0.0
-            else:
-                if num_neighbors < 7:
-                    density_adv = 0.0
-
-            self.ps.density_adv[p_i] = density_adv
-
-    @ti.func
-    def compute_density_change_task(self, p_i, p_j, ret: ti.template()):
-        v_i = self.ps.v[p_i]
-        v_j = self.ps.v[p_j]
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            # Fluid neighbors
-            ret.density_adv += self.ps.m_V[p_j] * (v_i - v_j).dot(
-                self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j]))
-        elif self.ps.material[p_j] == self.ps.material_solid:
-            # Boundary neighbors
-            ## Akinci2012
-            ret.density_adv += self.ps.m_V[p_j] * (v_i - v_j).dot(
-                self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j]))
-
-        # Compute the number of neighbors
-        ret.num_neighbors += 1
-
-    @ti.kernel
-    def compute_density_adv(self):
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-            delta = 0.0
-            self.ps.for_all_neighbors(p_i, self.compute_density_adv_task, delta)
-            density_adv = self.ps.density[p_i] + self.dt[None] * delta
-            self.density_adv[p_i] = density_adv
-
-    @ti.func
-    def compute_density_adv_task(self, p_i, p_j, ret: ti.template()):
-        v_i = self.ps.v[p_i]
-        v_j = self.ps.v[p_j]
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            # Fluid neighbors
-            m_j = self.density_0 * self.ps.m_V[p_j]
-            ret += m_j * (v_i - v_j).dot(self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j]))
-        elif self.ps.material[p_j] == self.ps.material_solid:
-            # Boundary neighbors
-            ## Akinci2012
-            ret += self.ps.m_V[p_j] * (v_i - v_j).dot(self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j]))
-
-    @ti.kernel
-    def compute_density_error(self, offset: float) -> float:
-        density_error = 0.0
-        for I in ti.grouped(self.ps.x):
-            if self.ps.material[I] == self.ps.material_fluid:
-                density_error += ti.max(self.density_adv[I] - offset, 0.0)
-        return density_error
-
-    @ti.kernel
-    def multiply_time_step(self, field: ti.template(), time_step: float):
-        for I in ti.grouped(self.ps.x):
-            if self.ps.material[I] == self.ps.material_fluid:
-                field[I] *= time_step
-
-    def divergence_solve(self):
-        # TODO: warm start
-        # Compute velocity of density change
-        self.compute_density_change()
-        inv_dt = 1 / self.dt[None]
-        self.multiply_time_step(self.ps.dfsph_factor, inv_dt)
-
-        m_iterations_v = 0
-
-        # Start solver
         avg_density_err = 0.0
 
-        while m_iterations_v < 1 or m_iterations_v < self.m_max_iterations_v:
-
-            avg_density_err = self.divergence_solver_iteration()
-            # Max allowed density fluctuation
-            # use max density error divided by time step size
-            eta = 1.0 / self.dt[None] * self.max_error_V * 0.01 * self.density_0
-            # print("eta ", eta)
-            if avg_density_err <= eta:
-                break
-            m_iterations_v += 1
-        print(f"DFSPH - iteration V: {m_iterations_v} Avg density err: {avg_density_err}")
-
-        # Multiply by h, the time step size has to be removed
-        # to make the stiffness value independent
-        # of the time step size
-
-        # TODO: if warm start
-        # also remove for kappa v
-
-        self.multiply_time_step(self.ps.dfsph_factor, self.dt[None])
-
-    def divergence_solver_iteration(self):
-        self.divergence_solver_iteration_kernel()
-        self.compute_density_change()
-        density_err = self.compute_density_error(0.0)
-        return density_err / self.ps.fluid_particle_num
-
-    @ti.kernel
-    def divergence_solver_iteration_kernel(self):
-        # Perform Jacobi iteration
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-            # evaluate rhs
-            b_i = self.ps.density_adv[p_i]
-            k_i = b_i * self.ps.dfsph_factor[p_i]
-            ret = ti.Struct(dv=ti.Vector([0.0 for _ in range(self.ps.dim)]), k_i=k_i)
-            # TODO: if warm start
-            # get_kappa_V += k_i
-            self.ps.for_all_neighbors(p_i, self.divergence_solver_iteration_task, ret)
-            self.ps.v[p_i] += ret.dv
+
+            self.b[p_i] = (self.ps.m[p_i] / self.ps.density0[p_i]) * (self.ps.density[p_i] - self.ps.density0[p_i])
+            avg_density_err += (ti.max(self.b[p_i], 0.0) / self.ps.m[p_i])
+
+        avg_density_err /= self.ps.fluid_particle_num
+        return avg_density_err
 
     @ti.func
-    def divergence_solver_iteration_task(self, p_i, p_j, ret: ti.template()):
+    def compute_Ax_task(self, p_i, p_j, ret: ti.template()):
+
+        # schur = 0.0
+        m_i = (self.density_0 * self.ps.m_V[p_i])
+        # dc_dxi = ti.math.vec3(0.0)
+        x_i = self.ps.x[p_i]
+        # Fluid neighbors
+        # dc_drho_i = self.density_0 * self.ps.m_V[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
         if self.ps.material[p_j] == self.ps.material_fluid:
-            # Fluid neighbors
-            b_j = self.ps.density_adv[p_j]
-            k_j = b_j * self.ps.dfsph_factor[p_j]
-            k_sum = ret.k_i + self.density_0 / self.density_0 * k_j  # TODO: make the neighbor density0 different for multiphase fluid
-            if ti.abs(k_sum) > self.m_eps:
-                grad_p_j = -self.ps.m_V[p_j] * self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j])
-                ret.dv -= self.dt[None] * k_sum * grad_p_j
-        elif self.ps.material[p_j] == self.ps.material_solid:
-            # Boundary neighbors
-            ## Akinci2012
-            if ti.abs(ret.k_i) > self.m_eps:
-                grad_p_j = -self.ps.m_V[p_j] * self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j])
-                vel_change = -self.dt[None] * 1.0 * ret.k_i * grad_p_j
-                ret.dv += vel_change
-                if self.ps.is_dynamic_rigid_body(p_j):
-                    self.ps.acceleration[p_j] += -vel_change * (1 / self.dt[None]) * self.ps.density[p_i] / \
-                                                 self.ps.density[p_j]
+            x_j = self.ps.x[p_j]
+            # m_j = self.density_0 * self.ps.m_V[p_j]
+            nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
+            # dc_dxi -= nabla_cij
+            ret[3] += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
+
+            for i in range(3):
+                ret[i] -= nabla_cij[i]
+
+    @ti.kernel
+    def computeAx(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
+            self.ps.for_all_neighbors(p_i, self.computeAx, ret)
+
+
+    @ti.kernel
+    def compute_Aii(self):
+
+        eps = 1e-6
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            Aii = 0.0
+            dc_dxi = ti.math.vec3(0.0)
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                nabla_cij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                Aii += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
+
+                dc_dxi -= nabla_cij
+            Aii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
+
+            self.Aii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * Aii + eps
+
+
+    @ti.func
+    def compute_lambdas_task2(self, p_i, p_j, ret: ti.template()):
+
+        # schur = 0.0
+        m_i = (self.density_0 * self.ps.m_V[p_i])
+        # dc_dxi = ti.math.vec3(0.0)
+        x_i = self.ps.x[p_i]
+        # Fluid neighbors
+        # dc_drho_i = self.density_0 * self.ps.m_V[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            x_j = self.ps.x[p_j]
+            # m_j = self.density_0 * self.ps.m_V[p_j]
+            nabla_cij = (1.0 / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
+            # dc_dxi -= nabla_cij
+            ret[3] += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
+
+            for i in range(3):
+                ret[i] -= nabla_cij[i]
+
+    @ti.kernel
+    def compute_lambdas_p2(self) -> float:
+
+        eps = 1e-6
+        avg_density_err = 0.0
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            c = (1.0 / self.ps.density0[p_i]) * ti.max(self.ps.density[p_i] - self.ps.density0[p_i], 0.0)
+            avg_density_err += c
+            ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
+            # ret = 0.0
+            self.ps.for_all_neighbors(p_i, self.compute_lambdas_task2, ret)
+
+            schur = ret[3]
+            dc_dxi = ti.Vector([ret[0], ret[1], ret[2]])
+            schur += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
+            self.ps.pressure[p_i] = - c / (schur + eps)
+
+        avg_density_err /= self.ps.fluid_particle_num
+        return avg_density_err
+
+    @ti.kernel
+    def compute_lambdas_v(self) -> float:
+
+        eps = 1e-3
+        avg_density_err = 0.0
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            # m_i = (self.density_0 * self.ps.m_V[p_i])
+            avg_density_err += self.div[p_i]
+            ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
+            # ret = 0.0
+            self.ps.for_all_neighbors(p_i, self.compute_lambdas_v_task, ret)
+
+            schur = ret[3]
+            dc_dxi = ti.Vector([ret[0], ret[1], ret[2]])
+            schur += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
+            self.ps.pressure[p_i] = -ti.max(self.div[p_i], 0.0) / (schur + eps)
+
+        avg_density_err /= self.ps.fluid_particle_num
+        return avg_density_err
+
+    @ti.kernel
+    def step_forward_x(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_static_rigid_body(p_i):
+                self.ps.acceleration[p_i].fill(0)
+                continue
+            elif self.ps.is_dynamic_rigid_body(p_i):
+                continue
+
+            # m_i = (self.density_0 * self.ps.m_V[p_i])
+            dx = ti.Vector([0.0 for _ in range(self.ps.dim)])
+            self.ps.for_all_neighbors(p_i, self.compute_pressure_forces_task, dx)
+            self.ps.x[p_i] += dx
+
+    @ti.kernel
+    def step_forward_x2(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_static_rigid_body(p_i):
+                self.ps.acceleration[p_i].fill(0)
+                continue
+            elif self.ps.is_dynamic_rigid_body(p_i):
+                continue
+
+            m_i = (self.density_0 * self.ps.m_V[p_i])
+            dx = ti.Vector([0.0 for _ in range(self.ps.dim)])
+            self.ps.for_all_neighbors(p_i, self.compute_pressure_forces_task, dx)
+            self.ps.x[p_i] += dx / m_i
+
+    @ti.kernel
+    def step_forward_v(self):
+
+        # print("test")
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_static_rigid_body(p_i):
+                self.ps.acceleration[p_i].fill(0)
+                continue
+            elif self.ps.is_dynamic_rigid_body(p_i):
+                continue
+        #
+            m_i = (self.density_0 * self.ps.m_V[p_i])
+            dv = ti.Vector([0.0 for _ in range(self.ps.dim)])
+            self.ps.for_all_neighbors(p_i, self.compute_divergence_forces_task, dv)
+            self.ps.v[p_i] += dv
+
+
+
+    @ti.kernel
+    def update_velocities(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic[p_i]:
+                self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i])/ self.dt[None]
+
+    @ti.kernel
+    def project(self, p: ti.template()):
+        for p_i in ti.grouped(p):
+            p[p_i] = ti.max(p[p_i], 0.0)
+
+    @ti.kernel
+    def update_pressure_acceleration(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic[p_i]:
+                v_tmp = (self.ps.x[p_i] - self.ps.x_old[p_i]) / self.dt[None]
+                self.ps.acceleration[p_i] += (v_tmp - self.ps.v_old[p_i]) / self.dt[None]
+
+
+    @ti.kernel
+    def apply_precondition(self, z: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            z[p_i] = x[p_i] / self.Aii[p_i]
+
+    @ti.kernel
+    def compute_matrix_free_Ax_step_0(self, x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            xi = x[p_i]
+            x[p_i] = (self.ps.m[p_i] / self.ps.density0[p_i]) * xi
+
+
+    @ti.kernel
+    def compute_matrix_free_Ax_step_1(self, tmp: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            tmp_i = ti.math.vec3(0.0)
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                tmp_i += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) *  self.ps.fluid_neighbors_values[p_i, j]
+
+            tmp[p_i] = tmp_i / self.ps.m[p_i]
+
+    @ti.kernel
+    def compute_matrix_free_Ax_step_2(self, Ax: ti.template(), z: ti.template()):
+
+        for p_i in ti.grouped(z):
+            Ax_i = 0.0
+            x_i = self.ps.x[p_i]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                x_j = self.ps.x[p_j]
+                Ax_i += self.ps.m[p_j] * self.nablaWij(x_i - x_j).dot(z[p_i] - z[p_j])
+
+            Ax[p_i] = Ax_i
 
     def pressure_solve(self):
-        inv_dt = 1 / self.dt[None]
-        inv_dt2 = 1 / (self.dt[None] * self.dt[None])
 
-        # TODO: warm start
+        num_iter = 0
+        data = []
+        for i in range(self.max_iteration):
 
-        # Compute rho_adv
-        # self.compute_density_adv()
-        self.multiply_time_step(self.alpha, inv_dt2)
+            self.enforce_boundary_3D(self.ps.material_fluid)
+            self.ps.search_neighbours(self.ps.x)
 
-        m_iterations = 0
+            self.precompute_values()
+            self.compute_density()
 
-        # Start solver
-        avg_density_err = 0.0
+            # self.compute_divergence()
 
-        while m_iterations < 1 or m_iterations < self.m_max_iterations:
+            if self.toggle:
+                avg_density_err = self.compute_source()
 
-            avg_density_err = self.pressure_solve_iteration()
-            # Max allowed density fluctuation
-            # eta = self.max_error * 0.01 * self.density_0
-            if avg_density_err <= self.density_0 * 0.001:
-                break
-            m_iterations += 1
-        print(f"DFSPH - iterations: {m_iterations} Avg density Err: {avg_density_err:.4f}")
-        # Multiply by h, the time step size has to be removed
-        # to make the stiffness value independent
-        # of the time step size
+                # tol = 1e-3
+                #
+                # # self.x.copy_from(self.ps.pressure)
+                #
+                # self.x.fill(0.0)
+                # self.r.copy_from(self.b)
+                # # add(self.r, self.b, -1.0, self.Ax)
+                # self.p.copy_from(self.r)
+                # rs_old = dot2(self.r, self.r)
+                #
+                # if rs_old > tol:
+                #
+                #     iter = 0
+                #     for i in range(1000):
+                #
+                #         self.compute_matrix_free_Ax(self.Ap, self.p)
+                #         alpha = rs_old / dot2(self.p, self.Ap)
+                #         add(self.x, self.x, +alpha, self.p)
+                #
+                #         add(self.r, self.r, -alpha, self.Ap)
+                #         r_norm = dot2(self.r, self.r)
+                #
+                #         if r_norm < tol:
+                #             break
+                #         rs_new = dot2(self.r, self.r)
+                #         beta = rs_new / rs_old
+                #         add(self.p, self.r, beta, self.p)
+                #         rs_old = rs_new
+                #
+                #         iter += 1
+                #
+                #     print(iter)
 
-        # TODO: if warm start
-        # also remove for kappa v
+                self.compute_Aii()
 
-    def pressure_solve_iteration(self):
-        self.compute_density_adv()
-        self.compute_lambda()
-        self.update_velocity()
-        density_err = self.compute_density_error(self.density_0)
-        return density_err / self.ps.fluid_particle_num
+                # self.p.fill(0.0)
+
+                # self.project(self.b)
+                self.apply_precondition(self.p, self.b)
+                self.project(self.p)
+
+                iter = 0
+                # for i in range(1000):
+                #
+                #     # A = D J invM J^T D
+                #
+                #     # step 1: Dp
+                #     self.compute_matrix_free_Ax_step_0(self.p)
+                #
+                #     # step 2: (invM J^T) Dp
+                #     self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
+                #
+                #     # step 3: J (invM J^T) Dp
+                #     self.compute_matrix_free_Ax_step_2(self.Ap, self.tmp)
+                #
+                #     # step 4: D (J invM J^T) Dp
+                #     self.compute_matrix_free_Ax_step_0(self.Ap)
+                #     # add(self.Ap, self.Ap, 1e-6, self.p)
+                # #     # r = b - Ap
+                #
+                #     # tst = dot2(self.p, self.Ap)
+                #     #
+                #     # if tst < 0.0:
+                #     #     print("fucked")
+                #
+                #     #r = b - Ap
+                #     add(self.r, self.b, -1.0, self.Ap)
+                #
+                #     r_norm = dot2(self.r, self.r)
+                #
+                #     if r_norm < 0.01:
+                #         break
+                #
+                #     # z = diag(A)^-1 r
+                #     self.apply_precondition(self.z, self.r)
+                # #
+                # #     # p += diag(A)^-1 (b - Ap)
+                #     add(self.p, self.p, 0.5, self.z)
+                #     self.project(self.p)
+                #     iter += 1
+                # print("Jacobi iter: ", iter)
+
+                self.compute_matrix_free_Ax_step_0(self.p)
+                self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
+
+                add(self.ps.x, self.ps.x, -1.0, self.tmp)
+
+                # self.ps.pressure.copy_from(self.p)
+
+
+                data.append(avg_density_err)
+                # self.step_forward_x()
+            else:
+                avg_density_err = self.compute_lambdas_p2()
+                data.append(avg_density_err)
+                self.step_forward_x2()
+
+            num_iter += 1
+            # if avg_density_err < 0.001:
+            #     break
+
+        return num_iter
+
+    def divergence_solve(self):
+
+        num_iter = 0
+        data = []
+        for i in range(10):
+            self.compute_divergence()
+            avg_density_err = self.compute_lambdas_v()
+            # data.append(avg_density_err)
+
+            # self.ps.pressure.fill(0.0)
+            self.step_forward_v()
+            num_iter += 1
+            # if avg_density_err < 0.5:
+            #     break
+
+        return num_iter
 
     @ti.kernel
-    def compute_lambda(self):
-        # Compute pressure forces
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-            # Evaluate rhs
-            c_i = ti.max(self.density_adv[p_i] - self.density_0, 0.0)
-            self.ps.pressure[p_i] = -c_i * self.alpha[p_i]
+    def mat_free_mul_D(self, Dx: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            Dx[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * x[p_i]
 
     @ti.kernel
-    def update_velocity(self):
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-            m_i = self.density_0 * self.ps.m_V[p_i]
-            dv = ti.math.vec3(0.0)
-            self.ps.for_all_neighbors(p_i, self.update_velocity_task, dv)
-            self.ps.v[p_i] += (self.dt[None] / m_i) * dv
+    def mat_free_mul_nabla_rho(self, nabla_rho_x: ti.template(), x: ti.template()):
 
-    @ti.func
-    def update_velocity_task(self, p_i, p_j, dv: ti.template()):
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            # Fluid neighbors
-            # k_sum = k_i + k_j # TODO: make the neighbor density0 different for multiphase fluid
-            # if ti.abs(k_sum) > self.m_eps:
-            m_j = self.density_0 * self.ps.m_V[p_j]
-            m_i = self.density_0 * self.ps.m_V[p_j]
-            grad_p_j = m_j * self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j])
-            # Directly update velocities instead of storing pressure accelerations
-            dv += (self.ps.pressure[p_i] + self.ps.pressure[p_j]) * grad_p_j  # ki, kj already contain inverse density
+        for p_i in ti.grouped(x):
+            nabla_rho_x_i = 0.0
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                nabla_rho_x_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-        # elif self.ps.material[p_j] == self.ps.material_solid:
-        #     # Boundary neighbors
-        #     ## Akinci2012
-        #     if ti.abs(k_i) > self.m_eps:
-        #         grad_p_j = -self.ps.m_V[p_j] * self.cubic_kernel_derivative(self.ps.x[p_i] - self.ps.x[p_j])
-        #
-        #         # Directly update velocities instead of storing pressure accelerations
-        #         vel_change = - self.dt[None] * 1.0 * k_i * grad_p_j  # kj already contains inverse density
-        #         self.ps.v[p_i] += vel_change
-        #         if self.ps.is_dynamic_rigid_body(p_j):
-        #             self.ps.acceleration[p_j] += -vel_change * 1.0 / self.dt[None] * self.ps.density[p_i] / self.ps.density[p_j]
+            nabla_rho_x[p_i] = nabla_rho_x_i
+            # nabla_rho_x[p_i] = tmp_i
 
     @ti.kernel
-    def predict_velocity(self):
-        # compute new velocities only considering non-pressure forces
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.is_dynamic[p_i] and self.ps.material[p_i] == self.ps.material_fluid:
-                self.ps.v[p_i] += self.dt[None] * self.ps.acceleration[p_i]
+    def mat_free_mul_invM_nabla_rho_T(self, invM_nabla_rho_T_x: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            invM_nabla_rho_T_x_i = ti.math.vec3(0.0)
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                invM_nabla_rho_T_x_i +=(self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
+
+            invM_nabla_rho_T_x[p_i] = invM_nabla_rho_T_x_i
+
+    @ti.kernel
+    def compute_b(self, b: ti.template(), v: ti.template()):
+
+        dtSq = self.dt[None] ** 2
+        for p_i in ti.grouped(b):
+            div_i = 0.0
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+
+            b[p_i] = (self.ps.density[p_i] + self.dt[None] * div_i - self.ps.density0[p_i]) / dtSq
 
     def substep(self):
-        self.compute_densities()
-        self.compute_DFSPH_factor()
-        # if self.enable_divergence_solver:
-        #     self.divergence_solve()
+
+        self.ps.search_neighbours(self.ps.x)
+        # self.ps.x_old.copy_from(self.ps.x)
         self.compute_non_pressure_forces()
-        self.predict_velocity()
-        self.pressure_solve()
+        self.compute_density()
+        self.precompute_values()
         self.advect_velocity()
+
+
+
+        self.compute_Aii()
+        self.p.fill(0.0)
+        self.compute_b(self.b, self.ps.v)
+
+        for i in range(self.max_iteration):
+
+            self.mat_free_mul_D(self.Dp, self.p)
+            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.Dp)
+            self.mat_free_mul_nabla_rho(self.Ap, self.tmp)
+
+            add(self.r, self.b, -1.0, self.Ap)
+            self.apply_precondition(self.z, self.r)
+
+            add(self.p, self.p, 1.0, self.z)
+            self.project(self.p)
+
+        self.mat_free_mul_D(self.Dp, self.p)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.Dp)
+        add(self.ps.v, self.ps.v, -self.dt[None], self.tmp)
+
+
+
+
+
+
+        # self.compute_matrix_free_Ax_step_0(self.p)
+        # self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
+        # add(self.ps.x, self.ps.x, -1.0, self.tmp)
+
+        # num_iter_v = self.divergence_solve()
+        # print("divergence iter: ", num_iter_v)
         self.advect_position()
+        # self.ps.y.copy_from(self.ps.x)
+
+        # num_iter_p = self.pressure_solve()
+        # print("pressure iter: ", num_iter_p)
+        #
+        # self.enforce_boundary_3D(self.ps.material_fluid)
+        # # self.update_pressure_acceleration()
+        # self.update_velocities()
+
+
+        # self.compute_divergence()

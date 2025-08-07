@@ -15,6 +15,8 @@ class IISPHSolver(SPHBase):
         self.pressure_accel = ti.Vector.field(self.ps.dim, dtype=float)
         particle_node = ti.root.dense(ti.i, self.ps.particle_max_num)
         particle_node.place(self.pressure_accel)
+
+        print("method: IISPH")
         # self.dt[None] = 2e-4
 
     @ti.kernel
@@ -130,8 +132,7 @@ class IISPHSolver(SPHBase):
                 x_j = self.ps.x[p_j]
                 dpj = self.last_pressure[p_j] / self.ps.density[p_j] ** 2
                 # Compute the pressure force contribution, Symmetric Formula
-                d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) \
-                       * self.cubic_kernel_derivative(x_i - x_j)
+                d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
 
             # Boundary neighbors
             dpj = self.last_pressure[p_i] / self.density_0 ** 2
@@ -239,8 +240,8 @@ class IISPHSolver(SPHBase):
             #     continue
             x_i = self.ps.x[p_i]
             # Add body force
-            d_v = ti.Vector([0.0 for _ in range(self.ps.dim)])
-            d_v[1] = self.g[1]
+            d_v = ti.Vector(self.g)
+            # d_v[1] = self.g[1]
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
@@ -252,7 +253,7 @@ class IISPHSolver(SPHBase):
         # Symplectic Euler
         for p_i in range(self.ps.particle_num[None]):
             if self.ps.material[p_i] == self.ps.material_fluid:
-                self.ps.v[p_i] += self.dt[None] * self.pressure_accel[p_i]
+                self.ps.v[p_i] += self.dt[None] * (self.pressure_accel[p_i] + self.ps.acceleration[p_i])
                 self.ps.x[p_i] += self.dt[None] * self.ps.v[p_i]
 
     def substep(self):
@@ -261,6 +262,8 @@ class IISPHSolver(SPHBase):
         # print(self.dt[None])
 
         # self.dt[None] = 2e-4
+        self.dt[None] = 4e-4
+        print(self.dt[None])
         self.ps.search_neighbours(self.ps.x)
         self.compute_densities()
         self.compute_non_pressure_forces()

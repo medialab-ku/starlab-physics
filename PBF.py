@@ -261,7 +261,7 @@ class PBFSolver(SPHBase):
     def advect_position(self):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                # self.ps.v[p_i] += self.dt[None] * self.ps.acceleration[p_i]
+                self.ps.v[p_i] += self.dt[None] * self.ps.acceleration[p_i]
                 self.ps.x[p_i] += self.dt[None] * self.ps.v[p_i]
 
 
@@ -334,7 +334,6 @@ class PBFSolver(SPHBase):
     def compute_Aii(self):
 
         eps = 1e-6
-        avg_density_err = 0.0
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
@@ -344,15 +343,13 @@ class PBFSolver(SPHBase):
             dc_dxi = ti.math.vec3(0.0)
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                nabla_cij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 Aii += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
 
-                # for i in range(3):
                 dc_dxi -= nabla_cij
             Aii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
 
-            self.Aii[p_i] = Aii + eps
-            # self.ps.pressure[p_i] = - self.b[p_i] / (schur + eps)
+            self.Aii[p_i] = ((self.ps.m[p_i] / self.ps.density0[p_i]) ** 2) * Aii + eps
 
 
     @ti.func
@@ -672,7 +669,7 @@ class PBFSolver(SPHBase):
         self.ps.x_old.copy_from(self.ps.x)
         self.compute_density()
         self.compute_non_pressure_forces()
-        self.advect_velocity()
+        # self.advect_velocity()
 
         # num_iter_v = self.divergence_solve()
         # print("divergence iter: ", num_iter_v)
