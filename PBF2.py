@@ -7,17 +7,18 @@ class PBF2Solver(SPHBase):
     def __init__(self, particle_system):
         super().__init__(particle_system)
         # Pressure state function parameters(WCSPH)
-        self.exponent = 7.0
-        self.exponent = self.ps.cfg.get_cfg("exponent")
-
-        self.stiffness = 50000.0
-        self.stiffness = self.ps.cfg.get_cfg("stiffness")
+        # self.exponent = 7.0
+        # self.exponent = self.ps.cfg.get_cfg("exponent")
+        #
+        # self.stiffness = 50000.0
+        # self.stiffness = self.ps.cfg.get_cfg("stiffness")
 
         self.surface_tension = 0.0
         self.dt[None] = self.ps.cfg.get_cfg("timeStepSize")
 
         self.nablaWij = self.cubic_kernel_derivative
         self.lda = self.ps.pressure
+        self.method = 0
 
         self.tol = 2
         self.toggle = True
@@ -735,16 +736,21 @@ class PBF2Solver(SPHBase):
 
         method = 0
         if method == 0:
-            self.projected_jacobi()
+            self.ProjectedJacobi()
         elif method == 1:
             self.ADMM()
+        elif method == 2:
+            self.Barrier()
 
+    def Barrier(self):
+
+        print("TODO")
 
     def ADMM(self):
 
         print("TODO")
 
-    def projected_jacobi(self):
+    def ProjectedJacobi(self):
 
         iter = 0
         tol = pow(10, -self.tol)

@@ -104,12 +104,14 @@ if __name__ == "__main__":
             # if method == 1:
             solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
             solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
-            # solver.toggle = w.checkbox("By = b", solver.toggle)
-                #
-                # if solver.toggle:
-                #     gui.text("mass weighted")
-                # else:
-                #     gui.text("vanilla")
+            solver.method = w.slider_int("method type", solver.method, 0, 2)
+
+            if solver.method == 0:
+                gui.text("Projected Jacobi")
+            elif solver.method == 1:
+                gui.text("ADMM")
+            elif solver.method == 2:
+                gui.text("Barrier")
 
             #     solver.k_rho = w.slider_float("k rho", solver.k_rho, 0.0, 1e6)
             #     solver.da_ratio = w.slider_float("da_ratio", solver.da_ratio, 0.0, 2.0)
