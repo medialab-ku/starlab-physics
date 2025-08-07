@@ -16,21 +16,24 @@ class PBF2Solver(SPHBase):
         self.surface_tension = 0.0
         self.dt[None] = self.ps.cfg.get_cfg("timeStepSize")
 
-        self.nablaWij = self.spiky_kernel_derivative
+        self.nablaWij = self.cubic_kernel_derivative
         self.lda = self.ps.pressure
 
-        self.tol = 3
+        self.tol = 2
         self.toggle = True
-        self.max_iteration = 20
+        self.max_iteration = 1000
 
         self.div = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
 
+        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Bii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.z   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.r   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -334,23 +337,24 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_Aii(self):
 
-        eps = 1e-6
+        eps = 0.0
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            Aii = 0.0
+            Bii = 0.0
             dc_dxi = ti.math.vec3(0.0)
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 nabla_cij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                Aii += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
+                Bii += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
 
                 dc_dxi -= nabla_cij
-            Aii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
+            Bii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
 
-            self.Aii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * Aii + eps
+            self.Bii[p_i] = Bii + eps
+            self.Aii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * Bii + eps
 
 
     @ti.func
@@ -490,10 +494,10 @@ class PBF2Solver(SPHBase):
 
 
     @ti.kernel
-    def apply_precondition(self, z: ti.template(), x: ti.template()):
+    def apply_precondition(self, z: ti.template(), Aii: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-            z[p_i] = x[p_i] / self.Aii[p_i]
+            z[p_i] = x[p_i] / Aii[p_i]
 
     @ti.kernel
     def compute_matrix_free_Ax_step_0(self, x: ti.template()):
@@ -527,125 +531,125 @@ class PBF2Solver(SPHBase):
 
             Ax[p_i] = Ax_i
 
-    def pressure_solve(self):
-
-        num_iter = 0
-        data = []
-        for i in range(self.max_iteration):
-
-            self.enforce_boundary_3D(self.ps.material_fluid)
-            self.ps.search_neighbours(self.ps.x)
-
-            self.precompute_values()
-            self.compute_density()
-
-            # self.compute_divergence()
-
-            if self.toggle:
-                avg_density_err = self.compute_source()
-
-                # tol = 1e-3
-                #
-                # # self.x.copy_from(self.ps.pressure)
-                #
-                # self.x.fill(0.0)
-                # self.r.copy_from(self.b)
-                # # add(self.r, self.b, -1.0, self.Ax)
-                # self.p.copy_from(self.r)
-                # rs_old = dot2(self.r, self.r)
-                #
-                # if rs_old > tol:
-                #
-                #     iter = 0
-                #     for i in range(1000):
-                #
-                #         self.compute_matrix_free_Ax(self.Ap, self.p)
-                #         alpha = rs_old / dot2(self.p, self.Ap)
-                #         add(self.x, self.x, +alpha, self.p)
-                #
-                #         add(self.r, self.r, -alpha, self.Ap)
-                #         r_norm = dot2(self.r, self.r)
-                #
-                #         if r_norm < tol:
-                #             break
-                #         rs_new = dot2(self.r, self.r)
-                #         beta = rs_new / rs_old
-                #         add(self.p, self.r, beta, self.p)
-                #         rs_old = rs_new
-                #
-                #         iter += 1
-                #
-                #     print(iter)
-
-                self.compute_Aii()
-
-                # self.p.fill(0.0)
-
-                # self.project(self.b)
-                self.apply_precondition(self.p, self.b)
-                self.project(self.p)
-
-                iter = 0
-                # for i in range(1000):
-                #
-                #     # A = D J invM J^T D
-                #
-                #     # step 1: Dp
-                #     self.compute_matrix_free_Ax_step_0(self.p)
-                #
-                #     # step 2: (invM J^T) Dp
-                #     self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
-                #
-                #     # step 3: J (invM J^T) Dp
-                #     self.compute_matrix_free_Ax_step_2(self.Ap, self.tmp)
-                #
-                #     # step 4: D (J invM J^T) Dp
-                #     self.compute_matrix_free_Ax_step_0(self.Ap)
-                #     # add(self.Ap, self.Ap, 1e-6, self.p)
-                # #     # r = b - Ap
-                #
-                #     # tst = dot2(self.p, self.Ap)
-                #     #
-                #     # if tst < 0.0:
-                #     #     print("fucked")
-                #
-                #     #r = b - Ap
-                #     add(self.r, self.b, -1.0, self.Ap)
-                #
-                #     r_norm = dot2(self.r, self.r)
-                #
-                #     if r_norm < 0.01:
-                #         break
-                #
-                #     # z = diag(A)^-1 r
-                #     self.apply_precondition(self.z, self.r)
-                # #
-                # #     # p += diag(A)^-1 (b - Ap)
-                #     add(self.p, self.p, 0.5, self.z)
-                #     self.project(self.p)
-                #     iter += 1
-                # print("Jacobi iter: ", iter)
-
-                self.compute_matrix_free_Ax_step_0(self.p)
-                self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
-
-                add(self.ps.x, self.ps.x, -1.0, self.tmp)
-
-                # self.ps.pressure.copy_from(self.p)
-
-
-                data.append(avg_density_err)
-                # self.step_forward_x()
-            else:
-                avg_density_err = self.compute_lambdas_p2()
-                data.append(avg_density_err)
-                self.step_forward_x2()
-
-            num_iter += 1
-            # if avg_density_err < 0.001:
-            #     break
-
-        return num_iter
+    # def pressure_solve(self):
+    #
+    #     num_iter = 0
+    #     data = []
+    #     for i in range(self.max_iteration):
+    #
+    #         self.enforce_boundary_3D(self.ps.material_fluid)
+    #         self.ps.search_neighbours(self.ps.x)
+    #
+    #         self.precompute_values()
+    #         self.compute_density()
+    #
+    #         # self.compute_divergence()
+    #
+    #         if self.toggle:
+    #             avg_density_err = self.compute_source()
+    #
+    #             # tol = 1e-3
+    #             #
+    #             # # self.x.copy_from(self.ps.pressure)
+    #             #
+    #             # self.x.fill(0.0)
+    #             # self.r.copy_from(self.b)
+    #             # # add(self.r, self.b, -1.0, self.Ax)
+    #             # self.p.copy_from(self.r)
+    #             # rs_old = dot2(self.r, self.r)
+    #             #
+    #             # if rs_old > tol:
+    #             #
+    #             #     iter = 0
+    #             #     for i in range(1000):
+    #             #
+    #             #         self.compute_matrix_free_Ax(self.Ap, self.p)
+    #             #         alpha = rs_old / dot2(self.p, self.Ap)
+    #             #         add(self.x, self.x, +alpha, self.p)
+    #             #
+    #             #         add(self.r, self.r, -alpha, self.Ap)
+    #             #         r_norm = dot2(self.r, self.r)
+    #             #
+    #             #         if r_norm < tol:
+    #             #             break
+    #             #         rs_new = dot2(self.r, self.r)
+    #             #         beta = rs_new / rs_old
+    #             #         add(self.p, self.r, beta, self.p)
+    #             #         rs_old = rs_new
+    #             #
+    #             #         iter += 1
+    #             #
+    #             #     print(iter)
+    #
+    #             self.compute_Aii()
+    #
+    #             # self.p.fill(0.0)
+    #
+    #             # self.project(self.b)
+    #             self.apply_precondition(self.p, self.b)
+    #             self.project(self.p)
+    #
+    #             iter = 0
+    #             # for i in range(1000):
+    #             #
+    #             #     # A = D J invM J^T D
+    #             #
+    #             #     # step 1: Dp
+    #             #     self.compute_matrix_free_Ax_step_0(self.p)
+    #             #
+    #             #     # step 2: (invM J^T) Dp
+    #             #     self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
+    #             #
+    #             #     # step 3: J (invM J^T) Dp
+    #             #     self.compute_matrix_free_Ax_step_2(self.Ap, self.tmp)
+    #             #
+    #             #     # step 4: D (J invM J^T) Dp
+    #             #     self.compute_matrix_free_Ax_step_0(self.Ap)
+    #             #     # add(self.Ap, self.Ap, 1e-6, self.p)
+    #             # #     # r = b - Ap
+    #             #
+    #             #     # tst = dot2(self.p, self.Ap)
+    #             #     #
+    #             #     # if tst < 0.0:
+    #             #     #     print("fucked")
+    #             #
+    #             #     #r = b - Ap
+    #             #     add(self.r, self.b, -1.0, self.Ap)
+    #             #
+    #             #     r_norm = dot2(self.r, self.r)
+    #             #
+    #             #     if r_norm < 0.01:
+    #             #         break
+    #             #
+    #             #     # z = diag(A)^-1 r
+    #             #     self.apply_precondition(self.z, self.r)
+    #             # #
+    #             # #     # p += diag(A)^-1 (b - Ap)
+    #             #     add(self.p, self.p, 0.5, self.z)
+    #             #     self.project(self.p)
+    #             #     iter += 1
+    #             # print("Jacobi iter: ", iter)
+    #
+    #             self.compute_matrix_free_Ax_step_0(self.p)
+    #             self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
+    #
+    #             add(self.ps.x, self.ps.x, -1.0, self.tmp)
+    #
+    #             # self.ps.pressure.copy_from(self.p)
+    #
+    #
+    #             data.append(avg_density_err)
+    #             # self.step_forward_x()
+    #         else:
+    #             avg_density_err = self.compute_lambdas_p2()
+    #             data.append(avg_density_err)
+    #             self.step_forward_x2()
+    #
+    #         num_iter += 1
+    #         # if avg_density_err < 0.001:
+    #         #     break
+    #
+    #     return num_iter
 
     def divergence_solve(self):
 
@@ -705,6 +709,78 @@ class PBF2Solver(SPHBase):
 
             b[p_i] = (self.ps.density[p_i] + self.dt[None] * div_i - self.ps.density0[p_i]) / dtSq
 
+    @ti.kernel
+    def measure_error(self, v: ti.template()) -> float:
+
+        avg_error = 0.0
+        for p_i in ti.grouped(v):
+            div_i = 0.0
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+
+            avg_error = ti.max(self.ps.density[p_i] + self.dt[None] * div_i - self.ps.density0[p_i], 0.0) / self.ps.density0[p_i]
+
+        return avg_error
+
+
+
+
+    def pressure_solve(self):
+
+        self.compute_Aii()
+        self.p.fill(0.0)
+        self.y.fill(0.0)
+        self.compute_b(self.b, self.ps.v)
+
+        method = 0
+        if method == 0:
+            self.projected_jacobi()
+        elif method == 1:
+            self.ADMM()
+
+
+    def ADMM(self):
+
+        print("TODO")
+
+    def projected_jacobi(self):
+
+        iter = 0
+        tol = pow(10, -self.tol)
+        for i in range(self.max_iteration):
+
+            # Ap = nabla rho invM nabla rhoT Dp
+
+            # if self.toggle is False:
+            self.mat_free_mul_D(self.y, self.p)
+
+            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.y)
+            add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+            err = self.measure_error(self.v_tmp)
+
+            if err < tol and iter > 2:
+                break
+
+            iter += 1
+            self.mat_free_mul_nabla_rho(self.Ap, self.tmp)
+
+            # z = omega * diag(A)^-1 (r - Ap)
+            add(self.r, self.b, -1.0, self.Ap)
+
+            # if self.toggle:
+            #     self.apply_precondition(self.z, self.Bii, self.r)
+            #     add(self.y, self.y, 1.0, self.z)
+            #     # p = max(p + z, 0.0)
+            #     self.project(self.y)
+            # else:
+            self.apply_precondition(self.z, self.Aii, self.r)
+            add(self.p, self.p, 1.0, self.z)
+            # p = max(p + z, 0.0)
+            self.project(self.p)
+
+        self.ps.v.copy_from(self.v_tmp)
+
     def substep(self):
 
         self.ps.search_neighbours(self.ps.x)
@@ -713,49 +789,6 @@ class PBF2Solver(SPHBase):
         self.compute_density()
         self.precompute_values()
         self.advect_velocity()
+        self.pressure_solve()
 
-
-
-        self.compute_Aii()
-        self.p.fill(0.0)
-        self.compute_b(self.b, self.ps.v)
-
-        for i in range(self.max_iteration):
-
-            self.mat_free_mul_D(self.Dp, self.p)
-            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.Dp)
-            self.mat_free_mul_nabla_rho(self.Ap, self.tmp)
-
-            add(self.r, self.b, -1.0, self.Ap)
-            self.apply_precondition(self.z, self.r)
-
-            add(self.p, self.p, 1.0, self.z)
-            self.project(self.p)
-
-        self.mat_free_mul_D(self.Dp, self.p)
-        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.Dp)
-        add(self.ps.v, self.ps.v, -self.dt[None], self.tmp)
-
-
-
-
-
-
-        # self.compute_matrix_free_Ax_step_0(self.p)
-        # self.compute_matrix_free_Ax_step_1(self.tmp, self.p)
-        # add(self.ps.x, self.ps.x, -1.0, self.tmp)
-
-        # num_iter_v = self.divergence_solve()
-        # print("divergence iter: ", num_iter_v)
         self.advect_position()
-        # self.ps.y.copy_from(self.ps.x)
-
-        # num_iter_p = self.pressure_solve()
-        # print("pressure iter: ", num_iter_p)
-        #
-        # self.enforce_boundary_3D(self.ps.material_fluid)
-        # # self.update_pressure_acceleration()
-        # self.update_velocities()
-
-
-        # self.compute_divergence()

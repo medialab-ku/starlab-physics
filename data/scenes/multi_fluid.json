@@ -8,7 +8,7 @@
 		"density0": 1000,
 		"simulationMethod": 2,
 		"gravitation": [0.0, -9.81, 0.0],
-		"timeStepSize": 0.004,
+		"timeStepSize": 0.003,
 		"stiffness": 50000,
 		"exponent": 7,
 		"boundaryHandlingMethod": 0,
@@ -20,7 +20,7 @@
 		{
             "objectId": 0,
 			"start": [0.0, 0.0, 0.0],
-			"end": [0.6, 3.5, 0.6],
+			"end": [0.6, 2.0, 0.6],
 			"translation": [0.1, 0.1, 0.1],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],

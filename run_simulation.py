@@ -101,10 +101,10 @@ if __name__ == "__main__":
             # ps.eta = w.slider_float("eta ", ps.eta, 0.0, 1.0)
             # solver.viscosity = w.slider_float("viscosity", solver.viscosity, 0.0, 1.0)
             #
-            if method == 1:
-                solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
-                solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
-                # solver.toggle = w.checkbox("test", solver.toggle)
+            # if method == 1:
+            solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
+            solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
+            # solver.toggle = w.checkbox("By = b", solver.toggle)
                 #
                 # if solver.toggle:
                 #     gui.text("mass weighted")
