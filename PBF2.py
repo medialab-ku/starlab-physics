@@ -800,7 +800,7 @@ class PBF2Solver(SPHBase):
 
         pcgIter += 1
 
-        for i in range(100):
+        for i in range(1000):
 
             # compute Ap with matrix-free fashion
             self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.p_b)
