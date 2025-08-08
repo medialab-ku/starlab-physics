@@ -40,3 +40,28 @@ def inf_norm(x: ti.template()) -> float:
         ti.atomic_max(ret, tmp)
 
     return ret
+
+@ti.kernel
+def mean_ti(x: ti.template()) -> float:
+    """Taichi kernel version of mean calculation"""
+    ret = 0.0
+    count = 0
+    for i in x:
+        ret += x[i]
+        count += 1
+    
+    return ret / ti.max(count, 1)
+
+def mean(x):
+    """Python host function to calculate mean of a Taichi field"""
+    return mean_ti(x)
+
+def clamp(x, lo, hi):
+    if x < lo: return lo
+    if x > hi: return hi
+    return x
+
+def sqrt(x):
+    # 음수/아주 작은 음수(라운딩) 방지
+    v = float(x)
+    return (0.0 if v <= 0.0 else v ** 0.5)

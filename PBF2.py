@@ -1,4 +1,5 @@
 import taichi as ti
+import math
 from sph_base import SPHBase
 from math_utils import *
 
@@ -43,6 +44,7 @@ class PBF2Solver(SPHBase):
         # ADMM variables
         self.b_tilde = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.w = ti.field(dtype=float, shape=self.ps.fluid_particle_num)  # consensus variable
+        self.w_prev = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.u = ti.field(dtype=float, shape=self.ps.fluid_particle_num)  # dual variable
 
 
@@ -70,6 +72,17 @@ class PBF2Solver(SPHBase):
     def apply_Atilde_plus_alphaI(self, out_scalar, x_scalar, alpha: float):
         # out_scalar = A_tilde(x_scalar) + alpha * x_scalar
         self.apply_Atilde(out_scalar, x_scalar)
+        add(out_scalar, out_scalar, alpha, x_scalar)
+
+    def apply_Ahat(self, out_scalar, x_scalar):
+        # out = D^{1/2} * ( B * (D^{1/2} * x) )
+        self.mat_free_mul_D_sqrt(self.r, x_scalar)                   # r = D^{1/2} x
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.r)         # tmp = M^{-1} * (∇ρ^T * r)
+        self.mat_free_mul_nabla_rho(out_scalar, self.tmp)            # out = ∇ρ * tmp
+        self.mat_free_mul_D_sqrt(out_scalar, out_scalar)             # out = D^{1/2} * out
+
+    def apply_Ahat_plus_alphaI(self, out_scalar, x_scalar, alpha: float):
+        self.apply_Ahat(out_scalar, x_scalar)
         add(out_scalar, out_scalar, alpha, x_scalar)
 
     @ti.func
@@ -528,7 +541,9 @@ class PBF2Solver(SPHBase):
     def apply_precondition(self, z: ti.template(), Aii: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-            z[p_i] = x[p_i] / Aii[p_i]
+            # z[p_i] = x[p_i] / Aii[p_i]
+            denom = ti.max(Aii[p_i], 1e-12)
+            z[p_i] = x[p_i] / denom
 
     @ti.kernel
     def compute_matrix_free_Ax_step_0(self, x: ti.template()):
@@ -734,6 +749,19 @@ class PBF2Solver(SPHBase):
 
             invM_nabla_rho_T_x[p_i] = invM_nabla_rho_T_x_i
 
+
+    @ti.kernel
+    def mat_free_mul_D_sqrt(self, out: ti.template(), x: ti.template()):
+        for p_i in ti.grouped(x):
+            out[p_i] = ti.sqrt(self.ps.m[p_i] / self.ps.density[p_i]) * x[p_i]
+
+
+    @ti.kernel
+    def mat_free_mul_D_sqrt_inv(self, out: ti.template(), x: ti.template()):
+        for p_i in ti.grouped(x):
+            out[p_i] = ti.sqrt(self.ps.density[p_i] / self.ps.m[p_i]) * x[p_i]
+
+
     @ti.kernel
     def compute_b(self, b: ti.template(), v: ti.template()):
 
@@ -786,6 +814,24 @@ class PBF2Solver(SPHBase):
             self.Hii[p_i] = self.Bii[p_i] + 1.0 / (p[p_i] ** 2)
 
 
+    @ti.kernel
+    def compute_Mii(self, alpha: float):
+        for p_i in range(self.ps.fluid_particle_num):
+            # Jacobi preconditioner diag(M) where M = A_tilde + alpha*I
+            # A_tilde diag ≈ D_inv * diag(nabla_rho invM nabla_rho^T) ≈ (density/m) * Bii
+            density_over_mass = self.ps.density[p_i] / self.ps.m[p_i]
+            self.Hii[p_i] = ti.max(density_over_mass * self.Bii[p_i] + alpha, 1e-12)
+
+
+    @ti.kernel
+    def clamp_velocity(self, v: ti.template(), vmax: float):
+        for p_i in ti.grouped(v):
+            vi = v[p_i]
+            n = vi.norm()
+            if n > vmax:
+                v[p_i] = (vmax / (n + 1e-12)) * vi
+
+
     def Barrier(self):
 
         # for i in range(10):
@@ -797,6 +843,43 @@ class PBF2Solver(SPHBase):
 
 
         # print("TODO")
+
+    def PCG_Atilde_plus_alphaI(self, alpha: float, rhs: ti.template(), x: ti.template(), precond_diag: ti.template(), max_iters: int, tol: float = 1e-6):
+        # r_b <- rhs - M x
+        self.apply_Atilde_plus_alphaI(self.Ap_b, x, alpha)
+        add(self.r_b, rhs, -1.0, self.Ap_b)
+
+        # z_b <- P^{-1} r_b; p_b <- z_b
+        self.apply_precondition(self.z_b, precond_diag, self.r_b)
+        self.p_b.copy_from(self.z_b)
+
+        rz_old = dot2(self.r_b, self.z_b)
+        rr = dot2(self.r_b, self.r_b)
+        if rr <= tol:
+            return
+
+        for _ in range(max_iters):
+            # Ap_b <- M p_b
+            self.apply_Atilde_plus_alphaI(self.Ap_b, self.p_b, alpha)
+
+            pAp = dot2(self.p_b, self.Ap_b)
+            if not (pAp > 1e-20):
+                break
+
+            alpha_k = clamp(rz_old / pAp, 1e-12, 1e+2)
+            add(x, x, +alpha_k, self.p_b)
+            add(self.r_b, self.r_b, -alpha_k, self.Ap_b)
+
+            rr = dot2(self.r_b, self.r_b)
+            if rr < tol:
+                break
+
+            self.apply_precondition(self.y_b, precond_diag, self.r_b)
+            rz_new = dot2(self.r_b, self.y_b)
+            beta_k = rz_new / rz_old
+            add(self.p_b, self.y_b, beta_k, self.p_b)
+            self.z_b.copy_from(self.y_b)
+            rz_old = rz_new
 
     def PCG(self):
 
@@ -857,9 +940,10 @@ class PBF2Solver(SPHBase):
     def ADMM(self):
 
         iter = 0
-        tol = pow(10, -self.tol)
-        alpha = 1.0
-        inner_pcg_iters = 10
+        pri_tol = 1e-4
+        dual_tol = 1e-3
+        alpha = 0.05 * mean(self.Hii)
+        inner_pcg_iters = 5
 
         # ADMM variables initialization
         self.z.fill(0.0)  # primal variable z
@@ -873,6 +957,9 @@ class PBF2Solver(SPHBase):
         self.compute_b(self.b, self.ps.v)
         self.mat_free_mul_D_inv(self.b_tilde, self.b)  # b_tilde = D_inv * b
 
+        w_prev = self.w_prev
+        w_prev.copy_from(self.w)
+
         # Matrix for the z-update step: M = A_tilde + alpha*I
 
         for i in range(self.max_iteration):
@@ -884,15 +971,11 @@ class PBF2Solver(SPHBase):
             add(self.r, self.b_tilde, alpha, self.w)      # r = b_tilde + alpha * w
             add(self.r, self.r, -alpha, self.u)           # r = r - alpha * u
 
-            # ====================================================================
-            # Inner PCG solver for the z-update
-            # (A_tilde + alpha*I)z = tmp
-            # Operator application (matrix-free) to form M z (for PCG):
-            self.apply_Atilde_plus_alphaI(self.Ap, self.z, alpha)  # Ap <- M z
-            # At this point, we have: M z (in self.Ap) and RHS r (in self.r)
-            # TODO: Replace with inner PCG once available:
-            # z = PCG(M=apply_Atilde_plus_alphaI, rhs=tmp, x0=z, iters=inner_pcg_iters, tol=...)
-            # ====================================================================
+            # ================= Inner PCG for (A_tilde + alpha I) z = r =================
+            # Build Jacobi preconditioner diag(M) and solve
+            self.compute_Mii(alpha)
+            # Use current z as initial guess; solution is written back to z
+            self.PCG_Atilde_plus_alphaI(alpha, self.r, self.z, self.Hii, inner_pcg_iters, tol=1e-6)
 
 
             # === w-update: Projection w = max(0, z + u) ===
@@ -900,18 +983,32 @@ class PBF2Solver(SPHBase):
             self.project(self.w)                 # w = max(0, z + u)
 
             # === u-update: Dual variable update u = u + (z - w) ===
-            self.tmp.fill(0.0)
-            add(self.tmp, self.z, -1.0, self.w)  # tmp = z - w
-            add(self.u, self.u, 1.0, self.tmp)   # u = u + (z - w)
+            # Use scalar buffer to avoid vec3-scalar type mismatch
+            add(self.r_b, self.z, -1.0, self.w)  # r_b = z - w (scalar field)
+            add(self.u, self.u, 1.0, self.r_b)   # u = u + r_b
+
+            self.mat_free_mul_D_inv(self.p, self.w)
 
             # Compute velocity candidate v_tmp = v - dt * (invM nabla_rho^T w)
             self.tmp.fill(0.0)
-            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.w)
+            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.p)
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
-            err = self.measure_error(self.v_tmp)
 
-            if err < tol and iter > 2:
+            # === ADMM residual ===
+            # primal residual: r = z - w
+            add(self.r_b, self.z, -1.0, self.w)
+            r_norm = sqrt(dot2(self.r_b, self.r_b))
+
+            # dual residual: s = alpha * (w - w_prev)
+            add(self.z_b, self.w, -1.0, w_prev)
+            scale(self.y_b, alpha, self.z_b)  # y_b = alpha * (w - w_prev)
+            s_norm = sqrt(dot2(self.y_b, self.y_b))
+
+            if r_norm < pri_tol and s_norm < dual_tol and iter > 2:
                 break
+
+            # w_prev 갱신
+            w_prev.copy_from(self.w)
 
             iter += 1
 
@@ -922,8 +1019,10 @@ class PBF2Solver(SPHBase):
 
         # Apply final solution to velocity: v <- v - dt * (invM nabla_rho^T w)
         self.tmp.fill(0.0)
-        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.w)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.p)
         add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+
+        self.clamp_velocity(self.v_tmp, vmax=3.0)
         self.ps.v.copy_from(self.v_tmp)
 
 
