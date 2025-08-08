@@ -38,9 +38,26 @@ class PBF2Solver(SPHBase):
         self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.z   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.r   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        
+        # ADMM variables
+        self.b_tilde = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.w = ti.field(dtype=float, shape=self.ps.fluid_particle_num)  # consensus variable
+        self.u = ti.field(dtype=float, shape=self.ps.fluid_particle_num)  # dual variable
 
         print("method: PBF2")
 
+
+    # === Matrix-free operator helpers for ADMM z-update ===
+    def apply_Atilde(self, out_scalar, x_scalar):
+        # out_scalar = D_inv @ (nabla_rho @ (invM @ (nabla_rho^T @ x_scalar)))
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, x_scalar)  # tmp: vector field
+        self.mat_free_mul_nabla_rho(out_scalar, self.tmp)       # out_scalar: scalar field
+        self.mat_free_mul_D_inv(out_scalar, out_scalar)         # out_scalar: scalar field
+
+    def apply_Atilde_plus_alphaI(self, out_scalar, x_scalar, alpha: float):
+        # out_scalar = A_tilde(x_scalar) + alpha * x_scalar
+        self.apply_Atilde(out_scalar, x_scalar)
+        add(out_scalar, out_scalar, alpha, x_scalar)
 
     @ti.func
     def compute_densities_task(self, p_i, p_j, ret: ti.template()):
@@ -676,6 +693,12 @@ class PBF2Solver(SPHBase):
             Dx[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * x[p_i]
 
     @ti.kernel
+    def mat_free_mul_D_inv(self, D_inv_x: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            D_inv_x[p_i] = (self.ps.density[p_i] / self.ps.m[p_i]) * x[p_i]
+
+    @ti.kernel
     def mat_free_mul_nabla_rho(self, nabla_rho_x: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
@@ -747,8 +770,77 @@ class PBF2Solver(SPHBase):
         print("TODO")
 
     def ADMM(self):
+        
+        iter = 0
+        tol = pow(10, -self.tol)
+        alpha = 1.0
+        inner_pcg_iters = 10
 
-        print("TODO")
+        # ADMM variables initialization
+        self.z.fill(0.0)  # primal variable z
+        self.w.fill(0.0)  # consensus variable w  
+        self.u.fill(0.0)  # dual variable u
+
+        # z = D * p
+        self.mat_free_mul_D(self.z, self.p)
+
+        # b -> b_tilde: D_inv * b
+        self.compute_b(self.b, self.ps.v)
+        self.mat_free_mul_D_inv(self.b_tilde, self.b)  # b_tilde = D_inv * b
+
+        # Matrix for the z-update step: M = A_tilde + alpha*I
+
+        for i in range(self.max_iteration):
+            # Initialize tmp at the beginning of each iteration
+            self.tmp.fill(0.0)
+            
+            # === z-update: Solve (A_tilde + alpha*I)z = b_tilde + alpha*(w - u) ===
+            # Compute RHS: r = b_tilde + alpha * (w - u)
+            add(self.r, self.b_tilde, alpha, self.w)      # r = b_tilde + alpha * w
+            add(self.r, self.r, -alpha, self.u)           # r = r - alpha * u
+            
+            # ====================================================================
+            # Inner PCG solver for the z-update
+            # (A_tilde + alpha*I)z = tmp
+            # Operator application (matrix-free) to form M z (for PCG):
+            self.apply_Atilde_plus_alphaI(self.Ap, self.z, alpha)  # Ap <- M z
+            # At this point, we have: M z (in self.Ap) and RHS r (in self.r)
+            # TODO: Replace with inner PCG once available:
+            # z = PCG(M=apply_Atilde_plus_alphaI, rhs=tmp, x0=z, iters=inner_pcg_iters, tol=...)
+            # ====================================================================
+            
+
+            # === w-update: Projection w = max(0, z + u) ===
+            add(self.w, self.z, 1.0, self.u)  # w = z + u
+            self.project(self.w)                 # w = max(0, z + u)
+            
+            # === u-update: Dual variable update u = u + (z - w) ===
+            self.tmp.fill(0.0)
+            add(self.tmp, self.z, -1.0, self.w)  # tmp = z - w
+            add(self.u, self.u, 1.0, self.tmp)   # u = u + (z - w)
+        
+            # Compute velocity candidate v_tmp = v - dt * (invM nabla_rho^T w)
+            self.tmp.fill(0.0)
+            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.w)
+            add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+            err = self.measure_error(self.v_tmp)
+
+            if err < tol and iter > 2:
+                break
+                
+            iter += 1
+
+            # Transform solution back to original variable p
+            # Since z = D @ p and w is the consensus in z-space, p = D_inv @ w
+            self.mat_free_mul_D_inv(self.p, self.w)
+
+    
+        # Apply final solution to velocity: v <- v - dt * (invM nabla_rho^T w)
+        self.tmp.fill(0.0)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.w)
+        add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+        self.ps.v.copy_from(self.v_tmp)
+
 
     def ProjectedJacobi(self):
 
