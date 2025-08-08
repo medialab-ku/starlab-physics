@@ -62,28 +62,7 @@ class PBF2Solver(SPHBase):
         print("method: PBF2")
 
 
-    # === Matrix-free operator helpers for ADMM z-update ===
-    def apply_Atilde(self, out_scalar, x_scalar):
-        # out_scalar = D_inv @ (nabla_rho @ (invM @ (nabla_rho^T @ x_scalar)))
-        self.mat_free_mul_invM_nabla_rho_T(self.tmp, x_scalar)  # tmp: vector field
-        self.mat_free_mul_nabla_rho(out_scalar, self.tmp)       # out_scalar: scalar field
-        self.mat_free_mul_D_inv(out_scalar, out_scalar)         # out_scalar: scalar field
 
-    def apply_Atilde_plus_alphaI(self, out_scalar, x_scalar, alpha: float):
-        # out_scalar = A_tilde(x_scalar) + alpha * x_scalar
-        self.apply_Atilde(out_scalar, x_scalar)
-        add(out_scalar, out_scalar, alpha, x_scalar)
-
-    def apply_Ahat(self, out_scalar, x_scalar):
-        # out = D^{1/2} * ( B * (D^{1/2} * x) )
-        self.mat_free_mul_D_sqrt(self.r, x_scalar)                   # r = D^{1/2} x
-        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.r)         # tmp = M^{-1} * (∇ρ^T * r)
-        self.mat_free_mul_nabla_rho(out_scalar, self.tmp)            # out = ∇ρ * tmp
-        self.mat_free_mul_D_sqrt(out_scalar, out_scalar)             # out = D^{1/2} * out
-
-    def apply_Ahat_plus_alphaI(self, out_scalar, x_scalar, alpha: float):
-        self.apply_Ahat(out_scalar, x_scalar)
-        add(out_scalar, out_scalar, alpha, x_scalar)
 
     @ti.func
     def compute_densities_task(self, p_i, p_j, ret: ti.template()):
@@ -814,8 +793,22 @@ class PBF2Solver(SPHBase):
             self.Hii[p_i] = self.Bii[p_i] + 1.0 / (p[p_i] ** 2)
 
 
+    # === Matrix-free operator helpers for ADMM z-update ===
+    def apply_Atilde(self, out_scalar, x_scalar):
+        # out_scalar = D_inv @ (nabla_rho @ (invM @ (nabla_rho^T @ x_scalar)))
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, x_scalar)  # tmp: vector field
+        self.mat_free_mul_nabla_rho(out_scalar, self.tmp)       # out_scalar: scalar field
+        self.mat_free_mul_D_inv(out_scalar, out_scalar)         # out_scalar: scalar field
+
+    def apply_Atilde_plus_alphaI(self, out_scalar, x_scalar, alpha: float):
+        # out_scalar = A_tilde(x_scalar) + alpha * x_scalar
+        self.apply_Atilde(out_scalar, x_scalar)
+        add(out_scalar, out_scalar, alpha, x_scalar)
+
+
     @ti.kernel
     def compute_Mii(self, alpha: float):
+        # ADMM preconditioner
         for p_i in range(self.ps.fluid_particle_num):
             # Jacobi preconditioner diag(M) where M = A_tilde + alpha*I
             # A_tilde diag ≈ D_inv * diag(nabla_rho invM nabla_rho^T) ≈ (density/m) * Bii
@@ -844,42 +837,6 @@ class PBF2Solver(SPHBase):
 
         # print("TODO")
 
-    def PCG_Atilde_plus_alphaI(self, alpha: float, rhs: ti.template(), x: ti.template(), precond_diag: ti.template(), max_iters: int, tol: float = 1e-6):
-        # r_b <- rhs - M x
-        self.apply_Atilde_plus_alphaI(self.Ap_b, x, alpha)
-        add(self.r_b, rhs, -1.0, self.Ap_b)
-
-        # z_b <- P^{-1} r_b; p_b <- z_b
-        self.apply_precondition(self.z_b, precond_diag, self.r_b)
-        self.p_b.copy_from(self.z_b)
-
-        rz_old = dot2(self.r_b, self.z_b)
-        rr = dot2(self.r_b, self.r_b)
-        if rr <= tol:
-            return
-
-        for _ in range(max_iters):
-            # Ap_b <- M p_b
-            self.apply_Atilde_plus_alphaI(self.Ap_b, self.p_b, alpha)
-
-            pAp = dot2(self.p_b, self.Ap_b)
-            if not (pAp > 1e-20):
-                break
-
-            alpha_k = clamp(rz_old / pAp, 1e-12, 1e+2)
-            add(x, x, +alpha_k, self.p_b)
-            add(self.r_b, self.r_b, -alpha_k, self.Ap_b)
-
-            rr = dot2(self.r_b, self.r_b)
-            if rr < tol:
-                break
-
-            self.apply_precondition(self.y_b, precond_diag, self.r_b)
-            rz_new = dot2(self.r_b, self.y_b)
-            beta_k = rz_new / rz_old
-            add(self.p_b, self.y_b, beta_k, self.p_b)
-            self.z_b.copy_from(self.y_b)
-            rz_old = rz_new
 
     def PCG(self):
 
@@ -940,9 +897,8 @@ class PBF2Solver(SPHBase):
     def ADMM(self):
 
         iter = 0
-        pri_tol = 1e-4
-        dual_tol = 1e-3
-        alpha = 0.05 * mean(self.Hii)
+        tol = pow(10, -self.tol)
+        alpha = 0.2
         inner_pcg_iters = 5
 
         # ADMM variables initialization
@@ -957,9 +913,6 @@ class PBF2Solver(SPHBase):
         self.compute_b(self.b, self.ps.v)
         self.mat_free_mul_D_inv(self.b_tilde, self.b)  # b_tilde = D_inv * b
 
-        w_prev = self.w_prev
-        w_prev.copy_from(self.w)
-
         # Matrix for the z-update step: M = A_tilde + alpha*I
 
         for i in range(self.max_iteration):
@@ -972,18 +925,52 @@ class PBF2Solver(SPHBase):
             add(self.r, self.r, -alpha, self.u)           # r = r - alpha * u
 
             # ================= Inner PCG for (A_tilde + alpha I) z = r =================
-            # Build Jacobi preconditioner diag(M) and solve
+            # PCG preparation
+            # Jacobi preconditioner diag(M) and solve
             self.compute_Mii(alpha)
-            # Use current z as initial guess; solution is written back to z
-            self.PCG_Atilde_plus_alphaI(alpha, self.r, self.z, self.Hii, inner_pcg_iters, tol=1e-6)
 
+            pcg_eps = 1e-1
+            # Use current z as initial guess then back to z
+            self.x.copy_from(self.z)
+            
+            self.apply_Atilde_plus_alphaI(self.Ap_b, self.x, alpha)
+            add(self.r_b, self.r, -1.0, self.Ap_b)
+            
+            self.apply_precondition(self.z_b, self.Hii, self.r_b)
+            self.p_b.copy_from(self.z_b)
+            rz_old = dot2(self.r_b, self.z_b)
+            rr = dot2(self.r_b, self.r_b)
+
+            # PCG iteration
+            for j in range(inner_pcg_iters):
+                self.apply_Atilde_plus_alphaI(self.Ap_b, self.p_b, alpha)
+                pAp = dot2(self.p_b, self.Ap_b)
+
+                # if pAp < 1e-12:
+                #     break
+                    
+                pcg_alpha = rz_old / pAp
+                add(self.x, self.x, pcg_alpha, self.p_b)
+                add(self.r_b, self.r_b, -pcg_alpha, self.Ap_b)
+                
+                self.apply_precondition(self.z_b, self.Hii, self.r_b)
+                rz_new = dot2(self.r_b, self.z_b)
+                rr = dot2(self.r_b, self.r_b)
+                
+                if rr < pcg_eps:
+                    break
+                    
+                pcg_beta = rz_new / rz_old
+                add(self.p_b, self.z_b, pcg_beta, self.p_b)
+                rz_old = rz_new
+            
+            self.z.copy_from(self.x)
 
             # === w-update: Projection w = max(0, z + u) ===
             add(self.w, self.z, 1.0, self.u)  # w = z + u
             self.project(self.w)                 # w = max(0, z + u)
 
             # === u-update: Dual variable update u = u + (z - w) ===
-            # Use scalar buffer to avoid vec3-scalar type mismatch
             add(self.r_b, self.z, -1.0, self.w)  # r_b = z - w (scalar field)
             add(self.u, self.u, 1.0, self.r_b)   # u = u + r_b
 
@@ -994,35 +981,18 @@ class PBF2Solver(SPHBase):
             self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.p)
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
 
-            # === ADMM residual ===
-            # primal residual: r = z - w
-            add(self.r_b, self.z, -1.0, self.w)
-            r_norm = sqrt(dot2(self.r_b, self.r_b))
+            err = self.measure_error(self.v_tmp)
 
-            # dual residual: s = alpha * (w - w_prev)
-            add(self.z_b, self.w, -1.0, w_prev)
-            scale(self.y_b, alpha, self.z_b)  # y_b = alpha * (w - w_prev)
-            s_norm = sqrt(dot2(self.y_b, self.y_b))
-
-            if r_norm < pri_tol and s_norm < dual_tol and iter > 2:
+            if err < tol and iter > 2:
                 break
-
-            # w_prev 갱신
-            w_prev.copy_from(self.w)
-
             iter += 1
-
-            # Transform solution back to original variable p
-            # Since z = D @ p and w is the consensus in z-space, p = D_inv @ w
-            self.mat_free_mul_D_inv(self.p, self.w)
-
 
         # Apply final solution to velocity: v <- v - dt * (invM nabla_rho^T w)
         self.tmp.fill(0.0)
         self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.p)
         add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
 
-        self.clamp_velocity(self.v_tmp, vmax=3.0)
+        # self.clamp_velocity(self.v_tmp, vmax=3.0)
         self.ps.v.copy_from(self.v_tmp)
 
 
