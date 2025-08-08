@@ -31,9 +31,9 @@ class PBF2Solver(SPHBase):
 
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Bii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Hii  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Hii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -776,7 +776,7 @@ class PBF2Solver(SPHBase):
         elif self.method == 1:
             self.ADMM()
         elif self.method == 2:
-            print("test")
+            # print("test")
             self.Barrier()
 
     @ti.kernel
@@ -807,7 +807,10 @@ class PBF2Solver(SPHBase):
         self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.x)
         self.mat_free_mul_nabla_rho(self.Ap_b, self.tmp)
         add(self.r, self.b, -1.0, self.Ap_b)
+
         self.apply_precondition(self.z, self.Bii, self.r)
+
+
         self.p_b.copy_from(self.z)
         rz_old = dot2(self.r, self.z)
         rr = dot2(self.r, self.r)
