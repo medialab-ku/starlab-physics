@@ -29,15 +29,27 @@ class PBF2Solver(SPHBase):
 
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
 
-        self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Bii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Aii  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Bii  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Hii  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Ap   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+
+        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.p    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.y    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.r    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.grad = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+
+        self.Ap_b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.p_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.y_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.r_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         print("method: PBF2")
 
@@ -338,7 +350,7 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_Aii(self):
 
-        eps = 0.0
+        eps = 1e-3
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
@@ -676,6 +688,12 @@ class PBF2Solver(SPHBase):
             Dx[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * x[p_i]
 
     @ti.kernel
+    def mat_free_mul_invD(self, Dx: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            Dx[p_i] = (self.ps.density[p_i]/self.ps.m[p_i]) * x[p_i]
+
+    @ti.kernel
     def mat_free_mul_nabla_rho(self, nabla_rho_x: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
@@ -734,17 +752,86 @@ class PBF2Solver(SPHBase):
         self.y.fill(0.0)
         self.compute_b(self.b, self.ps.v)
 
-        method = 0
-        if method == 0:
+        # method = 0
+        if self.method == 0:
             self.ProjectedJacobi()
-        elif method == 1:
+        elif self.method == 1:
             self.ADMM()
-        elif method == 2:
+        elif self.method == 2:
+            print("test")
             self.Barrier()
+
+    @ti.kernel
+    def compute_Hii(self, p: ti.template()):
+
+        for p_i in ti.grouped(p):
+            self.Hii[p_i] = self.Bii[p_i] + 1.0 / (p[p_i] ** 2)
+
 
     def Barrier(self):
 
-        print("TODO")
+        # for i in range(10):
+        self.PCG()
+        self.project(self.y)
+        # self.mat_free_mul_D(self.y, self.p)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.y)
+        add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+
+
+        # print("TODO")
+
+    def PCG(self):
+
+        eps = 1e-1
+        pcgIter = 0
+        # self.mat_free_mul_D(self.y, self.p)
+        self.x.copy_from(self.y)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.x)
+        self.mat_free_mul_nabla_rho(self.Ap_b, self.tmp)
+        add(self.r, self.b, -1.0, self.Ap_b)
+        self.apply_precondition(self.z, self.Bii, self.r)
+        self.p_b.copy_from(self.z)
+        rz_old = dot2(self.r, self.z)
+        rr = dot2(self.r, self.r)
+
+        if rr < eps:
+            # self.y.copy_from(self.x)
+            return
+
+        pcgIter += 1
+
+        for i in range(100):
+
+            # compute Ap with matrix-free fashion
+            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.p_b)
+            self.mat_free_mul_nabla_rho(self.Ap_b, self.tmp)
+
+            pAp = dot2(self.p_b, self.Ap_b)
+            # print(pAp)
+            alpha = rz_old / pAp
+            add(self.x, self.x, +alpha, self.p_b)
+            add(self.r, self.r, -alpha, self.Ap_b)
+
+            self.apply_precondition(self.z, self.Bii, self.r)
+            rz_new = dot2(self.r, self.z)
+            rr = dot2(self.r, self.r)
+
+            # print(rs_new)
+
+            if rr < eps:
+                # self.y.copy_from(self.x)
+                break
+
+            pcgIter += 1
+            beta = rz_new / rz_old
+            add(self.p_b, self.z, beta, self.p_b)
+            rz_old = rz_new
+
+        self.y.copy_from(self.x)
+
+        print(pcgIter)
+        # self.mat_free_mul_D(self.p, self.y)
+
 
     def ADMM(self):
 
@@ -760,7 +847,6 @@ class PBF2Solver(SPHBase):
 
             # if self.toggle is False:
             self.mat_free_mul_D(self.y, self.p)
-
             self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.y)
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
             err = self.measure_error(self.v_tmp)
