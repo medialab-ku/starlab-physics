@@ -66,7 +66,7 @@ class PBF2Solver(SPHBase):
         self.stats_pcg_iter = 0
         print("method: PBF2")
 
-
+        self.matrix_type = 0
 
 
     @ti.func
@@ -778,7 +778,6 @@ class PBF2Solver(SPHBase):
     def pressure_solve(self):
 
         self.compute_Aii()
-
         # test = dot2(self.Aii, self.Aii)
         # print("1: ", sqrt(test))
         #
@@ -1060,13 +1059,6 @@ class PBF2Solver(SPHBase):
 
             # z = omega * diag(A)^-1 (r - Ap)
             add(self.r_pcg, self.b, -1.0, self.Ap)
-
-            # if self.toggle:
-            #     self.apply_precondition(self.z, self.Bii, self.r)
-            #     add(self.y, self.y, 1.0, self.z)
-            #     # p = max(p + z, 0.0)
-            #     self.project(self.y)
-            # else:
             self.apply_precondition(self.z_pcg, self.Bii, self.r_pcg)
             add(self.y, self.y, 1.0, self.z_pcg)
             # p = max(p + z, 0.0)
@@ -1084,5 +1076,4 @@ class PBF2Solver(SPHBase):
         self.precompute_values()
         self.advect_velocity()
         self.pressure_solve()
-
         self.advect_position()

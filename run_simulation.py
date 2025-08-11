@@ -108,10 +108,19 @@ if __name__ == "__main__":
 
             if solver.method == 0:
                 gui.text("Projected Jacobi")
+                solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 2)
+                if solver.matrix_type == 0:
+                    gui.text("B")
+                elif solver.matrix_type == 1:
+                    gui.text("sqrt(D) B sqrt(D)")
+                elif solver.matrix_type == 2:
+                    gui.text("D B D")
+
             elif solver.method == 1:
                 gui.text("ADMM")
             elif solver.method == 2:
                 gui.text("Barrier")
+
 
             #     solver.k_rho = w.slider_float("k rho", solver.k_rho, 0.0, 1e6)
             #     solver.da_ratio = w.slider_float("da_ratio", solver.da_ratio, 0.0, 2.0)
