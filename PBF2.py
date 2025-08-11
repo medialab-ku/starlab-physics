@@ -14,7 +14,7 @@ class PBF2Solver(SPHBase):
         # self.stiffness = 50000.0
         # self.stiffness = self.ps.cfg.get_cfg("stiffness")
 
-        self.surface_tension = 0.0
+        self.surface_tension = 0.001
         self.dt[None] = self.ps.cfg.get_cfg("timeStepSize")
 
         self.nablaWij = self.cubic_kernel_derivative
@@ -923,7 +923,7 @@ class PBF2Solver(SPHBase):
         eps = 50
         # self.mat_free_mul_D(self.y, self.p)
 
-        self.y.fill(0.0)
+        # self.y.fill(0.0)
         self.x.copy_from(self.y)
         self.mat_free_B_alphaI_x(self.Ap_b, self.x, alpha_admm)
         add(self.r_pcg, self.b_admm, -1.0, self.Ap_b)
@@ -940,7 +940,7 @@ class PBF2Solver(SPHBase):
 
         # self.stats_pcg_iter += 1
         pcgIter = 0
-        for i in range(1000):
+        for i in range(1):
 
             # compute Ap with matrix-free fashion
             self.mat_free_B_alphaI_x(self.Ap_b, self.p_pcg, alpha_admm)
@@ -980,7 +980,7 @@ class PBF2Solver(SPHBase):
             rz_old = rz_new
 
         self.y.copy_from(self.x)
-        print("PCG iter: ", pcgIter)
+        # print("PCG iter: ", pcgIter)
 
 
     def update_z(self):
@@ -1001,6 +1001,7 @@ class PBF2Solver(SPHBase):
 
         self.stats_pcg_iter = 0
         alpha = 1e-2 * sqrt(dot2(self.Bii, self.Bii))
+        alpha = 0.0
         inner_pcg_iters = 5
 
         # ADMM variables initialization
@@ -1012,17 +1013,17 @@ class PBF2Solver(SPHBase):
         self.w.fill(0.0)  # consensus variable w
         self.u.fill(0.0)  # dual variable u
 
-        for i in range(1):
+        for i in range(100):
             # print("iter: ", i)
             self.update_y(alpha_admm=alpha)
             self.update_z()
-            self.update_u()
+            # self.update_u()
 
             self.tmp.fill(0.0)
             self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
             err = self.measure_error(self.v_tmp)
-            if err < tol:
+            if err < tol  and self.stats_iter > 2:
                break
             self.stats_iter += 1
 
@@ -1046,8 +1047,7 @@ class PBF2Solver(SPHBase):
             # Ap = nabla rho invM nabla rhoT Dp
 
             # if self.toggle is False:
-            self.mat_free_mul_D(self.y, self.p)
-
+            # self.mat_free_mul_D(self.y, self.p)
             self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.y)
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
             err = self.measure_error(self.v_tmp)
@@ -1067,10 +1067,10 @@ class PBF2Solver(SPHBase):
             #     # p = max(p + z, 0.0)
             #     self.project(self.y)
             # else:
-            self.apply_precondition(self.z_pcg, self.Aii, self.r_pcg)
-            add(self.p, self.p, 1.0, self.z_pcg)
+            self.apply_precondition(self.z_pcg, self.Bii, self.r_pcg)
+            add(self.y, self.y, 1.0, self.z_pcg)
             # p = max(p + z, 0.0)
-            self.project(self.p)
+            self.project(self.y)
 
         print("Jacobi iteration: ", self.stats_iter)
         self.ps.v.copy_from(self.v_tmp)
