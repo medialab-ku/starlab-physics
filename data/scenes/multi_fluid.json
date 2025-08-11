@@ -2,7 +2,7 @@
 	"Configuration":
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [1.0, 6.0, 1.0],
+        "domainEnd": [2.0, 6.0, 2.0],
 		"particleRadius": 0.02,
 		"numberOfStepsPerRenderUpdate": 1,
 		"density0": 1000,
@@ -20,11 +20,11 @@
 		{
             "objectId": 0,
 			"start": [0.0, 0.0, 0.0],
-			"end": [0.6, 5.0, 0.6],
+			"end": [0.6, 2.0, 0.6],
 			"translation": [0.1, 0.1, 0.1],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
-			"density": 1000.0,
+			"density": 10000.0,
 			"color": [10, 100, 200]
 		}
 	]

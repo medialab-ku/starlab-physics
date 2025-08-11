@@ -62,6 +62,8 @@ class PBF2Solver(SPHBase):
         self.r_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
+        self.stats_iter = 0
+        self.stats_pcg_iter = 0
         print("method: PBF2")
 
 
@@ -787,6 +789,7 @@ class PBF2Solver(SPHBase):
         self.y.fill(0.0)
         self.compute_b(self.b, self.ps.v)
 
+        self.stats_iter     = 0
         # method = 0
         if self.method == 0:
             self.ProjectedJacobi()
@@ -917,14 +920,11 @@ class PBF2Solver(SPHBase):
         # self.Hii.fill(0.0)
         # add(self.Hii, self.Hii, alpha_admm, self.i)
 
-        eps = 1e-3
-        pcgIter = 0
+        eps = 50
         # self.mat_free_mul_D(self.y, self.p)
 
-        # self.y.fill(0.0)
+        self.y.fill(0.0)
         self.x.copy_from(self.y)
-
-
         self.mat_free_B_alphaI_x(self.Ap_b, self.x, alpha_admm)
         add(self.r_pcg, self.b_admm, -1.0, self.Ap_b)
         # self.r_pcg.copy_from(self.b_admm)
@@ -938,7 +938,8 @@ class PBF2Solver(SPHBase):
             # self.y.copy_from(self.x)
             return
 
-        pcgIter += 1
+        # self.stats_pcg_iter += 1
+        pcgIter = 0
         for i in range(1000):
 
             # compute Ap with matrix-free fashion
@@ -951,8 +952,16 @@ class PBF2Solver(SPHBase):
             # print(pAp)
             alpha = rz_old / pAp
             add(self.x, self.x, +alpha, self.p_pcg)
-            add(self.r_pcg, self.r_pcg, -alpha, self.Ap_b)
 
+            # self.tmp.fill(0.0)
+            # self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
+            # add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+            #
+            # err = self.measure_error(self.v_tmp)
+            # if  err < eps:
+            #     break
+
+            add(self.r_pcg, self.r_pcg, -alpha, self.Ap_b)
             self.apply_precondition(self.z_pcg, self.Hii, self.r_pcg)
             rz_new = dot2(self.r_pcg, self.z_pcg)
             rr = sqrt(dot2(self.r_pcg, self.r_pcg))
@@ -964,13 +973,14 @@ class PBF2Solver(SPHBase):
                 # self.y.copy_from(self.x)
                 break
 
+            self.stats_pcg_iter += 1
             pcgIter += 1
             beta = rz_new / rz_old
             add(self.p_pcg, self.z_pcg, beta, self.p_pcg)
             rz_old = rz_new
 
         self.y.copy_from(self.x)
-        print(pcgIter)
+        print("PCG iter: ", pcgIter)
 
 
     def update_z(self):
@@ -988,7 +998,9 @@ class PBF2Solver(SPHBase):
 
         iter = 0
         tol = pow(10, -self.tol)
-        alpha = 1e-3 * sqrt(dot2(self.Bii, self.Bii))
+
+        self.stats_pcg_iter = 0
+        alpha = 1e-2 * sqrt(dot2(self.Bii, self.Bii))
         inner_pcg_iters = 5
 
         # ADMM variables initialization
@@ -1001,16 +1013,25 @@ class PBF2Solver(SPHBase):
         self.u.fill(0.0)  # dual variable u
 
         for i in range(1):
-            print("iter: ", i)
+            # print("iter: ", i)
             self.update_y(alpha_admm=alpha)
             self.update_z()
             self.update_u()
 
+            self.tmp.fill(0.0)
+            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
+            add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+            err = self.measure_error(self.v_tmp)
+            if err < tol:
+               break
+            self.stats_iter += 1
 
+        # print("PCG iteration: ", self.stats_pcg_iter)
+        print("ADMM iteration: ", self.stats_iter)
         # Apply final solution to velocity: v <- v - dt * (invM nabla_rho^T w)
-        self.tmp.fill(0.0)
-        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
-        add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+        # self.tmp.fill(0.0)
+        # self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
+        # add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
 
         # self.clamp_velocity(self.v_tmp, vmax=3.0)
         self.ps.v.copy_from(self.v_tmp)
@@ -1018,7 +1039,7 @@ class PBF2Solver(SPHBase):
 
     def ProjectedJacobi(self):
 
-        iter = 0
+        # iter = 0
         tol = pow(10, -self.tol)
         for i in range(self.max_iteration):
 
@@ -1031,10 +1052,10 @@ class PBF2Solver(SPHBase):
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
             err = self.measure_error(self.v_tmp)
 
-            if err < tol and iter > 2:
+            if err < tol and self.stats_iter > 2:
                 break
 
-            iter += 1
+            self.stats_iter += 1
             self.mat_free_mul_nabla_rho(self.Ap, self.tmp)
 
             # z = omega * diag(A)^-1 (r - Ap)
@@ -1051,6 +1072,7 @@ class PBF2Solver(SPHBase):
             # p = max(p + z, 0.0)
             self.project(self.p)
 
+        print("Jacobi iteration: ", self.stats_iter)
         self.ps.v.copy_from(self.v_tmp)
 
     def substep(self):
