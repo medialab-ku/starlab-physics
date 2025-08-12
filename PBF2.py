@@ -3,6 +3,43 @@ import math
 from sph_base import SPHBase
 from math_utils import *
 
+"""
+PBF2 Solver - Position Based Fluids with Multiple Solver Options
+
+This implementation provides several approaches to solve the implicit incompressible SPH system:
+
+Method 0 (ProjectedJacobi): 
+    Solves (J M⁻¹ Jᵀ) y = b where y = Dp
+    - J = ∇ρ (density gradient operator)
+    - M⁻¹ = inverse mass matrix
+    - D = diagonal density-weighting matrix
+    - Advantages: Simple, preserves symmetry naturally
+
+Method 1 (ADMM): 
+    Alternating Direction Method of Multipliers
+    - Uses augmented Lagrangian approach
+    - Good for complex constraints
+
+Method 2 (Barrier): 
+    Barrier function method
+    - Uses PCG with barrier functions
+
+Method 3 (NormalEquations): 
+    Solves (Dᵀ J M⁻¹ Jᵀ D) p = Dᵀ b
+    - Creates symmetric system by multiplying both sides by Dᵀ
+    - Advantages: Guaranteed symmetric, can use symmetric solvers
+    - Disadvantages: Squared condition number, potentially less stable
+    - Implementation: Uses matrix-free operators for efficiency
+
+The Normal Equations approach (Method 3) is particularly useful when you need:
+1. A guaranteed symmetric system
+2. To use symmetric solvers (CG, Jacobi, etc.)
+3. To avoid the complexity of other symmetrization methods
+
+Mathematical formulation:
+Original system: (J M⁻¹ Jᵀ D) p = b
+Normal equations: (Dᵀ J M⁻¹ Jᵀ D) p = Dᵀ b
+"""
 
 class PBF2Solver(SPHBase):
     def __init__(self, particle_system):
@@ -62,9 +99,15 @@ class PBF2Solver(SPHBase):
         self.r_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
+        # Additional fields for Normal Equations approach
+        self.tmp2 = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b_normal = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.tmp_vec = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         print("method: PBF2")
+        print("Available methods: 0=ProjectedJacobi, 1=ADMM, 2=Barrier, 3=NormalEquations")
 
         self.matrix_type = 0
 
@@ -772,7 +815,36 @@ class PBF2Solver(SPHBase):
 
         return avg_error
 
+    @ti.kernel
+    def measure_error_normal_equations(self) -> float:
+        """
+        Measure error for Normal Equations approach.
+        Computes the residual norm of the pressure equation.
+        """
+        avg_error = 0.0
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            
+            # Compute residual norm: ||D^T b - (D^T J M^(-1) J^T D) p||
+            # For simplicity, we'll use the residual norm directly
+            avg_error += self.r_pcg[p_i] * self.r_pcg[p_i]
+        
+        avg_error = ti.sqrt(avg_error / self.ps.fluid_particle_num)
+        return avg_error
 
+    @ti.kernel
+    def apply_precondition_normal_equations(self, z: ti.template(), r: ti.template()):
+        """
+        Preconditioner for Normal Equations approach.
+        Uses diagonal approximation of (D^T J M^(-1) J^T D)
+        """
+        for p_i in ti.grouped(r):
+            # Diagonal approximation: diag(D^T J M^(-1) J^T D) ≈ D^2 * Bii
+            # where Bii is the diagonal of J M^(-1) J^T
+            diag_approx = (self.ps.m[p_i] / self.ps.density[p_i]) ** 2 * self.Bii[p_i]
+            denom = ti.max(diag_approx, 1e-12)
+            z[p_i] = r[p_i] / denom
 
 
     def pressure_solve(self):
@@ -797,6 +869,8 @@ class PBF2Solver(SPHBase):
         elif self.method == 2:
             # print("test")
             self.Barrier()
+        elif self.method == 3:
+            self.NormalEquations()
 
     @ti.kernel
     def compute_Hii(self, p: ti.template()):
@@ -816,6 +890,15 @@ class PBF2Solver(SPHBase):
         # out_scalar = A_tilde(x_scalar) + alpha * x_scalar
         self.mat_free_Bx(out_scalar, x_scalar)
         add(out_scalar, out_scalar, alpha, x_scalar)
+
+    # === Matrix-free operator for Normal Equations approach ===
+    def mat_free_normal_equations(self, out_scalar, x_scalar):
+        # out_scalar = D^T @ (nabla_rho @ (invM @ (nabla_rho^T @ (D @ x_scalar))))
+        # This implements: (D^T J M^(-1) J^T D) x
+        self.mat_free_mul_D(self.tmp, x_scalar)                    # tmp = D @ x
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp_vec, self.tmp) # tmp_vec = M^(-1) J^T @ tmp
+        self.mat_free_mul_nabla_rho(self.tmp2, self.tmp_vec)        # tmp2 = J @ tmp_vec
+        self.mat_free_mul_D(out_scalar, self.tmp2)                  # out_scalar = D @ tmp2
 
 
     # @ti.kernel
@@ -1065,6 +1148,47 @@ class PBF2Solver(SPHBase):
             self.project(self.y)
 
         print("Jacobi iteration: ", self.stats_iter)
+        self.ps.v.copy_from(self.v_tmp)
+
+    def NormalEquations(self):
+        """
+        Normal Equations approach: solve (D^T J M^(-1) J^T D) p = D^T b
+        This creates a symmetric system by multiplying both sides by D^T
+        """
+        # Compute D^T b for the right-hand side
+        self.mat_free_mul_D(self.b_normal, self.b)
+        
+        # Initialize solution vector
+        self.p.fill(0.0)
+        
+        tol = pow(10, -self.tol)
+        for i in range(self.max_iteration):
+            # Compute Ap = (D^T J M^(-1) J^T D) p
+            self.mat_free_normal_equations(self.Ap, self.p)
+            
+            # Compute residual: r = D^T b - Ap
+            add(self.r_pcg, self.b_normal, -1.0, self.Ap)
+            
+            # Check convergence
+            err = self.measure_error_normal_equations()
+            if err < tol and self.stats_iter > 2:
+                break
+                
+            self.stats_iter += 1
+            
+            # Jacobi update: p = p + D^(-1) r (using diagonal approximation)
+            self.apply_precondition_normal_equations(self.z_pcg, self.r_pcg)
+            add(self.p, self.p, 1.0, self.z_pcg)
+            
+            # Apply projection to ensure non-negative pressure
+            self.project(self.p)
+        
+        print("Normal Equations iteration: ", self.stats_iter)
+        
+        # Apply the solution to velocity: v = v - dt * (M^(-1) J^T D p)
+        self.mat_free_mul_D(self.tmp, self.p)  # tmp = D p
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp_vec, self.tmp)  # tmp_vec = M^(-1) J^T D p
+        add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp_vec)
         self.ps.v.copy_from(self.v_tmp)
 
     def substep(self):
