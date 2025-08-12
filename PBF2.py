@@ -1,5 +1,7 @@
 import taichi as ti
 import math
+import os
+import json
 from sph_base import SPHBase
 from math_utils import *
 
@@ -110,6 +112,11 @@ class PBF2Solver(SPHBase):
         print("Available methods: 0=ProjectedJacobi, 1=ADMM, 2=Barrier, 3=NormalEquations")
 
         self.matrix_type = 0
+        
+        # Iteration logging system
+        self.enable_logging = False
+        self.iteration_log = []  # Store [frame, matrix_type, iterations]
+        self.current_frame = 0
 
 
     @ti.func
@@ -745,13 +752,13 @@ class PBF2Solver(SPHBase):
     def mat_free_mul_D(self, Dx: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-            Dx[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * x[p_i]
+            Dx[p_i] = (self.ps.m[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])) * x[p_i]
 
     @ti.kernel
     def mat_free_mul_D_inv(self, D_inv_x: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-            D_inv_x[p_i] = (self.ps.density[p_i] / self.ps.m[p_i]) * x[p_i]
+            D_inv_x[p_i] = (self.ps.density[p_i] * self.ps.density[p_i] / self.ps.m[p_i]) * x[p_i]
 
     @ti.kernel
     def mat_free_mul_nabla_rho(self, nabla_rho_x: ti.template(), x: ti.template()):
@@ -780,13 +787,13 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def mat_free_mul_D_sqrt(self, out: ti.template(), x: ti.template()):
         for p_i in ti.grouped(x):
-            out[p_i] = ti.sqrt(self.ps.m[p_i] / self.ps.density[p_i]) * x[p_i]
+            out[p_i] = ti.sqrt(self.ps.m[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])) * x[p_i]
 
 
     @ti.kernel
     def mat_free_mul_D_sqrt_inv(self, out: ti.template(), x: ti.template()):
         for p_i in ti.grouped(x):
-            out[p_i] = ti.sqrt(self.ps.density[p_i] / self.ps.m[p_i]) * x[p_i]
+            out[p_i] = ti.sqrt(self.ps.density[p_i] * self.ps.density[p_i] / self.ps.m[p_i]) * x[p_i]
 
 
     @ti.kernel
@@ -841,8 +848,9 @@ class PBF2Solver(SPHBase):
         """
         for p_i in ti.grouped(r):
             # Diagonal approximation: diag(D^T J M^(-1) J^T D) ≈ D^2 * Bii
-            # where Bii is the diagonal of J M^(-1) J^T
-            diag_approx = (self.ps.m[p_i] / self.ps.density[p_i]) ** 2 * self.Bii[p_i]
+            # where Bii is the diagonal of J M^(-1) J^T and D_ii = m_i/ρ_i²
+            d_val = self.ps.m[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
+            diag_approx = d_val * d_val * self.Bii[p_i]
             denom = ti.max(diag_approx, 1e-12)
             z[p_i] = r[p_i] / denom
 
@@ -1111,6 +1119,11 @@ class PBF2Solver(SPHBase):
 
         # print("PCG iteration: ", self.stats_pcg_iter)
         print("ADMM iteration: ", self.stats_iter)
+        
+        # Log iteration data if logging is enabled
+        if self.enable_logging:
+            self.iteration_log.append([self.current_frame, f"ADMM", self.stats_iter])
+        
         # Apply final solution to velocity: v <- v - dt * (invM nabla_rho^T w)
         # self.tmp.fill(0.0)
         # self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
@@ -1120,17 +1133,114 @@ class PBF2Solver(SPHBase):
         self.ps.v.copy_from(self.v_tmp)
 
 
+    def _apply_matrix_type0(self, out, solution):
+        """Apply B matrix: J M^-1 J^T"""
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, solution)
+        self.mat_free_mul_nabla_rho(out, self.tmp)
+
+    def _apply_matrix_type1(self, out, solution):
+        """Apply √D B √D matrix: √D J M^-1 J^T √D"""
+        # √D * solution
+        self.mat_free_mul_D_sqrt(self.tmp2, solution)
+        # J M^-1 J^T (√D * solution)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.tmp2)
+        self.mat_free_mul_nabla_rho(self.tmp2, self.tmp)
+        # √D * result
+        self.mat_free_mul_D_sqrt(out, self.tmp2)
+
+    def _apply_matrix_type2(self, out, solution):
+        """Apply D B D matrix: D J M^-1 J^T D"""
+        # D * solution
+        self.mat_free_mul_D(self.tmp2, solution)
+        # J M^-1 J^T (D * solution)
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.tmp2)
+        self.mat_free_mul_nabla_rho(self.tmp2, self.tmp)
+        # D * result
+        self.mat_free_mul_D(out, self.tmp2)
+
+    def _apply_matrix_type3(self, out, solution):
+        """Apply non-symmetric A matrix: J M^-1 J^T D"""
+        # This is the baseline non-symmetric matrix
+        # J M^-1 J^T D * solution
+        self.mat_free_mul_D(self.tmp2, solution)  # tmp2 = D * solution
+        self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.tmp2)  # tmp = M^-1 J^T D * solution
+        self.mat_free_mul_nabla_rho(out, self.tmp)  # out = J M^-1 J^T D * solution
+
+    @ti.kernel
+    def _apply_preconditioner_type1(self, z: ti.template(), r: ti.template()):
+        """Preconditioner for √D B √D: use √D * Bii * √D scaling"""
+        for p_i in ti.grouped(r):
+            # Diagonal approximation: √D * diag(B) * √D = (m/density²) * Bii
+            diag_approx = (self.ps.m[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])) * self.Bii[p_i]
+            denom = ti.max(diag_approx, 1e-12)
+            z[p_i] = r[p_i] / denom
+
+    @ti.kernel 
+    def _apply_preconditioner_type2(self, z: ti.template(), r: ti.template()):
+        """Preconditioner for D B D: use D * Bii * D scaling"""
+        for p_i in ti.grouped(r):
+            # Diagonal approximation: D * diag(B) * D = (m/density²)^2 * Bii
+            d_val = self.ps.m[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
+            diag_approx = d_val * d_val * self.Bii[p_i]
+            denom = ti.max(diag_approx, 1e-12)
+            z[p_i] = r[p_i] / denom
+
+    @ti.kernel
+    def _apply_preconditioner_type3(self, z: ti.template(), r: ti.template()):
+        """Preconditioner for non-symmetric A: use diagonal of J M^-1 J^T D"""
+        for p_i in ti.grouped(r):
+            # Diagonal approximation: diag(J M^-1 J^T D) = D * diag(J M^-1 J^T) = (m/density²) * Bii
+            diag_approx = (self.ps.m[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])) * self.Bii[p_i]
+            denom = ti.max(diag_approx, 1e-12)
+            z[p_i] = r[p_i] / denom
+
     def ProjectedJacobi(self):
 
-        # iter = 0
         tol = pow(10, -self.tol)
+        
+        # Setup RHS and solution variables based on matrix type
+        if self.matrix_type == 0:
+            # Type 0: J M^-1 J^T y = b
+            rhs = self.b
+            solution = self.y
+        elif self.matrix_type == 1:
+            # Type 1: √D J M^-1 J^T √D x₁ = √D b
+            self.mat_free_mul_D_sqrt(self.p, self.b)  # p = √D * b (reuse p field)
+            rhs = self.p
+            solution = self.x  # Solve for x₁
+        elif self.matrix_type == 2:
+            # Type 2: D J M^-1 J^T D x₂ = D b
+            self.mat_free_mul_D(self.p, self.b)  # p = D * b (reuse p field)
+            rhs = self.p
+            solution = self.x  # Solve for x₂
+        elif self.matrix_type == 3:
+            # Type 3: J M^-1 J^T p = b (non-symmetric baseline)
+            rhs = self.b
+            solution = self.p  # Solve directly for p
+        
+        # Initialize solution
+        solution.fill(0.0)
+        
         for i in range(self.max_iteration):
 
-            # Ap = nabla rho invM nabla rhoT Dp
-
-            # if self.toggle is False:
-            # self.mat_free_mul_D(self.y, self.p)
-            self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.y)
+            # Convergence check: compute M^-1 J^T (effective Dp) directly
+            if self.matrix_type == 0:
+                # Direct: M^-1 J^T y (y already = Dp)
+                self.mat_free_mul_invM_nabla_rho_T(self.tmp, solution)
+            elif self.matrix_type == 1:
+                # M^-1 J^T √D x₁ (avoid computing p = √D^-1 √D x₁)
+                self.mat_free_mul_D_sqrt(self.z_pcg, solution)  # z_pcg = √D x₁
+                self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_pcg)
+            elif self.matrix_type == 2:
+                # M^-1 J^T D x₂ (avoid computing p = D^-1 D x₂)
+                self.mat_free_mul_D(self.z_pcg, solution)  # z_pcg = D x₂
+                self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_pcg)
+            elif self.matrix_type == 3:
+                # M^-1 J^T D p (need to multiply by D first)
+                self.mat_free_mul_D(self.z_pcg, solution)  # z_pcg = D p
+                self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_pcg)
+            
+            # Common error computation
             add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
             err = self.measure_error(self.v_tmp)
 
@@ -1138,16 +1248,52 @@ class PBF2Solver(SPHBase):
                 break
 
             self.stats_iter += 1
-            self.mat_free_mul_nabla_rho(self.Ap, self.tmp)
+            
+            # Matrix-vector product based on type
+            if self.matrix_type == 0:
+                self._apply_matrix_type0(self.Ap, solution)
+            elif self.matrix_type == 1:
+                self._apply_matrix_type1(self.Ap, solution)
+            elif self.matrix_type == 2:
+                self._apply_matrix_type2(self.Ap, solution)
+            elif self.matrix_type == 3:
+                self._apply_matrix_type3(self.Ap, solution)
 
-            # z = omega * diag(A)^-1 (r - Ap)
-            add(self.r_pcg, self.b, -1.0, self.Ap)
-            self.apply_precondition(self.z_pcg, self.Bii, self.r_pcg)
-            add(self.y, self.y, 1.0, self.z_pcg)
-            # p = max(p + z, 0.0)
-            self.project(self.y)
+            # Residual computation
+            add(self.r_pcg, rhs, -1.0, self.Ap)
+            
+            # Apply appropriate preconditioner
+            if self.matrix_type == 0:
+                self.apply_precondition(self.z_pcg, self.Bii, self.r_pcg)
+            elif self.matrix_type == 1:
+                self._apply_preconditioner_type1(self.z_pcg, self.r_pcg)
+            elif self.matrix_type == 2:
+                self._apply_preconditioner_type2(self.z_pcg, self.r_pcg)
+            elif self.matrix_type == 3:
+                self._apply_preconditioner_type3(self.z_pcg, self.r_pcg)
+            
+            # Update solution
+            add(solution, solution, 1.0, self.z_pcg)
+            self.project(solution)
 
-        print("Jacobi iteration: ", self.stats_iter)
+        # Final solution recovery
+        if self.matrix_type == 1:
+            # y = √D * x₁
+            self.mat_free_mul_D_sqrt(self.y, solution)
+        elif self.matrix_type == 2:
+            # y = D * x₂
+            self.mat_free_mul_D(self.y, solution)
+        elif self.matrix_type == 3:
+            # y = D * p (convert pressure to Dp for velocity update)
+            self.mat_free_mul_D(self.y, solution)
+        # For type 0, solution is already in self.y
+
+        print(f"Jacobi iteration (type {self.matrix_type}): ", self.stats_iter)
+        
+        # Log iteration data if logging is enabled
+        if self.enable_logging:
+            self.iteration_log.append([self.current_frame, self.matrix_type, self.stats_iter])
+        
         self.ps.v.copy_from(self.v_tmp)
 
     def NormalEquations(self):
@@ -1185,13 +1331,88 @@ class PBF2Solver(SPHBase):
         
         print("Normal Equations iteration: ", self.stats_iter)
         
+        # Log iteration data if logging is enabled
+        if self.enable_logging:
+            self.iteration_log.append([self.current_frame, "NormalEq", self.stats_iter])
+        
         # Apply the solution to velocity: v = v - dt * (M^(-1) J^T D p)
         self.mat_free_mul_D(self.tmp, self.p)  # tmp = D p
         self.mat_free_mul_invM_nabla_rho_T(self.tmp_vec, self.tmp)  # tmp_vec = M^(-1) J^T D p
         add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp_vec)
         self.ps.v.copy_from(self.v_tmp)
 
+    def save_iteration_logs(self):
+        """Save iteration logs to files in log folder"""
+        if not self.iteration_log:
+            print("No iteration data to save")
+            return
+            
+        # Create log directory if it doesn't exist
+        log_dir = "log"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        # Group data by matrix type
+        data_by_type = {}
+        for frame, matrix_type, iterations in self.iteration_log:
+            if matrix_type not in data_by_type:
+                data_by_type[matrix_type] = []
+            data_by_type[matrix_type].append([frame, iterations])
+        
+        # Save each matrix type to separate file
+        for matrix_type, data in data_by_type.items():
+            filename = f"iterations_type_{matrix_type}.json"
+            filepath = os.path.join(log_dir, filename)
+            
+            log_data = {
+                "matrix_type": matrix_type,
+                "data": data,  # [[frame, iterations], ...]
+                "total_frames": len(data),
+                "avg_iterations": sum(row[1] for row in data) / len(data) if data else 0
+            }
+            
+            with open(filepath, 'w') as f:
+                json.dump(log_data, f, indent=2)
+            
+            print(f"Saved {len(data)} iteration records for type {matrix_type} to {filepath}")
+        
+        # Also save combined data
+        combined_filepath = os.path.join(log_dir, "iterations_combined.json")
+        combined_data = {
+            "all_data": self.iteration_log,  # [[frame, matrix_type, iterations], ...]
+            "summary": {
+                matrix_type: {
+                    "count": len(data),
+                    "avg_iterations": sum(row[1] for row in data) / len(data) if data else 0
+                }
+                for matrix_type, data in data_by_type.items()
+            }
+        }
+        
+        with open(combined_filepath, 'w') as f:
+            json.dump(combined_data, f, indent=2)
+        
+        print(f"Saved combined iteration data to {combined_filepath}")
+
+    def reset_logging(self):
+        """Reset logging system and save current data"""
+        if self.iteration_log and self.enable_logging:
+            self.save_iteration_logs()
+        
+        # Reset the log
+        self.iteration_log = []
+        self.current_frame = 0
+        print("Iteration logging reset")
+
+    def increment_frame(self):
+        """Increment frame counter for logging"""
+        self.current_frame += 1
+
     def substep(self):
+
+        # Increment frame counter for logging
+        if self.enable_logging:
+            self.increment_frame()
 
         self.ps.search_neighbours(self.ps.x)
         # self.ps.x_old.copy_from(self.ps.x)

@@ -108,18 +108,27 @@ if __name__ == "__main__":
 
             if solver.method == 0:
                 gui.text("Projected Jacobi")
-                solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 2)
+                solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 3)
                 if solver.matrix_type == 0:
                     gui.text("B")
                 elif solver.matrix_type == 1:
                     gui.text("sqrt(D) B sqrt(D)")
                 elif solver.matrix_type == 2:
                     gui.text("D B D")
+                elif solver.matrix_type == 3:
+                    gui.text("A (non-symmetric)")
 
             elif solver.method == 1:
                 gui.text("ADMM")
             elif solver.method == 2:
                 gui.text("Barrier")
+                
+            # Logging controls
+            gui.text("")  # Spacer
+            gui.text("Iteration Logging:")
+            solver.enable_logging = w.checkbox("Enable logging", solver.enable_logging)
+            if w.button("Reset & Save logs"):
+                solver.reset_logging()
 
 
             #     solver.k_rho = w.slider_float("k rho", solver.k_rho, 0.0, 1e6)
@@ -162,6 +171,8 @@ if __name__ == "__main__":
                 ps.x.copy_from(ps.x_0)
                 ps.v.fill(0.0)
                 runSim = False
+                # Reset logging and save current data
+                solver.reset_logging()
 
         if export_ply and frame_cnt > end_frame:
             runSim = False
