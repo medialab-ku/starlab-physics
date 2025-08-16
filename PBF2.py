@@ -117,6 +117,21 @@ class PBF2Solver(SPHBase):
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
         self.current_frame = 0
+        
+        # Spectral radius analysis
+        self.spectral_radius_analyzer = None
+        self.enable_spectral_analysis = False
+        
+    def initialize_spectral_radius_analysis(self):
+        """Initialize spectral radius analyzer"""
+        try:
+            from spectral_radius_analysis import SpectralRadiusAnalyzer
+            self.spectral_radius_analyzer = SpectralRadiusAnalyzer(self)
+            self.enable_spectral_analysis = True
+            print("Spectral radius analysis initialized")
+        except ImportError as e:
+            print(f"Warning: Could not initialize spectral radius analysis: {e}")
+            self.enable_spectral_analysis = False
 
 
     @ti.func
@@ -162,6 +177,8 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_density(self):
         # for p_i in range(self.ps.particle_num[None]):
+
+        print(self.ps.m[0] * self.cubic_kernel(0.0))
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
@@ -1294,6 +1311,10 @@ class PBF2Solver(SPHBase):
         if self.enable_logging:
             self.iteration_log.append([self.current_frame, self.matrix_type, self.stats_iter])
         
+        # Log spectral radius if spectral analysis is enabled
+        if self.enable_spectral_analysis and self.spectral_radius_analyzer:
+            self.spectral_radius_analyzer.log_spectral_radius()
+        
         self.ps.v.copy_from(self.v_tmp)
 
     def NormalEquations(self):
@@ -1403,6 +1424,31 @@ class PBF2Solver(SPHBase):
         self.iteration_log = []
         self.current_frame = 0
         print("Iteration logging reset")
+        
+        # Reset spectral radius logging too
+        if self.enable_spectral_analysis and self.spectral_radius_analyzer:
+            self.spectral_radius_analyzer.reset_logging()
+    
+    def save_spectral_radius_data(self, filename="spectral_radius_log.json"):
+        """Save spectral radius analysis data"""
+        if self.enable_spectral_analysis and self.spectral_radius_analyzer:
+            self.spectral_radius_analyzer.save_spectral_radius_data(filename)
+        else:
+            print("Spectral radius analysis not enabled or available")
+    
+    def plot_spectral_radius(self, save_path="plots/spectral_radius.png"):
+        """Plot spectral radius analysis"""
+        if self.enable_spectral_analysis and self.spectral_radius_analyzer:
+            self.spectral_radius_analyzer.plot_spectral_radius(save_path)
+        else:
+            print("Spectral radius analysis not enabled or available")
+    
+    def print_spectral_radius_summary(self):
+        """Print spectral radius analysis summary"""
+        if self.enable_spectral_analysis and self.spectral_radius_analyzer:
+            self.spectral_radius_analyzer.print_summary()
+        else:
+            print("Spectral radius analysis not enabled or available")
 
     def increment_frame(self):
         """Increment frame counter for logging"""
