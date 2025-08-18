@@ -600,11 +600,11 @@ def run_iisph(dt):
     
         compute_J_tr_x(tmp, p)
         jacobi_precondition(tmp, tmp, m)
-
-        add(velocities_tmp, velocities, -dt, tmp)
+        
+        add(velocities, velocities_adv, -dt, tmp)
 
         dx.fill(0.0)
-        add(dx, dx, dt, velocities_tmp)
+        add(dx, dx, dt, velocities)
 
         err = measure_error(dx)
         if err < tol:
@@ -623,7 +623,7 @@ def run_iisph(dt):
         num_iter += 1
 
     # print("Jacobi iter: ", num_iter)
-    velocities.copy_from(velocities_tmp)
+    # velocities.copy_from(velocities_tmp)
     # method_two(dt)
 
     advect_positions(dt)
