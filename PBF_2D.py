@@ -9,7 +9,7 @@ import taichi as ti
 
 ti.init(arch=ti.gpu)
 
-screen_res = (500, 500)
+screen_res = (500, 1000)
 screen_to_world_ratio = 400.0
 
 solver_method = 0
@@ -18,7 +18,7 @@ bg_color = 0x112F41
 particle_color = 0x068587
 boundary_color = 0xEBACA2
 num_particles_x = 60
-num_particles = num_particles_x * 100
+num_particles = num_particles_x * 200
 max_num_particles_per_cell = 400
 max_num_neighbors = 400
 time_delta = 0.004
@@ -156,6 +156,7 @@ cubic_factor = 15.0 / (7.0 * math.pi)    # 2D Cubic: 15/(7π)
 cubic_grad_factor = -45.0 / (7.0 * math.pi)  # 2D Cubic gradient: -45/(7π)
 old_positions = ti.Vector.field(dim, float)
 Aii = ti.field(float)
+Hii = ti.Matrix.field(dim, dim, float)
 Dii = ti.field(float)
 Ax = ti.field(float)
 tmp = ti.Vector.field(dim, float)
@@ -190,7 +191,7 @@ omega_ls = ti.field(float, shape=())
 board_states = ti.Vector.field(2, float)
 ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_adv, positions_normalized, dx, velocities, velocities_adv, velocities_tmp)
 ti.root.dense(ti.i, num_boundary_particles).place(boundary_positions, boundary_positions_normalized)
-ti.root.dense(ti.i, num_particles).place(Aii, Dii, src, Ax, rho, rho0, res, tmp, num)
+ti.root.dense(ti.i, num_particles).place(Aii, Dii, Hii, src, Ax, rho, rho0, res, tmp, num)
 ti.root.dense(ti.i, num_particles).place(dp)
 grid_snode = ti.root.dense(ti.ij, grid_size)
 grid_snode.place(grid_num_particles)
@@ -623,9 +624,6 @@ def run_iisph(dt):
         num_iter += 1
 
     # print("Jacobi iter: ", num_iter)
-    # velocities.copy_from(velocities_tmp)
-    # method_two(dt)
-
     advect_positions(dt)
     project_boundary(positions)
     epilogue(dt)
@@ -637,6 +635,7 @@ def compute_density_and_Aii(x: ti.template()):
         pos_i = x[p_i]
         grad_i = ti.Vector([0.0, 0.0])
         sum_gradient_sqr = 0.0
+        test = 0.0 
         density = m[p_i] * cubic_value(0.0, h_)
         for j in range(particle_num_neighbors[p_i]):
             p_j = particle_neighbors[p_i, j]
@@ -645,10 +644,13 @@ def compute_density_and_Aii(x: ti.template()):
             particle_wij[p_i, j] = grad_j
             grad_i += m[p_j] * grad_j
             sum_gradient_sqr += (m[p_j] * grad_j).dot(m[p_j] * grad_j) / m[p_j]
+            test += (m[p_j] * grad_j).dot(m[p_j] * grad_j)
             density += m[p_j] * cubic_value(pos_ji.norm(), h_)
         sum_gradient_sqr += grad_i.dot(grad_i) / m[p_i]
+        test += grad_i.dot(grad_i) 
         rho[p_i] = density
         Aii[p_i] = sum_gradient_sqr  + 1e-3
+        Dii[p_i] = test
 
 
 @ti.kernel
@@ -661,6 +663,38 @@ def measure_error_pbf(src: ti.template()) -> float:
 
     avg_error /= num_particles
     return avg_error
+
+@ti.kernel
+def compute_test(p: ti.template(), Jtp: ti.template(), dtSq: float):
+
+    """Compute test values for debugging"""
+    k = 1e-4
+
+    for p_i in positions:
+        src[p_i] = ti.max(rho0[p_i] -rho[p_i], 0.0)
+
+    # src.fill(0.0)
+    for p_i in positions:
+        
+        tmp[p_i] = ti.math.vec2(0.0)
+        ggT = ti.math.mat2(0.0)
+        g_sum = ti.math.vec2(0.0)
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            grad_j = particle_wij[p_i, j]
+            tmp[p_i] += (m[p_j] * src[p_i] + m[p_i] * src[p_j]) * grad_j
+            g_sum += m[p_j] * grad_j
+            ggT += m[p_i] * m[p_i] * (grad_j.outer_product(grad_j))
+    
+        Hii[p_i] = ggT + g_sum.outer_product(g_sum)
+
+
+    id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]]) 
+    for p_i in positions:
+
+        grad = m[p_i] * positions_adv[p_i] + k * dtSq * tmp[p_i]
+        Hii[p_i] = m[p_i] * id2 + k * dtSq * Hii[p_i]
+        positions[p_i] = Hii[p_i].inverse() @ grad
 
 def run_pbf(dt):
 
@@ -679,7 +713,7 @@ def run_pbf(dt):
 
         compute_density_and_Aii(positions)
 
-        add(src, rho, -1.0, rho0)
+        # add(src, rho, -1.0, rho0)
         # velocities_tmp.fill(0.0)
         # compute_src(src, velocities_tmp, 1.0)
         
@@ -687,22 +721,26 @@ def run_pbf(dt):
         # compute_J_x(Ax, velocities_tmp)
         # add(src, src, -1.0, Ax)
 
-        project(src)
-        err = measure_error2(src)
-        if err < tol:
-            print(f"Converged (measure_error) after {num_iter} iterations with error {err:.6f}")
-            break
+        # project(src)
+        # err = measure_error2(src)
+        # if err < tol:
+        #     print(f"Converged (measure_error) after {num_iter} iterations with error {err:.6f}")
+        #     break
 
 
-        jacobi_precondition(p, src, Aii)
+        # jacobi_precondition(p, src, Aii)
         # project(p)
 
-        compute_J_tr_x(tmp, p)
-        jacobi_precondition(tmp, tmp, m)
+        # compute_J_tr_x(tmp, p)
+        # jacobi_precondition(tmp, tmp, m)
 
         # dx.fill(0.0) 
         # add(dx, dx, -1.0, tmp)
-        add(positions, positions, -0.3 * dtSq, tmp)
+
+
+        # add(positions, positions, -0.5, tmp)
+        compute_test(p, tmp, dtSq)
+
         project_boundary(positions)
 
         num_iter += 1
