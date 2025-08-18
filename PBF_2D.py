@@ -5,11 +5,14 @@ import numpy as np
 import taichi as ti
 
 
+# print("test")
+
 ti.init(arch=ti.gpu)
 
-screen_res = (600, 800)
-screen_to_world_ratio = 10.0
+screen_res = (500, 500)
+screen_to_world_ratio = 400.0
 
+solver_method = 0
 dim = 2
 bg_color = 0x112F41
 particle_color = 0x068587
@@ -18,17 +21,18 @@ num_particles_x = 60
 num_particles = num_particles_x * 100
 max_num_particles_per_cell = 400
 max_num_neighbors = 400
-time_delta = 0.005
+time_delta = 0.004
 epsilon = 1e-5
-eps = 1e-4
+eps = 1e-2
 particle_radius = 3.0
-particle_radius_in_world = particle_radius / screen_to_world_ratio
+
 
 # PBF params
-h_ = 0.7
-tol = 1e-3
+h_ = 0.02
+particle_radius_in_world = h_ / 10
+tol = 1e-2
 mass = 1.0
-rho0 = 10000.0
+# rho0 = 1000.0  # Now replaced with per-particle rho0 field
 lambda_epsilon = 1e-1
 max_jacobi_iter = 1000
 corr_deltaQ_coeff = 0.3
@@ -107,7 +111,7 @@ def compute_boundary_positions():
     domain_end = [boundary[0], boundary[1]]  # Top-right corner of simulation domain
     
     # Add small offset to ensure boundary particles are within domain
-    particle_radius_offset = 1.0
+    particle_radius_offset = 0.1
     outer_start = [domain_start[0] + particle_radius_offset, 
                    domain_start[1] + particle_radius_offset]
     outer_end = [domain_end[0] - particle_radius_offset, 
@@ -156,13 +160,17 @@ Dii = ti.field(float)
 Ax = ti.field(float)
 tmp = ti.Vector.field(dim, float)
 rho = ti.field(float)
+rho0 = ti.field(float)  # Per-particle rest density
 res = ti.field(float)
 src = ti.field(float)
 num = ti.field(float)
 positions = ti.Vector.field(dim, float)
+positions_adv = ti.Vector.field(dim, float)
 positions_normalized = ti.Vector.field(dim, float)
 velocities = ti.Vector.field(dim, float)
+velocities_adv = ti.Vector.field(dim, float)
 velocities_tmp = ti.Vector.field(dim, float)
+dx = ti.Vector.field(dim, float)
 boundary_positions = ti.Vector.field(dim, float)
 boundary_positions_normalized = ti.Vector.field(dim, float)
 grid_num_particles = ti.field(int)
@@ -180,9 +188,9 @@ dp = ti.field(float)
 omega_ls = ti.field(float, shape=())
 # 0: x-pos, 1: timestep in sin()
 board_states = ti.Vector.field(2, float)
-ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_normalized, velocities, velocities_tmp)
+ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_adv, positions_normalized, dx, velocities, velocities_adv, velocities_tmp)
 ti.root.dense(ti.i, num_boundary_particles).place(boundary_positions, boundary_positions_normalized)
-ti.root.dense(ti.i, num_particles).place(Aii, Dii, src, Ax, rho, res, tmp, num)
+ti.root.dense(ti.i, num_particles).place(Aii, Dii, src, Ax, rho, rho0, res, tmp, num)
 ti.root.dense(ti.i, num_particles).place(dp)
 grid_snode = ti.root.dense(ti.ij, grid_size)
 grid_snode.place(grid_num_particles)
@@ -319,7 +327,7 @@ def neighbor_search(x: ti.template()):
         particle_num_neighbors[p_i] = nb_i
 
 @ti.kernel
-def prologue(dt: float):
+def advect_velocity(dt: float):
     # save old positions
     # for i in positions:
     #     old_positions[i] = positions[i]
@@ -327,7 +335,7 @@ def prologue(dt: float):
     for i in positions:
         g = ti.Vector([0.0, -9.8])
         # pos, vel = positions[i]
-        velocities[i] += g * dt
+        velocities_adv[i] = velocities[i] + g * dt
         # pos += vel * dt
         # positions[i] = confine_position_to_boundary(pos)
     # clear neighbor lookup table
@@ -377,46 +385,62 @@ def substep(dt: float):
         positions[i] += dt * velocities[i]
 
 @ti.kernel
+def project_boundary(x: ti.template()):
+
+    for i in positions:
+        pos = x[i]
+        x[i] = confine_position_to_boundary(pos)
+@ti.kernel
 def epilogue(dt: float):
     # confine to boundary
-    for i in positions:
-        pos = positions[i]
-        positions[i] = confine_position_to_boundary(pos)
+    # for i in positions:
+    #     pos = positions[i]
+    #     positions[i] = confine_position_to_boundary(pos)
     # update velocities
     for i in positions:
         velocities[i] = (positions[i] - old_positions[i]) / dt
     # no vorticity/xsph because we cannot do cross product in 2D...
 
 @ti.kernel
-def precompute(dt: float):
+def precompute(x: ti.template()):
         
     # print(m[0] * cubic_value(0.0, h_))
-    for p_i in positions:
-        pos_i = positions[p_i]
+    for p_i in x:
+        pos_i = x[p_i]
         grad_i = ti.Vector([0.0, 0.0])
         sum_gradient_sqr = 0.0
         density = m[p_i] * cubic_value(0.0, h_)
         # print("")
-        div = 0.0
         for j in range(particle_num_neighbors[p_i]):
             p_j = particle_neighbors[p_i, j]
             # if p_j < 0:
             #     break
-            pos_ji = pos_i - positions[p_j]
+            pos_ji = pos_i - x[p_j]
             grad_j = cubic_gradient(pos_ji, h_)
             particle_wij[p_i, j] = grad_j
-            div += m[p_j] * grad_j.dot(velocities[p_i] - velocities[p_j])
             grad_i += m[p_j] * grad_j
             sum_gradient_sqr += (m[p_j] * grad_j).dot(m[p_j] * grad_j) / m[p_j]
             density += m[p_j] * cubic_value(pos_ji.norm(), h_)
         sum_gradient_sqr += grad_i.dot(grad_i) / m[p_i]
         rho[p_i] = density
-        Aii[p_i] = m[p_i] * sum_gradient_sqr + 1e-3
-        src[p_i] = (density + dt * div - rho0) / (dt ** 2)
-
+        Aii[p_i] = sum_gradient_sqr + 1e-3
+        # src[p_i] = (density + dt * div - rho0) / (dt ** 2)
 
 @ti.kernel
-def compute_Ax_step_1(res: ti.template(), x: ti.template()):
+def compute_src(src: ti.template(), v: ti.template(), dt: float):
+
+     for p_i in positions:
+        div = 0.0
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            # if p_j < 0:
+            #     brea
+            grad_j = particle_wij[p_i, j]
+            div += m[p_j] * grad_j.dot(v[p_i] - v[p_j])
+        src[p_i] = (rho[p_i] + dt * div - rho0[p_i]) / (dt ** 2)
+
+@ti.kernel
+def compute_J_tr_x(res: ti.template(), x: ti.template()):
 
     for p_i in positions:
         res[p_i] = 0.0
@@ -425,13 +449,13 @@ def compute_Ax_step_1(res: ti.template(), x: ti.template()):
             grad_ij = particle_wij[p_i, j] 
             # if p_j < 0:
             #     break
-            res[p_i] += m[p_i] * m[p_j] * (x[p_i] + x[p_j]) * grad_ij
+            res[p_i] += (m[p_j] * x[p_i] + m[p_i] * x[p_j]) * grad_ij
             # Ax[p_i] += lambdas[p_j] * cubic_gradient(positions[p_i] - positions[p_j], h_)
     
 
 
 @ti.kernel
-def compute_Ax_step_2(res: ti.template(), x: ti.template()):
+def compute_J_x(res: ti.template(), x: ti.template()):
     for p_i in positions:
         res[p_i] = 0.0
         for j in range(particle_num_neighbors[p_i]):
@@ -529,7 +553,17 @@ def line_search_alpha(p: ti.template(), dp: ti.template()) -> float:
     return min_alpha
 
 @ti.kernel
-def measure_error(v: ti.template(), dt: float) -> float:
+def measure_error2(v: ti.template()) -> float:
+
+    avg_error = 0.0
+    for p_i in positions:
+        avg_error += v[p_i] / rho0[p_i]
+
+    avg_error /= num_particles
+    return avg_error
+
+@ti.kernel
+def measure_error(v: ti.template()) -> float:
 
     avg_error = 0.0
     for p_i in positions:
@@ -543,67 +577,139 @@ def measure_error(v: ti.template(), dt: float) -> float:
             grad_j = cubic_gradient(pos_ji, h_)
             div += m[p_j] * grad_j.dot(v[p_i] - v[p_j])
 
-        avg_error += ti.max(rho[p_i] + dt * div - rho0, 0.0) / rho0
+        avg_error += ti.max(rho[p_i] + div - rho0[p_i], 0.0) / rho0[p_i]
 
     avg_error /= num_particles
     return avg_error
 
 
-def run_pbf(dt):
+def run_iisph(dt):
 
 
     old_positions.copy_from(positions)
-    prologue(dt)
+    advect_velocity(dt)
     neighbor_search(positions)
-    precompute(dt)
+    precompute(positions)
+    velocities.copy_from(velocities_adv)
     
-    
+    compute_src(src, velocities, dt)
     p.fill(0.0)
     num_iter = 0
 
     for _ in range(max_jacobi_iter):
-
     
-        compute_Ax_step_1(tmp, p)
-
+        compute_J_tr_x(tmp, p)
         jacobi_precondition(tmp, tmp, m)
 
-        compute_Ax_step_2(Ax, tmp)
+        add(velocities_tmp, velocities, -dt, tmp)
 
-        add(Ax, Ax, 1e-3, p)
-        # compute src + Ax
+        dx.fill(0.0)
+        add(dx, dx, dt, velocities_tmp)
+
+        err = measure_error(dx)
+        if err < tol:
+            print(f"Converged (measure_error) after {num_iter} iterations with error {err:.6f}")
+            break
+
+
+        compute_J_x(Ax, tmp)
+        # add(Ax, Ax, 1e-3, p)
         add(res, src, -1.0, Ax)
-        
-        # Choose termination condition based on GUI setting
-        if use_measure_error:
-            # Option 1: Use measure_error()
-            add(velocities_tmp, velocities, -dt, tmp)
-            err = measure_error(velocities_tmp, dt)
-            if err < tol:
-                print(f"Converged (measure_error) after {num_iter} iterations with error {err:.6f}")
-                break
-        else:
-            # Option 2: Use residual norm
-            err = ti.sqrt(dot2(res, res) / num_particles)
-            if err < tol:
-                print(f"Converged (residual norm) after {num_iter} iterations with error {err:.6f}")
-                break
-
-        Dii.copy_from(Aii)
-        jacobi_precondition(dp, res, Dii)
-        
-        # Line search for step size
-        # alpha = line_search_alpha(p, dp)
+ 
+        jacobi_precondition(dp, res, Aii)
         add(p, p, 0.5, dp)
         
         project(p)
         num_iter += 1
 
-    print("Jacobi iter: ", num_iter)
-    # substep(dt)
+    # print("Jacobi iter: ", num_iter)
     velocities.copy_from(velocities_tmp)
+    # method_two(dt)
+
     advect_positions(dt)
+    project_boundary(positions)
     epilogue(dt)
+
+@ti.kernel
+def compute_density_and_Aii(x: ti.template()):
+
+    for p_i in x:
+        pos_i = x[p_i]
+        grad_i = ti.Vector([0.0, 0.0])
+        sum_gradient_sqr = 0.0
+        density = m[p_i] * cubic_value(0.0, h_)
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            pos_ji = pos_i - positions[p_j]
+            grad_j = cubic_gradient(pos_ji, h_)
+            particle_wij[p_i, j] = grad_j
+            grad_i += m[p_j] * grad_j
+            sum_gradient_sqr += (m[p_j] * grad_j).dot(m[p_j] * grad_j) / m[p_j]
+            density += m[p_j] * cubic_value(pos_ji.norm(), h_)
+        sum_gradient_sqr += grad_i.dot(grad_i) / m[p_i]
+        rho[p_i] = density
+        Aii[p_i] = sum_gradient_sqr  + 1e-3
+
+
+@ti.kernel
+def measure_error_pbf(src: ti.template()) -> float:
+
+    avg_error = 0.0
+    for p_i in positions:
+
+        avg_error += src[p_i] / rho0[p_i]
+
+    avg_error /= num_particles
+    return avg_error
+
+def run_pbf(dt):
+
+    old_positions.copy_from(positions)
+    advect_velocity(dt)
+    velocities.copy_from(velocities_adv)
+    add(positions_adv, positions, dt, velocities)
+
+    positions.copy_from(positions_adv)
+    project_boundary(positions)
+    neighbor_search(positions)
+    
+    num_iter = 0
+    dtSq = dt * dt
+    for _ in range(max_jacobi_iter):
+
+        compute_density_and_Aii(positions)
+
+        add(src, rho, -1.0, rho0)
+        # velocities_tmp.fill(0.0)
+        # compute_src(src, velocities_tmp, 1.0)
+        
+        # add(velocities_tmp, positions_adv, -1.0, positions)
+        # compute_J_x(Ax, velocities_tmp)
+        # add(src, src, -1.0, Ax)
+
+        project(src)
+        err = measure_error2(src)
+        if err < tol:
+            print(f"Converged (measure_error) after {num_iter} iterations with error {err:.6f}")
+            break
+
+
+        jacobi_precondition(p, src, Aii)
+        # project(p)
+
+        compute_J_tr_x(tmp, p)
+        jacobi_precondition(tmp, tmp, m)
+
+        # dx.fill(0.0) 
+        # add(dx, dx, -1.0, tmp)
+        add(positions, positions, -0.3 * dtSq, tmp)
+        project_boundary(positions)
+
+        num_iter += 1
+    # print("PBF iter: ", num_iter)
+
+    epilogue(dt)
+
 
 
 @ti.kernel
@@ -625,7 +731,7 @@ def render(window):
     normalize_positions()
     
     # Render fluid particles
-    canvas.circles(positions_normalized, radius=0.002, 
+    canvas.circles(positions_normalized, radius=particle_radius_in_world, 
                   color=((particle_color >> 16 & 0xff) / 255.0,
                          (particle_color >> 8 & 0xff) / 255.0,
                          (particle_color & 0xff) / 255.0))
@@ -638,15 +744,41 @@ def render(window):
 @ti.kernel
 def init_particles():
 
-    alpha = (0.3 / cubic_value(0.0, h_)) 
+    alpha = (0.4 / cubic_value(0.0, h_)) 
     for i in range(num_particles):
-        delta = h_ * 0.4
+        delta = h_ * 0.5
         offs = ti.Vector([(boundary[0] - delta * num_particles_x) * 0.5, boundary[1] * 0.02])
         positions[i] = ti.Vector([i % num_particles_x, i // num_particles_x]) * delta + offs
         for c in ti.static(range(dim)):
             velocities[i][c] = 0.0
-        m[i] = rho0 * alpha
+        
+        # Initialize per-particle rest density
+        # You can customize this based on particle properties
+        rho0[i] = 1000.0  # Default rest density
+        
+        # Set mass based on per-particle rest density
+        m[i] = rho0[i] * alpha
     board_states[None] = ti.Vector([boundary[0] - epsilon, -0.0])
+
+@ti.kernel 
+def set_particle_rest_densities():
+    """Set different rest densities for different particle regions or types"""
+    for i in range(num_particles):
+        x = i % num_particles_x
+        y = i // num_particles_x
+        
+        # Example: Create density variation based on particle position
+        # You can modify this to create different fluid types or density gradients
+        if y < 20:  # Bottom particles have higher density
+            rho0[i] = 1200.0
+        elif y < 40:  # Middle particles have medium density  
+            rho0[i] = 1000.0
+        else:  # Top particles have lower density
+            rho0[i] = 800.0
+        
+        # Update mass accordingly
+        alpha = (0.4 / cubic_value(0.0, h_))
+        m[i] = rho0[i] * alpha
 
 
 
@@ -674,6 +806,7 @@ def print_stats():
 
 def reset():
     init_particles()
+    set_particle_rest_densities()  # Set varied rest densities
     p.fill(0.0)
 
 
@@ -682,27 +815,34 @@ def stop():
 
 
 def show_options(gui, frame_cnt):
-    global boundary_particle_spacing, boundary_layers, use_measure_error, time_delta, tol, max_jacobi_iter
+    global boundary_particle_spacing, boundary_layers, use_measure_error, time_delta, tol, max_jacobi_iter, solver_method
     with gui.sub_window("Settings", 0., 0., 0.4, 0.4):
         gui.text(f"Current frame: {frame_cnt}")
         gui.text("")  # Spacer
         
+        gui.text("Method:")
+        solver_method = gui.slider_int("a", solver_method, 0, 1)
+        if solver_method == 0:
+            gui.text("Current: IISPH")
+        else:
+            gui.text("Current: PBF")
+
         gui.text("Time Step:")
-        time_delta = gui.slider_float("dt", time_delta, 0.001, 0.1)
+        time_delta = gui.slider_float("b", time_delta, 0.001, 0.1)
         
         gui.text("")  # Spacer
-        gui.text("Solver:")
-        max_jacobi_iter = gui.slider_int("Max iterations", max_jacobi_iter, 1, 2000)
+        gui.text("Max Iteration:")
+        max_jacobi_iter = gui.slider_int("c", max_jacobi_iter, 1, 2000)
         
         gui.text("")  # Spacer
-        gui.text("Convergence:")
-        tol = gui.slider_float("Tolerance", tol, 1e-6, 1e-1)
+        gui.text("Tolerance:")
+        tol = gui.slider_float(" ", tol, 1e-6, 1e-1)
         
-        gui.text("")  # Spacer
-        gui.text("Termination Condition:")
-        use_measure_error = gui.checkbox("Use measure_error()", use_measure_error)
-        if not use_measure_error:
-            gui.text("Using residual norm")
+        # gui.text("")  # Spacer
+        # gui.text("Termination Condition:")
+        # use_measure_error = gui.checkbox("Use measure_error()", use_measure_error)
+        # if not use_measure_error:
+        #     gui.text("Using residual norm")
         
         # gui.text("")  # Spacer
         # gui.text("Boundary Settings:")
@@ -719,6 +859,7 @@ def show_options(gui, frame_cnt):
 
 def main():
     init_particles()
+    set_particle_rest_densities()  # Set varied rest densities
     init_boundary_particles()
     print(f"boundary={boundary} grid={grid_size} cell_size={cell_size}")
     print(f"num_boundary_particles={num_boundary_particles}")
@@ -747,7 +888,13 @@ def main():
         
         if runSim:
             # move_board(time_delta)
-            run_pbf(time_delta)
+
+            if solver_method == 0:
+                run_iisph(time_delta)
+            elif solver_method == 1:
+                run_pbf(time_delta)
+                
+            # run_pbf(time_delta)
             frame_cnt += 1
             
         # if frame_cnt % 20 == 1:

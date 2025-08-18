@@ -101,34 +101,34 @@ if __name__ == "__main__":
             # ps.eta = w.slider_float("eta ", ps.eta, 0.0, 1.0)
             # solver.viscosity = w.slider_float("viscosity", solver.viscosity, 0.0, 1.0)
             #
-            # if method == 1:
-            solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
-            solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
-            solver.method = w.slider_int("method type", solver.method, 0, 2)
+            if method == 1:
+                solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
+                solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
+            # solver.method = w.slider_int("method type", solver.method, 0, 2)
 
-            if solver.method == 0:
-                gui.text("Projected Jacobi")
-                solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 3)
-                if solver.matrix_type == 0:
-                    gui.text("B")
-                elif solver.matrix_type == 1:
-                    gui.text("sqrt(D) B sqrt(D)")
-                elif solver.matrix_type == 2:
-                    gui.text("D B D")
-                elif solver.matrix_type == 3:
-                    gui.text("A (non-symmetric)")
+            # if solver.method == 0:
+            #     gui.text("Projected Jacobi")
+            #     solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 3)
+            #     if solver.matrix_type == 0:
+            #         gui.text("B")
+            #     elif solver.matrix_type == 1:
+            #         gui.text("sqrt(D) B sqrt(D)")
+            #     elif solver.matrix_type == 2:
+            #         gui.text("D B D")
+            #     elif solver.matrix_type == 3:
+            #         gui.text("A (non-symmetric)")
 
-            elif solver.method == 1:
-                gui.text("ADMM")
-            elif solver.method == 2:
-                gui.text("Barrier")
+            # elif solver.method == 1:
+            #     gui.text("ADMM")
+            # elif solver.method == 2:
+            #     gui.text("Barrier")
                 
-            # Logging controls
-            gui.text("")  # Spacer
-            gui.text("Iteration Logging:")
-            solver.enable_logging = w.checkbox("Enable logging", solver.enable_logging)
-            if w.button("Reset & Save logs"):
-                solver.reset_logging()
+            # # Logging controls
+            # gui.text("")  # Spacer
+            # gui.text("Iteration Logging:")
+            # solver.enable_logging = w.checkbox("Enable logging", solver.enable_logging)
+            # if w.button("Reset & Save logs"):
+            #     solver.reset_logging()
 
 
             #     solver.k_rho = w.slider_float("k rho", solver.k_rho, 0.0, 1e6)
