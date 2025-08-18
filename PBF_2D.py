@@ -435,6 +435,31 @@ def precompute(x: ti.template()):
         sum_gradient_sqr += grad_i.dot(grad_i) / m[p_i]
         rho[p_i] = density
         Aii[p_i] = sum_gradient_sqr + 1e-3
+
+@ti.kernel
+def precompute_vanilla(x: ti.template()):
+
+    # print(m[0] * cubic_value(0.0, h_))
+    for p_i in x:
+        pos_i = x[p_i]
+        grad_i = ti.Vector([0.0, 0.0])
+        sum_gradient_sqr = 0.0
+        density = m[p_i] * cubic_value(0.0, h_)
+        # print("")
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            # if p_j < 0:
+            #     break
+            pos_ji = pos_i - x[p_j]
+            grad_j = cubic_gradient(pos_ji, h_)
+            particle_wij[p_i, j] = grad_j
+            grad_i += m[p_j] * grad_j
+            sum_gradient_sqr += (m[p_j] * grad_j).dot(m[p_j] * grad_j) / m[p_j]
+            density += m[p_j] * cubic_value(pos_ji.norm(), h_)
+
+        rho[p_i] = density
+        sum_gradient_sqr += grad_i.dot(grad_i) / m[p_i]
+        Aii[p_i] = (m[p_i] / rho[p_i] ** 2) * sum_gradient_sqr + 1e-3
         # src[p_i] = (density + dt * div - rho0) / (dt ** 2)
 
 @ti.kernel
@@ -639,6 +664,60 @@ def run_iisph(dt):
     epilogue(dt)
 
 @ti.kernel
+def compute_M_inv_J_tr_D_x(res: ti.template(), x: ti.template()):
+
+    """Compute M_inv * J^T * D * x"""
+    for p_i in positions:
+        res[p_i] = ti.math.vec2(0.0, 0.0)
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            grad_ij = particle_wij[p_i, j]
+            if p_j < 0:
+                break
+            res[p_i] += m[p_j] * (x[p_i] / (rho[p_i] ** 2) + x[p_j] / (rho[p_j] ** 2)) * grad_ij
+
+
+def run_iisph_vanilla(dt):
+
+    old_positions.copy_from(positions)
+    advect_velocity(dt)
+    neighbor_search(positions)
+    precompute_vanilla(positions)
+    velocities.copy_from(velocities_adv)
+
+    compute_src(src, velocities, dt)
+    p.fill(0.0)
+    num_iter = 0
+
+    for _ in range(max_jacobi_iter):
+
+        compute_M_inv_J_tr_D_x(tmp, p)
+        add(velocities, velocities_adv, -dt, tmp)
+
+        dx.fill(0.0)
+        add(dx, dx, dt, velocities)
+
+        err = measure_error(dx)
+        if err < tol:
+            print(f"Converged (measure_error) after {num_iter} iterations with error {err:.6f}")
+            break
+
+        compute_J_x(Ax, tmp)
+        add(res, src, -1.0, Ax)
+
+        jacobi_precondition(dp, res, Aii)
+        add(p, p, 0.5, dp)
+
+        project(p)
+        num_iter += 1
+
+    # print("Jacobi iter: ", num_iter)
+    advect_positions(dt)
+    project_boundary(positions)
+    epilogue(dt)
+
+
+@ti.kernel
 def compute_density_and_Aii(x: ti.template()):
 
     for p_i in x:
@@ -678,7 +757,7 @@ def measure_error_pbf(src: ti.template()) -> float:
 @ti.kernel
 def compute_test(dtSq: float):
 
-    #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
+    #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c)
     """Compute test values for debugging"""
     k = 1e-9
 
@@ -706,7 +785,6 @@ def compute_test(dtSq: float):
         b[p_i] = m[p_i] * positions_adv[p_i] + k * dtSq * tmp[p_i]
         Hii[p_i] = m[p_i] * id2 + k * dtSq * Hii[p_i]
 
-    
 
     # apply_A_diag_only(x, Ap)          # Ap = A x
     # axpy(r, 1.0, b, -1.0, Ap)         # r = b - Ap
@@ -776,7 +854,7 @@ def build_rhs(k_val: float, dt2: float):
 
 @ti.kernel
 def build_block_diag_and_JtC(k: float, dtSq: float):
-    # compute c(x), activated when >=0  
+    # compute c(x), activated when >=0
     for p_i in positions:
         src[p_i] = ti.max(rho[p_i] - rho0[p_i], 0.0)
 
@@ -791,11 +869,11 @@ def build_block_diag_and_JtC(k: float, dtSq: float):
             tmp[p_i] += (m[p_j] * src[p_i] + m[p_i] * src[p_j]) * grad_j
             g_sum += m[p_j] * grad_j
             ggT += m[p_i] * m[p_i] * (grad_j.outer_product(grad_j))
-    
+
         Hii[p_i] = ggT + g_sum.outer_product(g_sum)
 
     # A = M + k * dt^2 * J^t J
-    # x = diag3x3 (A) ^-1 * (M * y - k * dtSq * J^t c) 
+    # x = diag3x3 (A) ^-1 * (M * y - k * dtSq * J^t c)
     id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]])
     for p_i in positions:
 
@@ -805,7 +883,9 @@ def build_block_diag_and_JtC(k: float, dtSq: float):
 @ti.kernel
 def compute_test(dtSq: float):
 
+
     #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
+    
     """Compute test values for debugging"""
     k = 1e-7
 
@@ -1055,13 +1135,15 @@ def show_options(gui, frame_cnt):
         gui.text("")  # Spacer
         
         gui.text("Method:")
-        solver_method = gui.slider_int("a", solver_method, 0, 2)
+        solver_method = gui.slider_int("a", solver_method, 0, 3)
         if solver_method == 0:
             gui.text("Current: IISPH")
         elif solver_method == 1:
             gui.text("Current: PBF")
         elif solver_method == 2:
             gui.text("Current: PCG")
+        elif solver_method == 3:
+            gui.text("Current: IISPH(vanilla)")
 
         gui.text("Time Step:")
         time_delta = gui.slider_float("b", time_delta, 0.001, 0.1)
@@ -1131,7 +1213,11 @@ def main():
                 run_pbf(time_delta)
             elif solver_method == 2:
                 run_pcg(time_delta)
-                
+                run_test_pcg(time_delta)
+            elif solver_method == 3:
+                run_iisph_vanilla(time_delta)
+
+
             # run_pbf(time_delta)
             frame_cnt += 1
             
