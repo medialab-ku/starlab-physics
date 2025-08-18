@@ -12,7 +12,7 @@ ti.init(arch=ti.gpu)
 screen_res = (500, 1000)
 screen_to_world_ratio = 400.0
 
-solver_method = 0
+solver_method = 2
 dim = 2
 bg_color = 0x112F41
 particle_color = 0x068587
@@ -21,7 +21,7 @@ num_particles_x = 60
 num_particles = num_particles_x * 200
 max_num_particles_per_cell = 400
 max_num_neighbors = 400
-time_delta = 0.004
+time_delta = 0.001
 epsilon = 1e-5
 eps = 1e-2
 particle_radius = 3.0
@@ -173,6 +173,11 @@ velocities = ti.Vector.field(dim, float)
 velocities_adv = ti.Vector.field(dim, float)
 velocities_tmp = ti.Vector.field(dim, float)
 dx = ti.Vector.field(dim, float)
+Ap_vec = ti.Vector.field(dim, float)
+r_vec = ti.Vector.field(dim, float)
+p_vec = ti.Vector.field(dim, float)
+z_vec = ti.Vector.field(dim, float)
+rhs_vec = ti.Vector.field(dim, float)
 boundary_positions = ti.Vector.field(dim, float)
 boundary_positions_normalized = ti.Vector.field(dim, float)
 grid_num_particles = ti.field(int)
@@ -194,6 +199,7 @@ omega_ls = ti.field(float, shape=())
 # 0: x-pos, 1: timestep in sin()
 board_states = ti.Vector.field(2, float)
 ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_adv, positions_normalized, dx, velocities, velocities_adv, velocities_tmp)
+ti.root.dense(ti.i, num_particles).place(Ap_vec, r_vec, p_vec, z_vec, rhs_vec)
 ti.root.dense(ti.i, num_boundary_particles).place(boundary_positions, boundary_positions_normalized)
 ti.root.dense(ti.i, num_particles).place(Aii, Dii, Hii, src, r, z, Ax, rho, rho0, res, tmp, num, b)
 ti.root.dense(ti.i, num_particles).place(dp)
@@ -481,7 +487,7 @@ def dot(a: ti.template(), b: ti.template()) -> float:
 
     return ret
 
-@ti.func
+@ti.kernel
 def dot2(a: ti.template(), b: ti.template()) -> float:
 
     ret = 0.0
@@ -497,7 +503,7 @@ def project(p: ti.template()):
         p[p_i] = ti.max(p[p_i], 0.0)
 
 
-@ti.func
+@ti.kernel
 def add(ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
     for i in ret:
         ret[i] = v0[i] + scale * v1[i]
@@ -668,31 +674,13 @@ def measure_error_pbf(src: ti.template()) -> float:
     avg_error /= num_particles
     return avg_error
 
-def run_test_pcg(dt):
-    
-    old_positions.copy_from(positions)
-    advect_velocity(dt)
-    velocities.copy_from(velocities_adv)
-    add(positions_adv, positions, dt, velocities)
 
-    positions.copy_from(positions_adv)
-    project_boundary(positions)
-    neighbor_search(positions)
+@ti.kernel
+def compute_test(dtSq: float):
 
-    dtSq = dt * dt
-
-    compute_density_and_Aii(positions)
-    compute_test_pcg(dtSq)
-    project_boundary(positions)
-
-    epilogue(dt)
-
-
-def compute_test_pcg(dtSq: float):
     #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
-    
     """Compute test values for debugging"""
-    k = 1e-7
+    k = 1e-9
 
     # compute c(x), activated when >=0  
     for p_i in positions:
@@ -768,11 +756,56 @@ def compute_test_pcg(dtSq: float):
 
 
 @ti.kernel
+def finalize_A(out_vec: ti.template(), x_vec: ti.template(), Ap_vec: ti.template(), k_val: float, dt2: float):
+    # out = M x + k dt^2 Ap
+    for p_i in positions:
+        out_vec[p_i] = m[p_i] * x_vec[p_i] + k_val * dt2 * Ap_vec[p_i]
+
+
+@ti.kernel
+def apply_Minv(out_vec: ti.template(), in_vec: ti.template()):
+    # Jacobi preconditioner: use block-diagonal inverse Hii^{-1}
+    for p_i in positions:
+        out_vec[p_i] = Hii[p_i].inverse() @ in_vec[p_i]
+
+
+@ti.kernel
+def build_rhs(k_val: float, dt2: float):
+    for p_i in positions:
+        rhs_vec[p_i] = m[p_i] * (positions_adv[p_i]- positions[p_i]) + (-k_val * dt2) * tmp[p_i]
+
+@ti.kernel
+def build_block_diag_and_JtC(k: float, dtSq: float):
+    # compute c(x), activated when >=0  
+    for p_i in positions:
+        src[p_i] = ti.max(rho[p_i] - rho0[p_i], 0.0)
+
+    # compute J^t c(x) and 2x2 block diagonal elements of J^t J
+    for p_i in positions:
+        tmp[p_i] = ti.math.vec2(0.0)
+        ggT = ti.math.mat2(0.0)
+        g_sum = ti.math.vec2(0.0)
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            grad_j = particle_wij[p_i, j]
+            tmp[p_i] += (m[p_j] * src[p_i] + m[p_i] * src[p_j]) * grad_j
+            g_sum += m[p_j] * grad_j
+            ggT += m[p_i] * m[p_i] * (grad_j.outer_product(grad_j))
+    
+        Hii[p_i] = ggT + g_sum.outer_product(g_sum)
+
+    # A = M + k * dt^2 * J^t J
+    # x = diag3x3 (A) ^-1 * (M * y - k * dtSq * J^t c) 
+    id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]])
+    for p_i in positions:
+
+        tmp[p_i] = m[p_i] * (positions_adv[p_i]-positions[p_i]) - k * dtSq * tmp[p_i]
+        Hii[p_i] = m[p_i] * id2 + k * dtSq * Hii[p_i]
+
+@ti.kernel
 def compute_test(dtSq: float):
 
-
     #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
-    
     """Compute test values for debugging"""
     k = 1e-7
 
@@ -796,10 +829,10 @@ def compute_test(dtSq: float):
 
     # A = M + k * dt^2 * J^t J
     # x = diag3x3 (A) ^-1 * (M * y - k * dtSq * J^t c) 
-    id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]]) 
+    id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]])
     for p_i in positions:
 
-        grad = m[p_i] * (positions[p_i] - positions_adv[p_i]) + k * dtSq * tmp[p_i]
+        grad = m[p_i] * (positions[p_i] - positions_adv[p_i]) - k * dtSq * tmp[p_i]
         Hii[p_i] = m[p_i] * id2 + k * dtSq * Hii[p_i]
         positions[p_i] = positions[p_i] - Hii[p_i].inverse() @ grad
 
@@ -855,6 +888,62 @@ def run_pbf(dt):
 
     epilogue(dt)
 
+
+def run_pcg(dt):
+    # Solve (M + k dt^2 J^T J) Δx = M(y - x) - k dt^2 J^T c
+
+    old_positions.copy_from(positions)
+    advect_velocity(dt)
+    velocities.copy_from(velocities_adv)
+    add(positions_adv, positions, dt, velocities)  # y = x + dt * v_adv
+
+    positions.copy_from(positions_adv)
+    project_boundary(positions)
+    neighbor_search(positions)
+
+    compute_density_and_Aii(positions)        # compute ρ, ∇W, Aii
+
+    dtSq = dt * dt
+    k = 1e-9
+
+    build_block_diag_and_JtC(k, dtSq)         # build J^T C and diag(J^T J)
+    build_rhs(k, dtSq)                        # rhs = M(y - x) - k dt^2 J^T c
+
+
+    dx.fill(0.0)
+    # r_vec.copy_from(rhs_vec)
+    # apply_Minv(z_vec, r_vec)
+    # p_vec.copy_from(z_vec)
+    # rz_old = dot(r_vec, z_vec)
+
+
+    compute_J_x(Ax, dx)                       # J * x
+    compute_J_tr_x(Ap_vec, Ax)                # J^T (J x)
+    finalize_A(Ap_vec, dx, Ap_vec, k, dtSq)   # A x = Mx + k dt^2 J^T J x
+
+    apply_Minv(dx, rhs_vec)                   # Δx ≈ M^{-1} rhs
+    # add(positions, positions, -1.0, dx)       # x ← x - Δx
+
+    # for _ in range(max_jacobi_iter):
+    #     compute_J_x(Ax, p_vec)
+    #     compute_J_tr_x(Ap_vec, Ax)
+    #     finalize_A(Ap_vec, p_vec, Ap_vec, k, dtSq)
+
+    #     pAp = dot(p_vec, Ap_vec)
+    #     alpha = rz_old / (pAp + 1e-20)
+
+    #     add(dx, dx, alpha, p_vec)
+    #     add(r_vec, r_vec, -alpha, Ap_vec)
+    #     apply_Minv(z_vec, r_vec)
+
+    #     rz_new = dot(r_vec, z_vec)
+    #     beta = rz_new / (rz_old + 1e-20)
+    #     add(p_vec, z_vec, beta, p_vec)
+    #     rz_old = rz_new
+
+    add(positions, positions, -1.0, dx)
+    project_boundary(positions)
+    epilogue(dt)
 
 
 @ti.kernel
@@ -1015,7 +1104,7 @@ def main():
     window = ti.ui.Window('PBF2D', screen_res, show_window=True, vsync=False)
     gui = window.get_gui()
     
-    runSim = True
+    runSim = False
     frame_cnt = 0
     
     while window.running:
@@ -1041,7 +1130,7 @@ def main():
             elif solver_method == 1:
                 run_pbf(time_delta)
             elif solver_method == 2:
-                run_test_pcg(time_delta)
+                run_pcg(time_delta)
                 
             # run_pbf(time_delta)
             frame_cnt += 1
