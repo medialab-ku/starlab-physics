@@ -35,6 +35,7 @@ mass = 1.0
 # rho0 = 1000.0  # Now replaced with per-particle rho0 field
 lambda_epsilon = 1e-1
 max_jacobi_iter = 1000
+max_pcg_iter = 1000
 corr_deltaQ_coeff = 0.3
 corrK = 0.001
 
@@ -181,6 +182,9 @@ particle_neighbors = ti.field(int)
 particle_wij = ti.Vector.field(dim, float)
 p = ti.field(float)
 m = ti.field(float)
+r = ti.field(float)
+z = ti.field(float)
+b = ti.field(float)
 barrier_grad = ti.field(float)
 barrier_hess = ti.field(float)
 position_deltas = ti.Vector.field(dim, float)
@@ -191,7 +195,7 @@ omega_ls = ti.field(float, shape=())
 board_states = ti.Vector.field(2, float)
 ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_adv, positions_normalized, dx, velocities, velocities_adv, velocities_tmp)
 ti.root.dense(ti.i, num_boundary_particles).place(boundary_positions, boundary_positions_normalized)
-ti.root.dense(ti.i, num_particles).place(Aii, Dii, Hii, src, Ax, rho, rho0, res, tmp, num)
+ti.root.dense(ti.i, num_particles).place(Aii, Dii, Hii, src, r, z, Ax, rho, rho0, res, tmp, num, b)
 ti.root.dense(ti.i, num_particles).place(dp)
 grid_snode = ti.root.dense(ti.ij, grid_size)
 grid_snode.place(grid_num_particles)
@@ -477,7 +481,7 @@ def dot(a: ti.template(), b: ti.template()) -> float:
 
     return ret
 
-@ti.kernel
+@ti.func
 def dot2(a: ti.template(), b: ti.template()) -> float:
 
     ret = 0.0
@@ -493,7 +497,7 @@ def project(p: ti.template()):
         p[p_i] = ti.max(p[p_i], 0.0)
 
 
-@ti.kernel
+@ti.func
 def add(ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
     for i in ret:
         ret[i] = v0[i] + scale * v1[i]
@@ -664,6 +668,105 @@ def measure_error_pbf(src: ti.template()) -> float:
     avg_error /= num_particles
     return avg_error
 
+def run_test_pcg(dt):
+    
+    old_positions.copy_from(positions)
+    advect_velocity(dt)
+    velocities.copy_from(velocities_adv)
+    add(positions_adv, positions, dt, velocities)
+
+    positions.copy_from(positions_adv)
+    project_boundary(positions)
+    neighbor_search(positions)
+
+    dtSq = dt * dt
+
+    compute_density_and_Aii(positions)
+    compute_test_pcg(dtSq)
+    project_boundary(positions)
+
+    epilogue(dt)
+
+
+def compute_test_pcg(dtSq: float):
+    #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
+    
+    """Compute test values for debugging"""
+    k = 1e-7
+
+    # compute c(x), activated when >=0  
+    for p_i in positions:
+        src[p_i] = ti.max(rho[p_i] - rho0[p_i], 0.0)
+
+    # compute J^t c(x) and 2x2 block diagonal elements of J^t J
+    for p_i in positions:
+        tmp[p_i] = ti.math.vec2(0.0)
+        ggT = ti.math.mat2(0.0)
+        g_sum = ti.math.vec2(0.0)
+        for j in range(particle_num_neighbors[p_i]):
+            p_j = particle_neighbors[p_i, j]
+            grad_j = particle_wij[p_i, j]
+            tmp[p_i] += (m[p_j] * src[p_i] + m[p_i] * src[p_j]) * grad_j
+            g_sum += m[p_j] * grad_j
+            ggT += m[p_i] * m[p_i] * (grad_j.outer_product(grad_j))
+    
+        Hii[p_i] = ggT + g_sum.outer_product(g_sum)
+
+    # A = M + k * dt^2 * J^t J
+    id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]])
+    for p_i in positions:
+        b[p_i] = m[p_i] * positions_adv[p_i] + k * dtSq * tmp[p_i]
+        Hii[p_i] = m[p_i] * id2 + k * dtSq * Hii[p_i]
+
+    
+
+    # apply_A_diag_only(x, Ap)          # Ap = A x
+    # axpy(r, 1.0, b, -1.0, Ap)         # r = b - Ap
+
+    # precond_diag(r, z)
+
+    # copy_vec(p, z)
+
+    # rz_old = dot2(r, z)
+    # if rz_old < eps:
+    #     return
+
+    # for _ in range(max_pcg_iter):
+
+    #     apply_A_diag_only(p, Ap)
+
+    #     pAp = dot2(p, Ap)
+    #     # 방어적 분모 클램프
+    #     if abs(pAp) < 1e-20:
+    #         break
+
+    #     alpha = rz_old / pAp
+
+    #     # x_{k+1} = x_k + alpha p_k
+    #     add(x, x, +alpha, p)
+
+    #     # r_{k+1} = r_k - alpha A p_k
+    #     add(r, r, -alpha, Ap)
+
+    #     rr = dot2(r, r)
+    #     if rr < eps:
+    #         break
+
+    #     # z_{k+1} = M^{-1} r_{k+1}  (M^{-1}≈Aii^{-1})
+    #     precond_diag(r, z)
+
+    #     rz_new = dot2(r, z)
+    #     beta = rz_new / (rz_old + 1e-20)
+
+    #     # p_{k+1} = z_{k+1} + beta p_k
+    #     add(p, z, beta, p)
+
+    #     rz_old = rz_new
+
+    # copy_vec(positions, x)
+
+
+
 @ti.kernel
 def compute_test(dtSq: float):
 
@@ -671,7 +774,7 @@ def compute_test(dtSq: float):
     #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
     
     """Compute test values for debugging"""
-    k = 1e-9
+    k = 1e-7
 
     # compute c(x), activated when >=0  
     for p_i in positions:
@@ -696,9 +799,9 @@ def compute_test(dtSq: float):
     id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]]) 
     for p_i in positions:
 
-        grad = m[p_i] * positions_adv[p_i] + k * dtSq * tmp[p_i]
+        grad = m[p_i] * (positions[p_i] - positions_adv[p_i]) + k * dtSq * tmp[p_i]
         Hii[p_i] = m[p_i] * id2 + k * dtSq * Hii[p_i]
-        positions[p_i] = Hii[p_i].inverse() @ grad
+        positions[p_i] = positions[p_i] - Hii[p_i].inverse() @ grad
 
 def run_pbf(dt):
 
@@ -863,11 +966,13 @@ def show_options(gui, frame_cnt):
         gui.text("")  # Spacer
         
         gui.text("Method:")
-        solver_method = gui.slider_int("a", solver_method, 0, 1)
+        solver_method = gui.slider_int("a", solver_method, 0, 2)
         if solver_method == 0:
             gui.text("Current: IISPH")
-        else:
+        elif solver_method == 1:
             gui.text("Current: PBF")
+        elif solver_method == 2:
+            gui.text("Current: PCG")
 
         gui.text("Time Step:")
         time_delta = gui.slider_float("b", time_delta, 0.001, 0.1)
@@ -935,6 +1040,8 @@ def main():
                 run_iisph(time_delta)
             elif solver_method == 1:
                 run_pbf(time_delta)
+            elif solver_method == 2:
+                run_test_pcg(time_delta)
                 
             # run_pbf(time_delta)
             frame_cnt += 1
