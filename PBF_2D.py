@@ -665,17 +665,20 @@ def measure_error_pbf(src: ti.template()) -> float:
     return avg_error
 
 @ti.kernel
-def compute_test(p: ti.template(), Jtp: ti.template(), dtSq: float):
+def compute_test(dtSq: float):
 
+
+    #goal: (M + k * dt^2 * J^t J) * x = (M * y - k * dtSq * J^t c) 
+    
     """Compute test values for debugging"""
-    k = 1e-4
+    k = 1e-9
 
+    # compute c(x), activated when >=0  
     for p_i in positions:
-        src[p_i] = ti.max(rho0[p_i] -rho[p_i], 0.0)
+        src[p_i] = ti.max(rho[p_i] - rho0[p_i], 0.0)
 
-    # src.fill(0.0)
+    # compute J^t c(x) and 2x2 block diagonal elements of J^t J
     for p_i in positions:
-        
         tmp[p_i] = ti.math.vec2(0.0)
         ggT = ti.math.mat2(0.0)
         g_sum = ti.math.vec2(0.0)
@@ -688,7 +691,8 @@ def compute_test(p: ti.template(), Jtp: ti.template(), dtSq: float):
     
         Hii[p_i] = ggT + g_sum.outer_product(g_sum)
 
-
+    # A = M + k * dt^2 * J^t J
+    # x = diag3x3 (A) ^-1 * (M * y - k * dtSq * J^t c) 
     id2 = ti.math.mat2([[1.0, 0.0], [0.0, 1.0]]) 
     for p_i in positions:
 
@@ -739,7 +743,7 @@ def run_pbf(dt):
 
 
         # add(positions, positions, -0.5, tmp)
-        compute_test(p, tmp, dtSq)
+        compute_test(dtSq)
 
         project_boundary(positions)
 
