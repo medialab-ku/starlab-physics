@@ -159,7 +159,7 @@ class PBF2Solver(SPHBase):
             # self.ps.density[p_i] *= self.density_0
 
     @ti.kernel
-    def compute_constraint(self) -> float:
+    def compute_pressure_pbf(self) -> float:
         
         ret = 0.0
         eps = 1e-3 
@@ -436,33 +436,46 @@ class PBF2Solver(SPHBase):
 
     def PBF(self):
 
+        # objective: min_x ||x - y||^2_{M/h^2} s.t. c(x) <= 0
+        # linearization:  min_x ||x^k+1 - y||^2_{M/h^2} s.t. c(x^k) + J * (x^k+1 - x^k) <= 0
+        # (1) M/h^2 * (x^k + dx - y) + J^k^T p = 0
+        # (2)  J^k * dx = 0
+
         tol = pow(10, -self.tol)
         # tol = 0.1
         self.ps.x_old.copy_from(self.ps.x)
+
+        # y = x_n + dt * v_n + dt * M^-1 * f_ext
         add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+
+        # x^0 = y (warm start)
+        # A = dtSq * JM^-1J^t
+        # p = c / diag(A)
+
+        # IISPH: x^k+1 = y   - M^-1 J^t * p (with full linear solve for p, Ap = b, single iteration )
+        # PBF  : x^k+1 = x^k - M^-1 J^t * p (with approximation, diag(A) * p = b, multiple iterations)
+        # ???  : (M + H) * dx = M * (y - x) - J^t p, x^k+1 = x^k + alpha * dx, what is best H?
 
         self.ps.x.copy_from(self.ps.y)
         iter = 0
+
         for _ in range(self.max_iteration):
 
             self.compute_density()
-            # self.compute_Aii(False)
-            error = self.compute_constraint()
-            # print(error)
+
+            # original problem: (JM^-1Jt) * p = c
+            # PBD approximation: p = diag(JM^-1Jt)^-1 * max(c, 0)
+            error = self.compute_pressure_pbf()
             if error < tol and iter > 1 or iter == self.max_iteration:
-                # print(error)
                 print(f" converged iter: {iter}. error: {error}")
-                break 
-            
-            # add(self.r_pcg, self.ps.density, -1.0, self.ps.density0)
-            # coef_wise_div(self.p, self.r_pcg, self.Aii)
-            # max(self.p)
+                break
+
 
             self.compute_J_tr_x(self.tmp, self.p)
             coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
-            
+
+            # x^k+1 = x^k - step_size(=0.5) * M^-1 J^t * p
             add(self.ps.x, self.ps.x, -0.5, self.tmp)
-            # self.enforce_boundary_3D(self.ps.material_fluid)
 
             iter += 1
 
