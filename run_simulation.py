@@ -152,7 +152,8 @@ if __name__ == "__main__":
             if export_ply:
                 end_frame = w.slider_int("end frame", end_frame, 0, int(1e3))
             #
-            gui.text(f"# particle: {ps.fluid_particle_num}")
+            gui.text(f"# fluid particle: {ps.fluid_particle_num}")
+            gui.text(f"# boundary particle: {ps.solid_particle_num}")
             # gui.text(f"# face: {ps.faces_dy.shape[0] // 3}")
             gui.text(f"Current frame: {frame_cnt}")
 

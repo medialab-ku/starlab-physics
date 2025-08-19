@@ -112,6 +112,7 @@ class ParticleSystem:
         self.acceleration = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.m_V = ti.field(dtype=float, shape=self.particle_max_num)
         self.m = ti.field(dtype=float, shape=self.particle_max_num)
+        self.m_inv = ti.field(dtype=float, shape=self.particle_max_num)
         self.density  = ti.field(dtype=float, shape=self.particle_max_num)
         self.density0 = ti.field(dtype=float, shape=self.particle_max_num)
         self.pressure = ti.field(dtype=float, shape=self.particle_max_num)
@@ -240,8 +241,6 @@ class ParticleSystem:
         solver_type = self.cfg.get_cfg("simulationMethod")
         if solver_type == 0:
             return WCSPHSolver(self)
-        elif solver_type == 1:
-            return PBFSolver(self)
         elif solver_type == 2:
             return PBF2Solver(self)
         elif solver_type == 3:
@@ -264,6 +263,12 @@ class ParticleSystem:
         self.pressure[p] = pressure
         self.material[p] = material
         self.is_dynamic[p] = is_dynamic
+
+        if is_dynamic:
+            self.m_inv[p] = 1.0 / self.m[p]
+        else:
+            self.m_inv[p] = 0.0
+            self.m[p] *= 10.0
         self.color[p] = color
     
     def add_particles(self,
