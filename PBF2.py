@@ -58,7 +58,7 @@ class PBF2Solver(SPHBase):
 
         self.nablaWij = self.cubic_kernel_derivative
         self.lda = self.ps.pressure
-        self.method = 0
+        self.method = 1
         self.iisph_vanilla = False 
 
         self.tol = 2
@@ -69,6 +69,7 @@ class PBF2Solver(SPHBase):
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -150,12 +151,46 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
                 x_j = self.ps.x[p_j]
+                self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
                 den += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
 
             # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
             self.ps.density[p_i] += den
             # self.ps.density[p_i] *= self.density_0
 
+    @ti.kernel
+    def compute_constraint(self) -> float:
+        
+        ret = 0.0
+        eps = 1e-3 
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            Jdx_i = 0.0
+            Aii = 0.0
+            J_ii = ti.math.vec3(0.0)
+            dx_i = self.ps.x[p_i] - self.ps.y[p_i]
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                # Fluid neighbors
+                dx_j = self.ps.x[p_j] - self.ps.y[p_i]
+                grad_ij =  self.ps.fluid_neighbors_values[p_i, j]
+                J_ij = self.ps.m[p_j] * grad_ij
+                Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
+
+                J_ii -= J_ij
+                Jdx_i += self.ps.m[p_j] * (dx_i - dx_j).dot(grad_ij)
+
+            Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
+                
+            c = ti.max(self.ps.density[p_i] - self.ps.density0[p_i], 0.0)
+            ret += (c / self.ps.density0[p_i]) 
+            self.c[p_i] = c
+            self.Aii[p_i] = Aii + eps
+            self.p[p_i] = c / (Aii + eps)
+
+        ret /= self.ps.fluid_particle_num 
+        return ret 
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
         x_i = self.ps.x[p_i]
@@ -255,11 +290,11 @@ class PBF2Solver(SPHBase):
 
 
     @ti.kernel
-    def update_velocities(self):
+    def update_velocities(self, dt: float):
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i])/ self.dt
+                self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i])/ dt
 
 
 
@@ -346,8 +381,7 @@ class PBF2Solver(SPHBase):
     def IISPH(self):
         
         self.compute_density()
-        self.precompute_values()
-
+        # self.precompute_values()
         self.ps.v.copy_from(self.ps.v_adv)
         self.compute_Aii(self.iisph_vanilla)
         self.compute_b(self.b, self.ps.v, self.dt)
@@ -388,14 +422,49 @@ class PBF2Solver(SPHBase):
         self.advect_position(self.dt)
         
 
+    def PBF(self):
+
+        tol = pow(10, -self.tol)
+        # tol = 0.1
+        self.ps.x_old.copy_from(self.ps.x)
+        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+
+        self.ps.x.copy_from(self.ps.y)
+        iter = 0
+        print("test")
+        for _ in range(self.max_iteration):
+
+            self.compute_density()
+            # self.compute_Aii(False)
+            error = self.compute_constraint()
+            # print(error)
+            if error < tol and iter > 1 or iter == self.max_iteration:
+                # print(error)
+                print(f" converged iter: {iter}. error: {error}")
+                break 
+            
+            # add(self.r_pcg, self.ps.density, -1.0, self.ps.density0)
+            # coef_wise_div(self.p, self.r_pcg, self.Aii)
+            # max(self.p)
+
+            self.compute_J_tr_x(self.tmp, self.p)
+            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+            
+            add(self.ps.x, self.ps.x, -0.5, self.tmp)
+            # self.enforce_boundary_3D(self.ps.material_fluid)
+
+            iter += 1
+
+        self.update_velocities(self.dt)
+
+        
+
     def substep(self):
         
         self.ps.search_neighbours(self.ps.x)
-        # self.ps.x_old.copy_from(self.ps.x)
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
-        
-        
+
         if self.method == 0:
             self.IISPH()
         elif self.method == 1:

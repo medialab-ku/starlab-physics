@@ -61,6 +61,12 @@ def coef_wise_mul(ret: ti.template(), x: ti.template(), y: ti.template()):
 
     for i in x:
         ret[i] = x[i] * y[i]
+
+@ti.kernel
+def coef_wise_div(ret: ti.template(), x: ti.template(), y: ti.template()):
+
+    for i in x:
+        ret[i] = x[i] / y[i]
     
 @ti.kernel
 def mean_ti(x: ti.template()) -> float:
