@@ -174,7 +174,7 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
                 dx_j = self.ps.x[p_j] - self.ps.y[p_i]
-                grad_ij =  self.ps.fluid_neighbors_values[p_i, j]
+                grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
                 Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
@@ -431,7 +431,6 @@ class PBF2Solver(SPHBase):
 
         self.ps.x.copy_from(self.ps.y)
         iter = 0
-        print("test")
         for _ in range(self.max_iteration):
 
             self.compute_density()
