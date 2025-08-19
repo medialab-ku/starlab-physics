@@ -54,7 +54,7 @@ class PBF2Solver(SPHBase):
         # self.stiffness = self.ps.cfg.get_cfg("stiffness")
 
         self.surface_tension = 0.001
-        self.dt[None] = self.ps.cfg.get_cfg("timeStepSize")
+        self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
         self.nablaWij = self.cubic_kernel_derivative
         self.lda = self.ps.pressure
@@ -68,6 +68,7 @@ class PBF2Solver(SPHBase):
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
 
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Bii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -178,7 +179,7 @@ class PBF2Solver(SPHBase):
     def compute_density(self):
         # for p_i in range(self.ps.particle_num[None]):
 
-        print(self.ps.m[0] * self.cubic_kernel(0.0))
+        # print(self.ps.m[0] * self.cubic_kernel(0.0))
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
@@ -349,84 +350,19 @@ class PBF2Solver(SPHBase):
                 self.ps.acceleration[p_i] = d_v
 
     @ti.kernel
-    def advect_velocity(self):
+    def advect_velocity(self, dt: float):
         # Symplectic Euler
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                self.ps.v[p_i] += self.dt[None] * self.ps.acceleration[p_i]
-                # self.ps.x[p_i] += self.dt[None] * self.ps.v[p_i]
+                self.ps.v_adv[p_i] = self.ps.v[p_i] + dt * self.ps.acceleration[p_i]
+                # self.ps.x[p_i] += self.dt * self.ps.v[p_i]
 
     @ti.kernel
-    def advect_position(self):
+    def advect_position(self, dt: float):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                # self.ps.v[p_i] += self.dt[None] * self.ps.acceleration[p_i]
-                self.ps.x[p_i] += self.dt[None] * self.ps.v[p_i]
-
-
-    @ti.func
-    def compute_lambdas_task(self, p_i, p_j, ret: ti.template()):
-
-        # schur = 0.0
-        m_i = (self.density_0 * self.ps.m_V[p_i])
-        # dc_dxi = ti.math.vec3(0.0)
-        x_i = self.ps.x[p_i]
-        # Fluid neighbors
-        # dc_drho_i = self.density_0 * self.ps.m_V[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            x_j = self.ps.x[p_j]
-            # m_j = self.density_0 * self.ps.m_V[p_j]
-            nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
-            # dc_dxi -= nabla_cij
-            ret[3] += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
-
-            for i in range(3):
-                ret[i] -= nabla_cij[i]
-
-    @ti.kernel
-    def compute_source(self) -> float:
-
-        eps = 1e-6
-        avg_density_err = 0.0
-
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            self.b[p_i] = (self.ps.m[p_i] / self.ps.density0[p_i]) * (self.ps.density[p_i] - self.ps.density0[p_i])
-            avg_density_err += (ti.max(self.b[p_i], 0.0) / self.ps.m[p_i])
-
-        avg_density_err /= self.ps.fluid_particle_num
-        return avg_density_err
-
-    @ti.func
-    def compute_Ax_task(self, p_i, p_j, ret: ti.template()):
-
-        # schur = 0.0
-        m_i = (self.density_0 * self.ps.m_V[p_i])
-        # dc_dxi = ti.math.vec3(0.0)
-        x_i = self.ps.x[p_i]
-        # Fluid neighbors
-        # dc_drho_i = self.density_0 * self.ps.m_V[p_i] / (self.ps.density[p_i] * self.ps.density[p_i])
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            x_j = self.ps.x[p_j]
-            # m_j = self.density_0 * self.ps.m_V[p_j]
-            nabla_cij = (self.ps.m[p_i] / self.ps.density0[p_i]) * self.ps.m[p_j] * self.nablaWij(x_i - x_j)
-            # dc_dxi -= nabla_cij
-            ret[3] += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
-
-            for i in range(3):
-                ret[i] -= nabla_cij[i]
-
-    @ti.kernel
-    def computeAx(self):
-
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            ret = ti.Vector([0.0 for _ in range(self.ps.dim + 1)])
-            self.ps.for_all_neighbors(p_i, self.computeAx, ret)
+                # self.ps.v[p_i] += self.dt * self.ps.acceleration[p_i]
+                self.ps.x[p_i] += dt * self.ps.v[p_i]
 
 
     @ti.kernel
@@ -438,18 +374,17 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            Bii = 0.0
-            dc_dxi = ti.math.vec3(0.0)
+            Aii = 0.0
+            J_ii = ti.math.vec3(0.0)
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                nabla_cij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                Bii += nabla_cij.dot(nabla_cij) / self.ps.m[p_j]
+                J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
-                dc_dxi -= nabla_cij
-            Bii += dc_dxi.dot(dc_dxi) / self.ps.m[p_i]
-
-            self.Bii[p_i] = Bii + eps
-            self.Aii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * Bii + eps
+                J_ii -= J_ij
+            Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
+            self.Aii[p_i] = Aii + eps
+            # self.Aii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * Bii + eps
 
 
     @ti.func
@@ -572,7 +507,7 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i])/ self.dt[None]
+                self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i])/ self.dt
 
     @ti.kernel
     def project(self, p: ti.template()):
@@ -584,8 +519,8 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                v_tmp = (self.ps.x[p_i] - self.ps.x_old[p_i]) / self.dt[None]
-                self.ps.acceleration[p_i] += (v_tmp - self.ps.v_old[p_i]) / self.dt[None]
+                v_tmp = (self.ps.x[p_i] - self.ps.x_old[p_i]) / self.dt
+                self.ps.acceleration[p_i] += (v_tmp - self.ps.v_old[p_i]) / self.dt
 
 
     @ti.kernel
@@ -788,6 +723,30 @@ class PBF2Solver(SPHBase):
 
             nabla_rho_x[p_i] = nabla_rho_x_i
             # nabla_rho_x[p_i] = tmp_i
+    
+
+    @ti.kernel
+    def compute_J_x(self, ret: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            ret_i = 0.0
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                ret_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+
+            ret[p_i] = ret_i
+
+    @ti.kernel
+    def compute_J_tr_x(self, ret: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            ret_i = ti.math.vec3(0.0)
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                ret_i += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
+
+            ret[p_i] = ret_i
+
 
     @ti.kernel
     def mat_free_mul_invM_nabla_rho_T(self, invM_nabla_rho_T_x: ti.template(), x: ti.template()):
@@ -814,16 +773,16 @@ class PBF2Solver(SPHBase):
 
 
     @ti.kernel
-    def compute_b(self, b: ti.template(), v: ti.template()):
+    def compute_b(self, b: ti.template(), v: ti.template(), dt: float):
 
-        dtSq = self.dt[None] ** 2
+        dtSq = self.dt ** 2
         for p_i in ti.grouped(b):
             div_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-            b[p_i] = (self.ps.density[p_i] + self.dt[None] * div_i - self.ps.density0[p_i]) / dtSq
+            b[p_i] = (self.ps.density[p_i] + self.dt * div_i - self.ps.density0[p_i]) / dtSq
 
     @ti.kernel
     def measure_error(self, v: ti.template()) -> float:
@@ -835,7 +794,7 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-            avg_error = ti.max(self.ps.density[p_i] + self.dt[None] * div_i - self.ps.density0[p_i], 0.0) / self.ps.density0[p_i]
+            avg_error = ti.max(self.ps.density[p_i] + self.dt * div_i - self.ps.density0[p_i], 0.0) / self.ps.density0[p_i]
 
         return avg_error
 
@@ -873,29 +832,12 @@ class PBF2Solver(SPHBase):
 
 
     def pressure_solve(self):
-
-        self.compute_Aii()
-        # test = dot2(self.Aii, self.Aii)
-        # print("1: ", sqrt(test))
-        #
-        # test = dot2(self.Bii, self.Bii)
-        # print("2: ", sqrt(test))
-
-        self.p.fill(0.0)
-        self.y.fill(0.0)
-        self.compute_b(self.b, self.ps.v)
-
-        self.stats_iter     = 0
-        # method = 0
+        
         if self.method == 0:
-            self.ProjectedJacobi()
-        elif self.method == 1:
-            self.ADMM()
-        elif self.method == 2:
-            # print("test")
-            self.Barrier()
-        elif self.method == 3:
-            self.NormalEquations()
+            self.ps.v.copy_from(self.ps.v_adv)
+            self.IISPH()
+
+        
 
     @ti.kernel
     def compute_Hii(self, p: ti.template()):
@@ -952,7 +894,7 @@ class PBF2Solver(SPHBase):
         self.project(self.y)
         # self.mat_free_mul_D(self.y, self.p)
         self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.y)
-        add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+        add(self.v_tmp, self.ps.v, -self.dt, self.tmp)
 
 
         # print("TODO")
@@ -1062,7 +1004,7 @@ class PBF2Solver(SPHBase):
 
             # self.tmp.fill(0.0)
             # self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
-            # add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+            # add(self.v_tmp, self.ps.v, -self.dt, self.tmp)
             #
             # err = self.measure_error(self.v_tmp)
             # if  err < eps:
@@ -1128,7 +1070,7 @@ class PBF2Solver(SPHBase):
 
             self.tmp.fill(0.0)
             self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
-            add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+            add(self.v_tmp, self.ps.v, -self.dt, self.tmp)
             err = self.measure_error(self.v_tmp)
             if err < tol  and self.stats_iter > 2:
                break
@@ -1144,7 +1086,7 @@ class PBF2Solver(SPHBase):
         # Apply final solution to velocity: v <- v - dt * (invM nabla_rho^T w)
         # self.tmp.fill(0.0)
         # self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_admm)
-        # add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
+        # add(self.v_tmp, self.ps.v, -self.dt, self.tmp)
 
         # self.clamp_velocity(self.v_tmp, vmax=3.0)
         self.ps.v.copy_from(self.v_tmp)
@@ -1211,111 +1153,35 @@ class PBF2Solver(SPHBase):
             denom = ti.max(diag_approx, 1e-12)
             z[p_i] = r[p_i] / denom
 
-    def ProjectedJacobi(self):
+    def IISPH(self):
+
+        self.compute_Aii()
+        self.compute_b(self.b, self.ps.v_adv, self.dt)
 
         tol = pow(10, -self.tol)
-        
-        # Setup RHS and solution variables based on matrix type
-        if self.matrix_type == 0:
-            # Type 0: J M^-1 J^T y = b
-            rhs = self.b
-            solution = self.y
-        elif self.matrix_type == 1:
-            # Type 1: √D J M^-1 J^T √D x₁ = √D b
-            self.mat_free_mul_D_sqrt(self.p, self.b)  # p = √D * b (reuse p field)
-            rhs = self.p
-            solution = self.x  # Solve for x₁
-        elif self.matrix_type == 2:
-            # Type 2: D J M^-1 J^T D x₂ = D b
-            self.mat_free_mul_D(self.p, self.b)  # p = D * b (reuse p field)
-            rhs = self.p
-            solution = self.x  # Solve for x₂
-        elif self.matrix_type == 3:
-            # Type 3: J M^-1 J^T p = b (non-symmetric baseline)
-            rhs = self.b
-            solution = self.p  # Solve directly for p
-        
-        # Initialize solution
-        solution.fill(0.0)
-        
-        for i in range(self.max_iteration):
+        self.p.fill(0.0)
+        iter = 0
+        relax = 0.5
+        for _ in range(self.max_iteration):
 
-            # Convergence check: compute M^-1 J^T (effective Dp) directly
-            if self.matrix_type == 0:
-                # Direct: M^-1 J^T y (y already = Dp)
-                self.mat_free_mul_invM_nabla_rho_T(self.tmp, solution)
-            elif self.matrix_type == 1:
-                # M^-1 J^T √D x₁ (avoid computing p = √D^-1 √D x₁)
-                self.mat_free_mul_D_sqrt(self.z_pcg, solution)  # z_pcg = √D x₁
-                self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_pcg)
-            elif self.matrix_type == 2:
-                # M^-1 J^T D x₂ (avoid computing p = D^-1 D x₂)
-                self.mat_free_mul_D(self.z_pcg, solution)  # z_pcg = D x₂
-                self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_pcg)
-            elif self.matrix_type == 3:
-                # M^-1 J^T D p (need to multiply by D first)
-                self.mat_free_mul_D(self.z_pcg, solution)  # z_pcg = D p
-                self.mat_free_mul_invM_nabla_rho_T(self.tmp, self.z_pcg)
+            self.compute_J_tr_x(self.tmp, self.p)
+            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+
+            add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
+            error = self.measure_error(self.ps.v)
+
+            if error < tol and iter > 2:
+
+                print(f" converged iter: {iter}. error: {error}")
+                break 
             
-            # Common error computation
-            add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp)
-            err = self.measure_error(self.v_tmp)
+            iter += 1 
 
-            if err < tol and self.stats_iter > 2:
-                break
-
-            self.stats_iter += 1
-            
-            # Matrix-vector product based on type
-            if self.matrix_type == 0:
-                self._apply_matrix_type0(self.Ap, solution)
-            elif self.matrix_type == 1:
-                self._apply_matrix_type1(self.Ap, solution)
-            elif self.matrix_type == 2:
-                self._apply_matrix_type2(self.Ap, solution)
-            elif self.matrix_type == 3:
-                self._apply_matrix_type3(self.Ap, solution)
-
-            # Residual computation
-            add(self.r_pcg, rhs, -1.0, self.Ap)
-            
-            # Apply appropriate preconditioner
-            if self.matrix_type == 0:
-                self.apply_precondition(self.z_pcg, self.Bii, self.r_pcg)
-            elif self.matrix_type == 1:
-                self._apply_preconditioner_type1(self.z_pcg, self.r_pcg)
-            elif self.matrix_type == 2:
-                self._apply_preconditioner_type2(self.z_pcg, self.r_pcg)
-            elif self.matrix_type == 3:
-                self._apply_preconditioner_type3(self.z_pcg, self.r_pcg)
-            
-            # Update solution
-            add(solution, solution, 1.0, self.z_pcg)
-            self.project(solution)
-
-        # Final solution recovery
-        if self.matrix_type == 1:
-            # y = √D * x₁
-            self.mat_free_mul_D_sqrt(self.y, solution)
-        elif self.matrix_type == 2:
-            # y = D * x₂
-            self.mat_free_mul_D(self.y, solution)
-        elif self.matrix_type == 3:
-            # y = D * p (convert pressure to Dp for velocity update)
-            self.mat_free_mul_D(self.y, solution)
-        # For type 0, solution is already in self.y
-
-        print(f"Jacobi iteration (type {self.matrix_type}): ", self.stats_iter)
-        
-        # Log iteration data if logging is enabled
-        if self.enable_logging:
-            self.iteration_log.append([self.current_frame, self.matrix_type, self.stats_iter])
-        
-        # Log spectral radius if spectral analysis is enabled
-        if self.enable_spectral_analysis and self.spectral_radius_analyzer:
-            self.spectral_radius_analyzer.log_spectral_radius()
-        
-        self.ps.v.copy_from(self.v_tmp)
+            self.compute_J_x(self.Ap, self.tmp)
+            add(self.r_pcg, self.b, -1.0, self.Ap)
+            coef_wise_op(self.dp, self.r_pcg, self.Aii, 1)
+            add(self.p, self.p, relax, self.dp)  # Initialize p with b
+            max(self.p)  # Ensure non-negativity
 
     def NormalEquations(self):
         """
@@ -1359,7 +1225,7 @@ class PBF2Solver(SPHBase):
         # Apply the solution to velocity: v = v - dt * (M^(-1) J^T D p)
         self.mat_free_mul_D(self.tmp, self.p)  # tmp = D p
         self.mat_free_mul_invM_nabla_rho_T(self.tmp_vec, self.tmp)  # tmp_vec = M^(-1) J^T D p
-        add(self.v_tmp, self.ps.v, -self.dt[None], self.tmp_vec)
+        add(self.v_tmp, self.ps.v, -self.dt, self.tmp_vec)
         self.ps.v.copy_from(self.v_tmp)
 
     def save_iteration_logs(self):
@@ -1455,16 +1321,17 @@ class PBF2Solver(SPHBase):
         self.current_frame += 1
 
     def substep(self):
-
+        
+        # print("test")
         # Increment frame counter for logging
-        if self.enable_logging:
-            self.increment_frame()
+        # if self.enable_logging:
+        #     self.increment_frame()
 
         self.ps.search_neighbours(self.ps.x)
         # self.ps.x_old.copy_from(self.ps.x)
         self.compute_non_pressure_forces()
         self.compute_density()
         self.precompute_values()
-        self.advect_velocity()
+        self.advect_velocity(self.dt)
         self.pressure_solve()
-        self.advect_position()
+        self.advect_position(self.dt)

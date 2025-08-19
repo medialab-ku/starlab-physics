@@ -97,17 +97,17 @@ if __name__ == "__main__":
         global export_ply
 
         with gui.sub_window("Settings", 0., 0., 0.4, 0.4) as w:
-            # dt_ui = w.slider_float("dt", dt_ui, 0.001, 0.101)
-            # ps.eta = w.slider_float("eta ", ps.eta, 0.0, 1.0)
-            # solver.viscosity = w.slider_float("viscosity", solver.viscosity, 0.0, 1.0)
-            #
-            if method == 1:
+            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.01)
+            if method == 2:
                 solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
-            # solver.method = w.slider_int("method type", solver.method, 0, 2)
+                solver.method = w.slider_int("method type", solver.method, 0, 2)
 
-            # if solver.method == 0:
-            #     gui.text("Projected Jacobi")
+                if solver.method == 0:
+                    gui.text("IISPH")
+                elif solver.method == 1:
+                    gui.text("PBF")
+
             #     solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 3)
             #     if solver.matrix_type == 0:
             #         gui.text("B")
@@ -172,7 +172,7 @@ if __name__ == "__main__":
                 ps.v.fill(0.0)
                 runSim = False
                 # Reset logging and save current data
-                solver.reset_logging()
+                # solver.reset_logging()
 
         if export_ply and frame_cnt > end_frame:
             runSim = False

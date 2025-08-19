@@ -19,6 +19,11 @@ def dot2(a: ti.template(), b: ti.template()) -> float:
     return ret
 
 @ti.kernel
+def max(x: ti.template()):
+     for i in x:
+        x[i] = ti.max(x[i], 0.0)
+
+@ti.kernel
 def add(ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
     for i in ret:
         ret[i] = v0[i] + scale * v1[i]
@@ -40,6 +45,16 @@ def inf_norm(x: ti.template()) -> float:
         ti.atomic_max(ret, tmp)
 
     return ret
+
+@ti.kernel
+def coef_wise_op(ret: ti.template(), x: ti.template(), y: ti.template(), op: int):
+
+    for i in x:
+        if op == 0:  # mul
+            ret[i] = x[i] + y[i]
+        
+        if op == 1:  # div
+            ret[i] = x[i] / y[i]
 
 @ti.kernel
 def mean_ti(x: ti.template()) -> float:

@@ -7,7 +7,6 @@ from WCSPH import WCSPHSolver
 from DFSPH import DFSPHSolver
 from PBF import PBFSolver
 from PBF2 import PBF2Solver
-from PBF3 import PBF3Solver
 from IISPH import IISPHSolver
 from scan_single_buffer import parallel_prefix_sum_inclusive_inplace
 
@@ -108,6 +107,7 @@ class ParticleSystem:
         self.x_old = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.x_0 = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.v = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+        self.v_adv = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.v_old = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.y = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.acceleration = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)

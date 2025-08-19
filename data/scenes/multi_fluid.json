@@ -3,12 +3,12 @@
 	{
         "domainStart": [0.0, 0.0, 0.0],
         "domainEnd": [2.0, 6.0, 2.0],
-		"particleRadius": 0.02,
+		"particleRadius": 0.01,
 		"numberOfStepsPerRenderUpdate": 1,
 		"density0": 1000,
-		"simulationMethod": 1,
+		"simulationMethod": 2,
 		"gravitation": [0.0, -9.81, 0.0],
-		"timeStepSize": 0.003,
+		"timeStepSize": 0.005,
 		"stiffness": 50000,
 		"exponent": 7,
 		"boundaryHandlingMethod": 0,
@@ -20,7 +20,7 @@
 		{
             "objectId": 0,
 			"start": [0.0, 0.0, 0.0],
-			"end": [0.6, 2.5, 0.6],
+			"end": [0.5, 2.5, 0.5],
 			"translation": [0.1, 0.1, 0.1],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
@@ -31,11 +31,11 @@
 		{
             "objectId": 0,
 			"start": [0.0, 2.6, 0.0],
-			"end": [0.6, 5.1, 0.6],
+			"end": [0.5, 5.1, 0.5],
 			"translation": [0.1, 0.1, 0.1],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
-			"density": 10000.0,
+			"density": 1000.0,
 			"color": [200, 100, 10]
 		}
 	]
