@@ -12,15 +12,15 @@ ti.init(arch=ti.gpu)
 screen_res = (500, 1000)
 screen_to_world_ratio = 400.0
 
-solver_method = 2
+solver_method = 0
 dim = 2
 bg_color = 0x112F41
 particle_color = 0x068587
 boundary_color = 0xEBACA2
 num_particles_x = 60
-num_particles = num_particles_x * 200
+num_particles = num_particles_x * 100
 max_num_particles_per_cell = 400
-max_num_neighbors = 400
+max_num_neighbors = 800
 time_delta = 0.001
 epsilon = 1e-5
 eps = 1e-2
@@ -178,8 +178,6 @@ r_vec = ti.Vector.field(dim, float)
 p_vec = ti.Vector.field(dim, float)
 z_vec = ti.Vector.field(dim, float)
 rhs_vec = ti.Vector.field(dim, float)
-boundary_positions = ti.Vector.field(dim, float)
-boundary_positions_normalized = ti.Vector.field(dim, float)
 grid_num_particles = ti.field(int)
 grid2particles = ti.field(int)
 particle_num_neighbors = ti.field(int)
@@ -198,19 +196,35 @@ dp = ti.field(float)
 omega_ls = ti.field(float, shape=())
 # 0: x-pos, 1: timestep in sin()
 board_states = ti.Vector.field(2, float)
-ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_adv, positions_normalized, dx, velocities, velocities_adv, velocities_tmp)
-ti.root.dense(ti.i, num_particles).place(Ap_vec, r_vec, p_vec, z_vec, rhs_vec)
+particle_is_dynamic = ti.field(dtype=ti.i32)
+
+#TODO: allocate taichi data structure for boundary particle: neighbor search, mass
+
+boundary_positions = ti.Vector.field(dim, float)
+boundary_positions_normalized = ti.Vector.field(dim, float)
+
+boundary_num_neighbors = ti.field(int)
+boundary_neighbors = ti.field(int)
+
+m_b = ti.field(float)
 ti.root.dense(ti.i, num_boundary_particles).place(boundary_positions, boundary_positions_normalized)
+ti.root.dense(ti.i, num_boundary_particles).place(m_b)
+
+ti.root.dense(ti.i, num_particles).place(old_positions, positions, positions_adv, positions_normalized, dx, velocities, velocities_adv, velocities_tmp, particle_is_dynamic)
+ti.root.dense(ti.i, num_particles).place(Ap_vec, r_vec, p_vec, z_vec, rhs_vec)
 ti.root.dense(ti.i, num_particles).place(Aii, Dii, Hii, src, r, z, Ax, rho, rho0, res, tmp, num, b)
 ti.root.dense(ti.i, num_particles).place(dp)
 grid_snode = ti.root.dense(ti.ij, grid_size)
 grid_snode.place(grid_num_particles)
 grid_snode.dense(ti.k, max_num_particles_per_cell).place(grid2particles)
 nb_node = ti.root.dense(ti.i, num_particles)
+nb_node.place(boundary_num_neighbors)
 nb_node.place(particle_num_neighbors)
-nb_node.dense(ti.j, max_num_neighbors).place(particle_neighbors, particle_wij)
+nb_node.dense(ti.j, max_num_neighbors).place(boundary_neighbors, particle_neighbors, particle_wij)
 ti.root.dense(ti.i, num_particles).place(p, m, barrier_grad, barrier_hess, position_deltas)
 ti.root.place(board_states)
+
+
 
 
 @ti.func
@@ -307,35 +321,65 @@ def move_board(dt: float):
     board_states[None] = b
 
 
+#TODO: separate neighbor search into two steps
 @ti.kernel
-def neighbor_search(x: ti.template()):
+def neighbor_search(x: ti.template(), x_b: ti.template()):
+    
+    # step 1: clear grid
     for I in ti.grouped(grid_num_particles):
         grid_num_particles[I] = 0
-    for I in ti.grouped(particle_neighbors):
-        particle_neighbors[I] = -1
+    # for I in ti.grouped(particle_neighbors):
+    #     particle_neighbors[I] = -1
     # update grid
+
+    # step 2: update particles in cell
     for p_i in x:
         cell = get_cell(x[p_i])
         # ti.Vector doesn't seem to support unpacking yet
         # but we can directly use int Vectors as indices
         offs = ti.atomic_add(grid_num_particles[cell], 1)
         grid2particles[cell, offs] = p_i
-    # find particle neighbors
+
+    for p_i in x_b:
+        cell = get_cell(x_b[p_i])
+        offs = ti.atomic_add(grid_num_particles[cell], 1)
+        # Add offset to distinguish boundary particles
+        grid2particles[cell, offs] = p_i + num_particles
+
+
+    for i in range(num_particles):
+        particle_num_neighbors[i] = 0
+        boundary_num_neighbors[i] = 0
+
+    # step 3: find particle neighbors & boundary neighbors
     for p_i in x:
         pos_i = x[p_i]
         cell = get_cell(pos_i)
+        
         nb_i = 0
+        nbb_i = 0
         for offs in ti.static(ti.grouped(ti.ndrange((-1, 2), (-1, 2)))):
             cell_to_check = cell + offs
             if is_in_grid(cell_to_check):
                 for j in range(grid_num_particles[cell_to_check]):
-                    p_j = grid2particles[cell_to_check, j]
-                    if nb_i < max_num_neighbors and p_j != p_i and (pos_i - x[p_j]).norm() < neighbor_radius:
+                    p_j_global = grid2particles[cell_to_check, j]
+                    is_fluid = p_j_global < num_particles
 
-                        if p_j >= 0:
-                            particle_neighbors[p_i, nb_i] = p_j
-                            nb_i += 1
-        particle_num_neighbors[p_i] = nb_i
+                    if is_fluid:
+                        p_j_local = p_j_global
+                        if p_i != p_j_local and (pos_i - x[p_j_local]).norm() < neighbor_radius:
+                            if nb_i < max_num_neighbors:
+                                particle_neighbors[p_i, nb_i] = p_j_local
+                                nb_i += 1
+                    else:
+                        p_k_local = p_j_global - num_particles
+                        if (pos_i - x_b[p_k_local]).norm() < neighbor_radius:
+                            if nbb_i < max_num_neighbors:
+                                boundary_neighbors[p_i, nbb_i] = p_k_local
+                                nbb_i += 1
+            
+            particle_num_neighbors[p_i] = nb_i
+            boundary_num_neighbors[p_i] = nbb_i
 
 @ti.kernel
 def advect_velocity(dt: float):
@@ -413,9 +457,11 @@ def epilogue(dt: float):
     # no vorticity/xsph because we cannot do cross product in 2D...
 
 @ti.kernel
-def precompute(x: ti.template()):
+def precompute(x: ti.template(), x_b: ti.template()):
         
     # print(m[0] * cubic_value(0.0, h_))
+
+    # for fluid particles
     for p_i in x:
         pos_i = x[p_i]
         grad_i = ti.Vector([0.0, 0.0])
@@ -432,9 +478,20 @@ def precompute(x: ti.template()):
             grad_i += m[p_j] * grad_j
             sum_gradient_sqr += (m[p_j] * grad_j).dot(m[p_j] * grad_j) / m[p_j]
             density += m[p_j] * cubic_value(pos_ji.norm(), h_)
+
+        #TODO: for boundary particles: density, Aii
+        for k in range(boundary_num_neighbors[p_i]):
+            p_k = boundary_neighbors[p_i, k]
+            pos_ki = pos_i - x_b[p_k]
+            grad_k = cubic_gradient(pos_ki, h_)
+            particle_wij[p_i, particle_num_neighbors[p_i] + k] = grad_k
+            grad_i += m_b[p_k] * grad_k
+            density += m_b[p_k] * cubic_value(pos_ki.norm(), h_)
+
         sum_gradient_sqr += grad_i.dot(grad_i) / m[p_i]
         rho[p_i] = density
         Aii[p_i] = sum_gradient_sqr + 1e-3
+
 
 @ti.kernel
 def precompute_vanilla(x: ti.template()):
@@ -487,8 +544,13 @@ def compute_J_tr_x(res: ti.template(), x: ti.template()):
             #     break
             res[p_i] += (m[p_j] * x[p_i] + m[p_i] * x[p_j]) * grad_ij
             # Ax[p_i] += lambdas[p_j] * cubic_gradient(positions[p_i] - positions[p_j], h_)
-    
 
+        #TODO: for boundary particles: compute_J_tr_x   
+        for k in range(boundary_num_neighbors[p_i]):
+            p_k = boundary_neighbors[p_i, k]
+            grad_ik = particle_wij[p_i, particle_num_neighbors[p_i] + k]
+            res[p_i] += (m_b[p_k] * x[p_i]) * grad_ik
+    
 
 @ti.kernel
 def compute_J_x(res: ti.template(), x: ti.template()):
@@ -502,6 +564,11 @@ def compute_J_x(res: ti.template(), x: ti.template()):
             res[p_i] += m[p_j] * (x[p_i] - x[p_j]).dot(grad_ij)
             # Ax[p_i] += lambdas[p_j] * cubic_gradient(positions[p_i] - positions[p_j], h_)
 
+        #TODO: for boundary particles: compute_J_x
+        for k in range(boundary_num_neighbors[p_i]):
+            p_k = boundary_neighbors[p_i, k]
+            grad_ik = particle_wij[p_i, (particle_num_neighbors[p_i] + k)]
+            res[p_i] += m_b[p_k] * x[p_i].dot(grad_ik)
 
 @ti.kernel
 def dot(a: ti.template(), b: ti.template()) -> float:
@@ -624,8 +691,8 @@ def run_iisph(dt):
 
     old_positions.copy_from(positions)
     advect_velocity(dt)
-    neighbor_search(positions)
-    precompute(positions)
+    neighbor_search(positions, boundary_positions)
+    precompute(positions, boundary_positions)
     velocities.copy_from(velocities_adv)
     
     compute_src(src, velocities, dt)
@@ -1061,10 +1128,12 @@ def init_particles():
     alpha = (0.4 / cubic_value(0.0, h_)) 
     for i in range(num_particles):
         delta = h_ * 0.5
-        offs = ti.Vector([(boundary[0] - delta * num_particles_x) * 0.5, boundary[1] * 0.02])
+        offs = ti.Vector([(boundary[0] - delta * num_particles_x) * 0.5, boundary[1] * 0.06])
         positions[i] = ti.Vector([i % num_particles_x, i // num_particles_x]) * delta + offs
         for c in ti.static(range(dim)):
             velocities[i][c] = 0.0
+        
+        particle_is_dynamic[i] = 1 # 1 for fluid, 0 for boundary
         
         # Initialize per-particle rest density
         # You can customize this based on particle properties
@@ -1072,6 +1141,9 @@ def init_particles():
         
         # Set mass based on per-particle rest density
         m[i] = rho0[i] * alpha
+
+    m_b.fill(1e+7)
+
     board_states[None] = ti.Vector([boundary[0] - epsilon, -0.0])
 
 @ti.kernel 
@@ -1098,6 +1170,7 @@ def set_particle_rest_densities():
 
 def init_boundary_particles():
     boundary_positions.from_numpy(boundary_positions_np)
+    # boundary_positions = compute_boundary_positions()
 
 def regenerate_boundary():
     global boundary_positions_np, num_boundary_particles
@@ -1213,7 +1286,6 @@ def main():
                 run_pbf(time_delta)
             elif solver_method == 2:
                 run_pcg(time_delta)
-                run_test_pcg(time_delta)
             elif solver_method == 3:
                 run_iisph_vanilla(time_delta)
 
