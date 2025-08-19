@@ -59,19 +59,18 @@ class PBF2Solver(SPHBase):
         self.nablaWij = self.cubic_kernel_derivative
         self.lda = self.ps.pressure
         self.method = 0
+        self.iisph_vanilla = False 
 
         self.tol = 2
         self.toggle = True
         self.max_iteration = 1000
 
-        self.div = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Bii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Hii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -81,17 +80,6 @@ class PBF2Solver(SPHBase):
         self.z_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.r_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
-        # ADMM variables
-        self.b_admm = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z_admm = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r_admm = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.w = ti.field(dtype=float, shape=self.ps.fluid_particle_num)  # consensus variable
-        self.w_prev = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.u = ti.field(dtype=float, shape=self.ps.fluid_particle_num)  # dual variable
-        self.i = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.i.fill(1.0)
-
-        self.grad = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         self.Ap_b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -366,7 +354,7 @@ class PBF2Solver(SPHBase):
 
 
     @ti.kernel
-    def compute_Aii(self):
+    def compute_Aii(self, iisph_vanilla: bool):
 
         eps = 1e-3
 
@@ -383,9 +371,14 @@ class PBF2Solver(SPHBase):
 
                 J_ii -= J_ij
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
-            self.Aii[p_i] = Aii + eps
-            # self.Aii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i]) * Bii + eps
 
+            if iisph_vanilla:
+                 Dii = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
+                 self.Dii[p_i] = Dii
+                 self.Aii[p_i] = Dii * Aii + eps
+            else:
+                self.Aii[p_i] = Aii + eps
+ 
 
     @ti.func
     def compute_lambdas_task2(self, p_i, p_j, ret: ti.template()):
@@ -775,17 +768,17 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_b(self, b: ti.template(), v: ti.template(), dt: float):
 
-        dtSq = self.dt ** 2
+        dtSq = dt ** 2
         for p_i in ti.grouped(b):
             div_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-            b[p_i] = (self.ps.density[p_i] + self.dt * div_i - self.ps.density0[p_i]) / dtSq
+            b[p_i] = (self.ps.density[p_i] + dt * div_i - self.ps.density0[p_i]) / dtSq
 
     @ti.kernel
-    def measure_error(self, v: ti.template()) -> float:
+    def measure_error(self, v: ti.template(), dt: float) -> float:
 
         avg_error = 0.0
         for p_i in ti.grouped(v):
@@ -794,7 +787,7 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-            avg_error = ti.max(self.ps.density[p_i] + self.dt * div_i - self.ps.density0[p_i], 0.0) / self.ps.density0[p_i]
+            avg_error = ti.max(self.ps.density[p_i] + dt * div_i - self.ps.density0[p_i], 0.0) / self.ps.density0[p_i]
 
         return avg_error
 
@@ -834,7 +827,6 @@ class PBF2Solver(SPHBase):
     def pressure_solve(self):
         
         if self.method == 0:
-            self.ps.v.copy_from(self.ps.v_adv)
             self.IISPH()
 
         
@@ -1153,22 +1145,52 @@ class PBF2Solver(SPHBase):
             denom = ti.max(diag_approx, 1e-12)
             z[p_i] = r[p_i] / denom
 
+
+    @ti.kernel
+    def compute_invM_J_tr_D_x(self, ret: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            ret_i = ti.math.vec3(0.0)
+
+            inv_density_2 = 1.0 / (self.ps.density[p_i] ** 2) 
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                ret_i += self.ps.m[p_j] * (x[p_i] * inv_density_2 + x[p_j] / (self.ps.density[p_j] ** 2)) * self.ps.fluid_neighbors_values[p_i, j]
+
+            ret[p_i] = ret_i
+
     def IISPH(self):
 
-        self.compute_Aii()
-        self.compute_b(self.b, self.ps.v_adv, self.dt)
+        self.ps.v.copy_from(self.ps.v_adv)
+        self.compute_Aii(self.iisph_vanilla)
+        self.compute_b(self.b, self.ps.v, self.dt)
 
         tol = pow(10, -self.tol)
         self.p.fill(0.0)
         iter = 0
         relax = 0.5
         for _ in range(self.max_iteration):
+            
 
-            self.compute_J_tr_x(self.tmp, self.p)
+            # if self.iisph_vanilla:
+            #     coef_wise_op(self.p, self.p, self.Dii, 0)
+
+            # self.compute_J_tr_x(self.tmp, self.p)
+            # coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+
+            if self.iisph_vanilla:
+                # self.compute_invM_J_tr_D_x(self.tmp, self.p)
+                # coef_wise_op(self.p, self.p, self.Dii, 0)
+                
+                coef_wise_mul(self.y, self.Dii, self.p)
+                self.compute_J_tr_x(self.tmp, self.y)
+            else:
+                self.compute_J_tr_x(self.tmp, self.p)
+                
+                
             coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
-
             add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
-            error = self.measure_error(self.ps.v)
+            error = self.measure_error(self.ps.v, self.dt)
 
             if error < tol and iter > 2:
 
@@ -1179,7 +1201,10 @@ class PBF2Solver(SPHBase):
 
             self.compute_J_x(self.Ap, self.tmp)
             add(self.r_pcg, self.b, -1.0, self.Ap)
+
             coef_wise_op(self.dp, self.r_pcg, self.Aii, 1)
+
+    
             add(self.p, self.p, relax, self.dp)  # Initialize p with b
             max(self.p)  # Ensure non-negativity
 

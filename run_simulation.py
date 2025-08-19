@@ -105,6 +105,8 @@ if __name__ == "__main__":
 
                 if solver.method == 0:
                     gui.text("IISPH")
+                    solver.iisph_vanilla = w.checkbox("vanilla",  solver.iisph_vanilla)
+
                 elif solver.method == 1:
                     gui.text("PBF")
 

@@ -51,11 +51,17 @@ def coef_wise_op(ret: ti.template(), x: ti.template(), y: ti.template(), op: int
 
     for i in x:
         if op == 0:  # mul
-            ret[i] = x[i] + y[i]
+            ret[i] = x[i] * y[i]
         
         if op == 1:  # div
             ret[i] = x[i] / y[i]
 
+@ti.kernel
+def coef_wise_mul(ret: ti.template(), x: ti.template(), y: ti.template()):
+
+    for i in x:
+        ret[i] = x[i] * y[i]
+    
 @ti.kernel
 def mean_ti(x: ti.template()) -> float:
     """Taichi kernel version of mean calculation"""

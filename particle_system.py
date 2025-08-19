@@ -5,7 +5,6 @@ from functools import reduce
 from config_builder import SimConfig
 from WCSPH import WCSPHSolver
 from DFSPH import DFSPHSolver
-from PBF import PBFSolver
 from PBF2 import PBF2Solver
 from IISPH import IISPHSolver
 from scan_single_buffer import parallel_prefix_sum_inclusive_inplace
