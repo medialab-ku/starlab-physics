@@ -105,6 +105,7 @@ if __name__ == "__main__":
 
                 if solver.method == 0:
                     gui.text("IISPH")
+                    solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
                     solver.iisph_vanilla = w.checkbox("vanilla",  solver.iisph_vanilla)
 
                 elif solver.method == 1:
