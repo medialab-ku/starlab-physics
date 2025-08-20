@@ -45,6 +45,10 @@ python run_simulation.py --scene_file ./data/scenes/dragon_bath.json
 python run_simulation.py --scene_file ./data/scenes/armadillo_bath_dynamic.json
 ```
 
+```
+python run_simulation.py --scene_file ./data/scenes/multi_fluid.json
+```
+
 
 ## Reference
 1. M. Becker and M. Teschner (2007). "Weakly compressible SPH for free surface flows". In:Proceedings of the 2007 ACM SIGGRAPH/Eurographics symposium on Computer animation. Eurographics Association, pp. 209–217.
