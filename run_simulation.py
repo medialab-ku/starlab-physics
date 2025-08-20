@@ -23,7 +23,8 @@ if __name__ == "__main__":
     config = SimConfig(scene_file_path=scene_path)
     scene_name = scene_path.split("/")[-1].split(".")[0]
 
-    substeps = config.get_cfg("numberOfStepsPerRenderUpdate")
+    substeps = config.get_cfg("numSubstepping")
+    print(substeps)
     output_frames = config.get_cfg("exportFrame")
     output_interval = int(0.016 / config.get_cfg("timeStepSize"))
     output_ply = config.get_cfg("exportPly")
@@ -97,7 +98,10 @@ if __name__ == "__main__":
         global export_ply
 
         with gui.sub_window("Settings", 0., 0., 0.4, 0.4) as w:
-            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.01)
+
+            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
+            solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
+
             if method == 2:
                 solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
@@ -168,7 +172,7 @@ if __name__ == "__main__":
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
                 runSim = not runSim
-                print(runSim)
+                # print(runSim)
 
             if window.event.key == 'r':
                 frame_cnt = 0
@@ -182,9 +186,13 @@ if __name__ == "__main__":
             runSim = False
 
         if runSim:
-            for i in range(substeps):
+
+            dt = solver.dt
+            solver.dt = dt / solver.num_substep
+            for i in range(solver.num_substep):
                 solver.step()
 
+            solver.dt = dt 
             frame_cnt += 1
 
         ps.copy_to_vis_buffer(invisible_objects=invisible_objects)

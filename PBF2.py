@@ -60,10 +60,10 @@ class PBF2Solver(SPHBase):
         self.lda = self.ps.pressure
         self.method = 1
         self.iisph_vanilla = False 
-
+        self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
         self.tol = 2
         self.omega = 0.5 
-        self.toggle = True
+        self.cfl = True
         self.max_iteration = 1000
 
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
@@ -489,6 +489,8 @@ class PBF2Solver(SPHBase):
             coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
 
             # x^k+1 = x^k - step_size(=0.5) * M^-1 J^t * p
+
+
             add(self.ps.x, self.ps.x, -0.5, self.tmp)
 
             iter += 1
@@ -499,10 +501,11 @@ class PBF2Solver(SPHBase):
 
     def substep(self):
         
+        
         self.ps.search_neighbours(self.ps.x)
         self.compute_non_pressure_forces()
-        self.advect_velocity(self.dt)
 
+        self.advect_velocity(self.dt)
         if self.method == 0:
             self.IISPH()
         elif self.method == 1:
