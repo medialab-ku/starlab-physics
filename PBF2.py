@@ -176,10 +176,16 @@ class PBF2Solver(SPHBase):
                 dx_j = self.ps.x[p_j] - self.ps.y[p_i]
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
-                Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
+
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
                 J_ii -= J_ij
-                Jdx_i += self.ps.m[p_j] * (dx_i - dx_j).dot(grad_ij)
+
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Jdx_i += self.ps.m[p_j] * (dx_i - dx_j).dot(grad_ij)
+                else:
+                    Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
 
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
                 
@@ -277,7 +283,9 @@ class PBF2Solver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
+
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
                 J_ii -= J_ij
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
@@ -309,7 +317,10 @@ class PBF2Solver(SPHBase):
             ret_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                ret_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    ret_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                else:
+                    ret_i += self.ps.m[p_j] * (x[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
             ret[p_i] = ret_i
 
@@ -327,7 +338,10 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # val = ti.cast(self.ps.material[p_i], float)
                 if self.ps.material[p_i] == self.ps.material_fluid:
-                    ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
+                    if self.ps.material[p_j] == self.ps.material_fluid:
+                        ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
+                    else:
+                        ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
 
         # print(num_f)
             # ret[p_i] = ret_i

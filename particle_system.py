@@ -489,8 +489,10 @@ class ParticleSystem:
         rigid_body["restCenterOfMass"] = mesh_backup.vertices.mean(axis=0)
         is_success = tm.repair.fill_holes(mesh)
             # print("Is the mesh successfully repaired? ", is_success)
-        voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter)
-        voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).fill()
+
+        a = 0.5 
+        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
+        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
         # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
         # voxelized_mesh.show()
         voxelized_points_np = voxelized_mesh.points
