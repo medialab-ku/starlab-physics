@@ -61,19 +61,22 @@ class PBF2Solver(SPHBase):
         self.method = 1
         self.iisph_vanilla = False 
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
+
+        self.adaptive_step_size = False 
+        self.print_info = True 
         self.tol = 2
         self.omega = 0.5 
         self.cfl = True
         self.max_iteration = 1000
-
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Hii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Hii = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -168,6 +171,7 @@ class PBF2Solver(SPHBase):
                 continue
             Jdx_i = 0.0
             Aii = 0.0
+            Hii = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
             dx_i = self.ps.x[p_i] - self.ps.y[p_i]
             for j in range(self.ps.fluid_neighbors_num[p_i]):
@@ -177,6 +181,8 @@ class PBF2Solver(SPHBase):
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
 
+
+                Hii += J_ij.outer_product(J_ij)
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
@@ -188,10 +194,11 @@ class PBF2Solver(SPHBase):
                     Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
 
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
-                
+            Hii += J_ii.outer_product(J_ii)
             c = ti.max(self.ps.density[p_i] - self.ps.density0[p_i], 0.0)
             ret += (c / self.ps.density0[p_i]) 
             self.c[p_i] = c
+            self.Hii[p_i] = Hii 
             self.Aii[p_i] = Aii + eps
             self.p[p_i] = c / (Aii + eps)
 
@@ -447,6 +454,18 @@ class PBF2Solver(SPHBase):
         
         self.advect_position(self.dt)
         
+    
+    @ti.kernel
+    def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
+
+        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            
+            H = self.ps.m[p_i] * I3x3 + Hii[p_i] / self.Aii[p_i]
+            dx[p_i] = H.inverse() @ grad[p_i]
+
 
     def PBF(self):
 
@@ -481,17 +500,29 @@ class PBF2Solver(SPHBase):
             # PBD approximation: p = diag(JM^-1Jt)^-1 * max(c, 0)
             error = self.compute_pressure_pbf()
             if error < tol and iter > 1 or iter == self.max_iteration:
-                print(f" converged iter: {iter}. error: {error}")
+                if self.print_info:
+                    print(f" converged iter: {iter}. error: {error}")
                 break
-
-
+            
+            # dx = self.tmp
             self.compute_J_tr_x(self.tmp, self.p)
-            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+            # coef_wise_op(dx, dx, self.ps.m, 1)
+
+            self.apply_precondition(self.dx, self.Hii, self.tmp)
+            step_size = 1.0
+
+            if self.adaptive_step_size:
+                  div = self.dp
+                  self.compute_J_x(div, self.dx)
+                  aTa = dot2(div, div)
+                  aTb = dot2(div, self.c)
+
+                  k = 1e8
+                  alpha = (k * aTb) / (k * aTa + 1.0)
+                  step_size = ti.min(1.0, alpha)
 
             # x^k+1 = x^k - step_size(=0.5) * M^-1 J^t * p
-
-
-            add(self.ps.x, self.ps.x, -0.5, self.tmp)
+            add(self.ps.x, self.ps.x, -step_size, self.dx)
 
             iter += 1
 

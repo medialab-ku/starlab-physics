@@ -97,7 +97,7 @@ if __name__ == "__main__":
         # global animate
         global export_ply
 
-        with gui.sub_window("Settings", 0., 0., 0.4, 0.4) as w:
+        with gui.sub_window("Settings", 0., 0., 0.4, 0.3) as w:
 
             solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
             solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
@@ -106,7 +106,7 @@ if __name__ == "__main__":
                 solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
                 solver.method = w.slider_int("method type", solver.method, 0, 2)
-
+                solver.print_info = w.checkbox("print", solver.print_info)
                 if solver.method == 0:
                     gui.text("IISPH")
                     solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
@@ -114,45 +114,11 @@ if __name__ == "__main__":
 
                 elif solver.method == 1:
                     gui.text("PBF")
-
-            #     solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 3)
-            #     if solver.matrix_type == 0:
-            #         gui.text("B")
-            #     elif solver.matrix_type == 1:
-            #         gui.text("sqrt(D) B sqrt(D)")
-            #     elif solver.matrix_type == 2:
-            #         gui.text("D B D")
-            #     elif solver.matrix_type == 3:
-            #         gui.text("A (non-symmetric)")
-
-            # elif solver.method == 1:
-            #     gui.text("ADMM")
-            # elif solver.method == 2:
-            #     gui.text("Barrier")
-                
-            # # Logging controls
-            # gui.text("")  # Spacer
-            # gui.text("Iteration Logging:")
-            # solver.enable_logging = w.checkbox("Enable logging", solver.enable_logging)
-            # if w.button("Reset & Save logs"):
-            #     solver.reset_logging()
+                    solver.adaptive_step_size = w.checkbox("adaptive step size",  solver.adaptive_step_size)
 
 
-            #     solver.k_rho = w.slider_float("k rho", solver.k_rho, 0.0, 1e6)
-            #     solver.da_ratio = w.slider_float("da_ratio", solver.da_ratio, 0.0, 2.0)
-            #     solver.use_gn = w.checkbox("use gn", solver.use_gn)
-            #     solver.use_div = w.checkbox("use div", solver.use_div)
-            #
-            # # pbf_num_iters = w.slider_int("# iter", pbf_num_iters, 1, 100)
-            # # solver_type = w.slider_int("solver type", solver_type, 0, 2)
-            #
-            # stop_frame = w.checkbox("stop frame ?", stop_frame)
+          
             export_ply = w.checkbox("export", export_ply)
-            # output_obj = w.checkbox("output_obj", output_obj)
-            # output_vtk = w.checkbox("output_vtk", output_vtk)
-            # is_plot_option = w.checkbox("plot option", is_plot_option)
-            # animate = w.checkbox("animate", animate)
-            #
             if export_ply:
                 end_frame = w.slider_int("end frame", end_frame, 0, int(1e3))
             #
