@@ -57,6 +57,7 @@ class PBF2Solver(SPHBase):
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
         self.nablaWij = self.cubic_kernel_derivative
+        self.Wij = self.cubic_kernel
         self.lda = self.ps.pressure
         self.method = 1
         self.iisph_vanilla = False 
@@ -66,36 +67,36 @@ class PBF2Solver(SPHBase):
         self.toggle = True
         self.max_iteration = 1000
 
-        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
-        self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Hii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Dii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Hii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Ap  = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.y   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.b   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.z_pcg   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.r_pcg   = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
 
-        self.Ap_b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.y_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Ap_b   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        # self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.p_pcg    = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.y_b    = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.b_b    = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.z_pcg    = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.r_pcg    = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.grad_b = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         # Additional fields for Normal Equations approach
-        self.tmp2 = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b_normal = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.tmp_vec = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.tmp2 = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.b_normal = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.tmp_vec = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
         self.stats_iter = 0
         self.stats_pcg_iter = 0
@@ -124,6 +125,17 @@ class PBF2Solver(SPHBase):
             print(f"Warning: Could not initialize spectral radius analysis: {e}")
             self.enable_spectral_analysis = False
 
+    # @ti.kernel
+    # def initialize_boundary_particles(self):
+    #     for p_i in ti.grouped(self.x):
+    #         sum_Wij = 0.0
+    #         for j in range(self.ps.fluid_neighbors_num[p_i]):
+    #             p_j = self.ps.fluid_neighbors[p_i, j]
+    #             if self.ps.material[p_i] == self.ps.material_solid or self.ps.material[p_j] == self.ps.material_solid:
+    #                 continue
+    #             sum_Wij += self.Wij((self.ps.x[p_i] - self.ps.x[p_j]).norm())
+
+    #         self.ps.m[p_i] = self.ps.density0[p_i] / sum_Wij
 
     @ti.kernel
     def precompute_values(self):
@@ -500,6 +512,7 @@ class PBF2Solver(SPHBase):
     def substep(self):
         
         self.ps.search_neighbours(self.ps.x)
+        self.ps.initialize_boundary_particles()
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
 
