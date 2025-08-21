@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     substeps = config.get_cfg("numberOfStepsPerRenderUpdate")
     output_frames = config.get_cfg("exportFrame")
-    output_interval = int(0.016 / config.get_cfg("timeStepSize"))
+    output_interval = int(0.02 / config.get_cfg("timeStepSize"))
     output_ply = config.get_cfg("exportPly")
     output_obj = config.get_cfg("exportObj")
     series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, "{}")
@@ -43,9 +43,9 @@ if __name__ == "__main__":
     gui = window.get_gui()
     scene = ti.ui.Scene()
     camera = ti.ui.Camera()
-    camera.position(5.5, 2.5, 4.0)
+    camera.position(5.5, 2.5, -4.0)
     camera.up(0.0, 1.0, 0.0)
-    camera.lookat(-1.0, 0.0, 0.0)
+    camera.lookat(0.0, 0.0, 1.0)
     camera.fov(70)
     scene.set_camera(camera)
 
@@ -96,7 +96,7 @@ if __name__ == "__main__":
         box_lines_indices[i] = val
 
     frame_cnt = 0
-    export_ply = False
+    export_ply = output_ply
     end_frame = 1000
 
     def show_options():
@@ -172,7 +172,7 @@ if __name__ == "__main__":
             # animate = w.checkbox("animate", animate)
             #
             if export_ply:
-                end_frame = w.slider_int("end frame", end_frame, 0, int(1e3))
+                end_frame = w.slider_int("end frame", end_frame, 0, int(5e3))
             #
             gui.text("")  # Spacer
             gui.text("Visualization Controls:")
@@ -230,6 +230,72 @@ if __name__ == "__main__":
                 solver.step()
 
             frame_cnt += 1
+
+            if frame_cnt > 0 and frame_cnt % output_interval == 0:
+                if export_ply:
+                    if export_rigid_objects:
+                        # Export each object separately
+                        for obj_id in ps.object_collection:
+                            obj_data = ps.dump(obj_id=obj_id)
+                            np_pos = obj_data["position"]
+                            
+                            # Only export if object has particles
+                            if len(np_pos) > 0:
+                                if obj_id == 0:
+                                    # Fluid particles (object id 0): position + RGB encoding velocity x,y,z
+                                    np_vel = obj_data["velocity"]
+                                    
+                                    # Normalize velocity components to 0-1 range for RGB encoding
+                                    # Assume velocity range is roughly -5 to 5
+                                    vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
+                                    vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
+                                    vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
+                                    
+                                    # Create separate PLY file for fluid
+                                    obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
+                                    writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
+                                    writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
+                                    
+                                    # Encode velocity x,y,z in RGB channels
+                                    writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
+                                    
+                                    writer.export_frame_ascii(cnt_ply, obj_series_prefix)
+                                else:
+                                    # Rigid objects (object id > 0): position only
+                                    obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
+                                    writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
+                                    writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
+                                    
+                                    # Add object ID as vertex color (R channel)
+                                    object_id_color = np.full((len(np_pos), 3), 0.0)
+                                    object_id_color[:, 0] = obj_id / 255.0  # Normalize object ID to 0-1 range
+                                    writer.add_vertex_color(object_id_color[:, 0], object_id_color[:, 1], object_id_color[:, 2])
+                                    
+                                    writer.export_frame_ascii(cnt_ply, obj_series_prefix)
+                    else:
+                        # Export only fluid particles (object id 0) with velocity encoding
+                        obj_id = 0
+                        obj_data = ps.dump(obj_id=obj_id)
+                        np_pos = obj_data["position"]
+                        
+                        # Only export if object has particles
+                        if len(np_pos) > 0:
+                            np_vel = obj_data["velocity"]
+                            
+                            # Normalize velocity components to 0-1 range for RGB encoding
+                            # Assume velocity range is roughly -5 to 5
+                            vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
+                            vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
+                            vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
+                            
+                            writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
+                            writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
+                            
+                            # Encode velocity x,y,z in RGB channels
+                            writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
+                            
+                            writer.export_frame_ascii(cnt_ply, series_prefix.format(0))
+                    cnt_ply += 1
 
         ps.copy_to_vis_buffer(invisible_objects=invisible_objects)
         if ps.dim == 2:
@@ -364,76 +430,11 @@ if __name__ == "__main__":
             if cnt % output_interval == 0:
                 window.write_image(f"{scene_name}_output_img/{cnt:06}.png")
         
-        if cnt % output_interval == 0:
-            if output_ply:
-                if export_rigid_objects:
-                    # Export each object separately
-                    for obj_id in ps.object_collection:
-                        obj_data = ps.dump(obj_id=obj_id)
-                        np_pos = obj_data["position"]
-                        
-                        # Only export if object has particles
-                        if len(np_pos) > 0:
-                            if obj_id == 0:
-                                # Fluid particles (object id 0): position + RGB encoding velocity x,y,z
-                                np_vel = obj_data["velocity"]
-                                
-                                # Normalize velocity components to 0-1 range for RGB encoding
-                                # Assume velocity range is roughly -5 to 5
-                                vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
-                                vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
-                                vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
-                                
-                                # Create separate PLY file for fluid
-                                obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
-                                writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
-                                writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
-                                
-                                # Encode velocity x,y,z in RGB channels
-                                writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
-                                
-                                writer.export_frame_ascii(cnt_ply, obj_series_prefix)
-                            else:
-                                # Rigid objects (object id > 0): position only
-                                obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
-                                writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
-                                writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
-                                
-                                # Add object ID as vertex color (R channel)
-                                object_id_color = np.full((len(np_pos), 3), 0.0)
-                                object_id_color[:, 0] = obj_id / 255.0  # Normalize object ID to 0-1 range
-                                writer.add_vertex_color(object_id_color[:, 0], object_id_color[:, 1], object_id_color[:, 2])
-                                
-                                writer.export_frame_ascii(cnt_ply, obj_series_prefix)
-                else:
-                    # Export only fluid particles (object id 0) with velocity encoding
-                    obj_id = 0
-                    obj_data = ps.dump(obj_id=obj_id)
-                    np_pos = obj_data["position"]
-                    
-                    # Only export if object has particles
-                    if len(np_pos) > 0:
-                        np_vel = obj_data["velocity"]
-                        
-                        # Normalize velocity components to 0-1 range for RGB encoding
-                        # Assume velocity range is roughly -5 to 5
-                        vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
-                        vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
-                        vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
-                        
-                        writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
-                        writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
-                        
-                        # Encode velocity x,y,z in RGB channels
-                        writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
-                        
-                        writer.export_frame_ascii(cnt_ply, series_prefix.format(0))
-            if output_obj:
-                for r_body_id in ps.object_id_rigid_body:
-                    with open(f"{scene_name}_output/obj_{r_body_id}_{cnt_ply:06}.obj", "w") as f:
-                        e = ps.object_collection[r_body_id]["mesh"].export(file_type='obj')
-                        f.write(e)
-            cnt_ply += 1
+        if output_obj:
+            for r_body_id in ps.object_id_rigid_body:
+                with open(f"{scene_name}_output/obj_{r_body_id}_{cnt_ply:06}.obj", "w") as f:
+                    e = ps.object_collection[r_body_id]["mesh"].export(file_type='obj')
+                    f.write(e)
 
         cnt += 1
         # if cnt > 6000:
