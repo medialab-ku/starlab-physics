@@ -5,53 +5,12 @@ import json
 from sph_base import SPHBase
 from math_utils import *
 
-"""
-PBF2 Solver - Position Based Fluids with Multiple Solver Options
 
-This implementation provides several approaches to solve the implicit incompressible SPH system:
-
-Method 0 (ProjectedJacobi): 
-    Solves (J M⁻¹ Jᵀ) y = b where y = Dp
-    - J = ∇ρ (density gradient operator)
-    - M⁻¹ = inverse mass matrix
-    - D = diagonal density-weighting matrix
-    - Advantages: Simple, preserves symmetry naturally
-
-Method 1 (ADMM): 
-    Alternating Direction Method of Multipliers
-    - Uses augmented Lagrangian approach
-    - Good for complex constraints
-
-Method 2 (Barrier): 
-    Barrier function method
-    - Uses PCG with barrier functions
-
-Method 3 (NormalEquations): 
-    Solves (Dᵀ J M⁻¹ Jᵀ D) p = Dᵀ b
-    - Creates symmetric system by multiplying both sides by Dᵀ
-    - Advantages: Guaranteed symmetric, can use symmetric solvers
-    - Disadvantages: Squared condition number, potentially less stable
-    - Implementation: Uses matrix-free operators for efficiency
-
-The Normal Equations approach (Method 3) is particularly useful when you need:
-1. A guaranteed symmetric system
-2. To use symmetric solvers (CG, Jacobi, etc.)
-3. To avoid the complexity of other symmetrization methods
-
-Mathematical formulation:
-Original system: (J M⁻¹ Jᵀ D) p = b
-Normal equations: (Dᵀ J M⁻¹ Jᵀ D) p = Dᵀ b
-"""
 
 class PBF2Solver(SPHBase):
     def __init__(self, particle_system):
         super().__init__(particle_system)
-        # Pressure state function parameters(WCSPH)
-        # self.exponent = 7.0
-        # self.exponent = self.ps.cfg.get_cfg("exponent")
-        #
-        # self.stiffness = 50000.0
-        # self.stiffness = self.ps.cfg.get_cfg("stiffness")
+    
 
         self.surface_tension = 0.001
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
@@ -63,14 +22,16 @@ class PBF2Solver(SPHBase):
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
 
         self.adaptive_step_size = False
-        self.gauss_newton_pcg = False
+        self.gauss_newton_pcg = True
         self.print_info = True 
         self.tol = 2
         self.omega = 0.5 
-        self.cfl = True
+        self.cfl = False
         self.max_iteration = 1000
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.dx_adv = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
@@ -177,12 +138,12 @@ class PBF2Solver(SPHBase):
 
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
             Hii += J_ii.outer_product(J_ii)
-            c = ti.max(self.ps.density[p_i] - self.ps.density0[p_i], 0.0)
-            ret += (c / self.ps.density0[p_i]) 
+            c = self.ps.density[p_i] - self.ps.density0[p_i]
+            ret += (ti.max(c, 0.0) / self.ps.density0[p_i]) 
             self.c[p_i] = c
             self.Hii[p_i] = Hii 
             self.Aii[p_i] = Aii + eps
-            self.p[p_i] = c / (Aii + eps)
+            self.p[p_i] = ti.max(c, 0.0) / self.Aii[p_i]
 
         ret /= self.ps.fluid_particle_num 
         return ret 
@@ -435,8 +396,19 @@ class PBF2Solver(SPHBase):
         
         
         self.advect_position(self.dt)
-        
-    
+
+    @ti.kernel
+    def compute_gradient(self, grad: ti.template(), adv: bool):
+
+       
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            
+            grad[p_i] = self.tmp[p_i]
+            if adv:
+                grad[p_i] += self.ps.m[p_i] * (self.ps.x[p_i] - self.ps.y[p_i])
+
     @ti.kernel
     def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
 
@@ -487,18 +459,29 @@ class PBF2Solver(SPHBase):
                 break
             
             # dx = self.tmp
-            self.compute_J_tr_x(self.tmp, self.p)
+            # self.compute_J_tr_x(self.tmp, self.p)
             # coef_wise_op(dx, dx, self.ps.m, 1)
             
             step_size = 0.5
             if self.gauss_newton_pcg:
-                self.apply_precondition(self.dx, self.Hii, self.tmp)
+
+                add(self.dx_adv, self.ps.y, -1.0, self.ps.x)
+                self.compute_J_x(self.dp, self.dx_adv)
+                max(self.dp)
+                max(self.c)
+                # add(self.c, self.c, 1.0, self.dp)  # Initialize p with b
+                coef_wise_op(self.p, self.c, self.Aii, 1)
+                self.compute_J_tr_x(self.tmp, self.p)
+
+                self.compute_gradient(self.grad, False)
+                self.apply_precondition(self.dx, self.Hii, self.grad)
                 step_size = 1.0
             else:
+                self.compute_J_tr_x(self.tmp, self.p)
                 coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
             if self.adaptive_step_size:
-                  div = self.dp
+                  div = self.dp 
                   self.compute_J_x(div, self.dx)
                   aTa = dot2(div, div)
                   aTb = dot2(div, self.c)
