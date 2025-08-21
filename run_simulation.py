@@ -9,9 +9,7 @@ from matplotlib.colors import Normalize
 from matplotlib.colors import LinearSegmentedColormap
 
 
-
-ti.init(arch=ti.gpu, device_memory_fraction=0.5)
-
+ti.init(arch=ti.gpu, device_memory_fraction=0.7)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='SPH Taichi')
@@ -100,6 +98,7 @@ if __name__ == "__main__":
         with gui.sub_window("Settings", 0., 0., 0.4, 0.3) as w:
 
             solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
+            solver.cfl = w.checkbox("CFL", solver.cfl)
             solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
 
             if method == 2:
@@ -107,6 +106,7 @@ if __name__ == "__main__":
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
                 solver.method = w.slider_int("method type", solver.method, 0, 2)
                 solver.print_info = w.checkbox("print", solver.print_info)
+
                 if solver.method == 0:
                     gui.text("IISPH")
                     solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
@@ -114,7 +114,9 @@ if __name__ == "__main__":
 
                 elif solver.method == 1:
                     gui.text("PBF")
+                    solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
                     solver.adaptive_step_size = w.checkbox("adaptive step size",  solver.adaptive_step_size)
+
 
 
           
@@ -216,3 +218,4 @@ if __name__ == "__main__":
         # if cnt > 6000:
         #     break
         window.show()
+        

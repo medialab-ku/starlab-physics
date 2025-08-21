@@ -62,7 +62,8 @@ class PBF2Solver(SPHBase):
         self.iisph_vanilla = False 
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
 
-        self.adaptive_step_size = False 
+        self.adaptive_step_size = False
+        self.gauss_newton_pcg = False
         self.print_info = True 
         self.tol = 2
         self.omega = 0.5 
@@ -95,11 +96,6 @@ class PBF2Solver(SPHBase):
         self.r_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
-        # Additional fields for Normal Equations approach
-        self.tmp2 = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b_normal = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.tmp_vec = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         print("method: PBF2")
@@ -111,21 +107,7 @@ class PBF2Solver(SPHBase):
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
         self.current_frame = 0
-        
-        # Spectral radius analysis
-        self.spectral_radius_analyzer = None
-        self.enable_spectral_analysis = False
-        
-    def initialize_spectral_radius_analysis(self):
-        """Initialize spectral radius analyzer"""
-        try:
-            from spectral_radius_analysis import SpectralRadiusAnalyzer
-            self.spectral_radius_analyzer = SpectralRadiusAnalyzer(self)
-            self.enable_spectral_analysis = True
-            print("Spectral radius analysis initialized")
-        except ImportError as e:
-            print(f"Warning: Could not initialize spectral radius analysis: {e}")
-            self.enable_spectral_analysis = False
+     
 
 
     @ti.kernel
@@ -507,9 +489,13 @@ class PBF2Solver(SPHBase):
             # dx = self.tmp
             self.compute_J_tr_x(self.tmp, self.p)
             # coef_wise_op(dx, dx, self.ps.m, 1)
-
-            self.apply_precondition(self.dx, self.Hii, self.tmp)
-            step_size = 1.0
+            
+            step_size = 0.5
+            if self.gauss_newton_pcg:
+                self.apply_precondition(self.dx, self.Hii, self.tmp)
+                step_size = 1.0
+            else:
+                coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
             if self.adaptive_step_size:
                   div = self.dp
@@ -532,13 +518,23 @@ class PBF2Solver(SPHBase):
 
     def substep(self):
         
-        
         self.ps.search_neighbours(self.ps.x)
-        self.compute_non_pressure_forces()
 
-        self.advect_velocity(self.dt)
+
+        dt_original = self.dt
+
+        if self.cfl:
+            v_max = inf_norm(self.ps.v)
+            dt_upper_bound = 0.4 * (self.ps.particle_diameter / (v_max + 1e-12))
+            dt_lower_bound = 0.001
+            self.dt = ti.max(dt_lower_bound, ti.min(dt_upper_bound, self.dt))
+            print(f"use smaller time step: {self.dt}")
+
+        self.compute_non_pressure_forces()
+        self.advect_velocity(self.dt)    
         if self.method == 0:
             self.IISPH()
         elif self.method == 1:
             self.PBF()
 
+        self.dt = dt_original  # Reset dt to original value after substep
