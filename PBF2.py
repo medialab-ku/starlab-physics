@@ -5,53 +5,12 @@ import json
 from sph_base import SPHBase
 from math_utils import *
 
-"""
-PBF2 Solver - Position Based Fluids with Multiple Solver Options
 
-This implementation provides several approaches to solve the implicit incompressible SPH system:
-
-Method 0 (ProjectedJacobi): 
-    Solves (J M⁻¹ Jᵀ) y = b where y = Dp
-    - J = ∇ρ (density gradient operator)
-    - M⁻¹ = inverse mass matrix
-    - D = diagonal density-weighting matrix
-    - Advantages: Simple, preserves symmetry naturally
-
-Method 1 (ADMM): 
-    Alternating Direction Method of Multipliers
-    - Uses augmented Lagrangian approach
-    - Good for complex constraints
-
-Method 2 (Barrier): 
-    Barrier function method
-    - Uses PCG with barrier functions
-
-Method 3 (NormalEquations): 
-    Solves (Dᵀ J M⁻¹ Jᵀ D) p = Dᵀ b
-    - Creates symmetric system by multiplying both sides by Dᵀ
-    - Advantages: Guaranteed symmetric, can use symmetric solvers
-    - Disadvantages: Squared condition number, potentially less stable
-    - Implementation: Uses matrix-free operators for efficiency
-
-The Normal Equations approach (Method 3) is particularly useful when you need:
-1. A guaranteed symmetric system
-2. To use symmetric solvers (CG, Jacobi, etc.)
-3. To avoid the complexity of other symmetrization methods
-
-Mathematical formulation:
-Original system: (J M⁻¹ Jᵀ D) p = b
-Normal equations: (Dᵀ J M⁻¹ Jᵀ D) p = Dᵀ b
-"""
 
 class PBF2Solver(SPHBase):
     def __init__(self, particle_system):
         super().__init__(particle_system)
-        # Pressure state function parameters(WCSPH)
-        # self.exponent = 7.0
-        # self.exponent = self.ps.cfg.get_cfg("exponent")
-        #
-        # self.stiffness = 50000.0
-        # self.stiffness = self.ps.cfg.get_cfg("stiffness")
+
 
         self.surface_tension = 0.001
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
@@ -61,42 +20,43 @@ class PBF2Solver(SPHBase):
         self.lda = self.ps.pressure
         self.method = 1
         self.iisph_vanilla = False 
+        self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
 
+        self.adaptive_step_size = False
+        self.gauss_newton_pcg = True
+        self.print_info = True
         self.tol = 2
         self.omega = 0.5 
-        self.toggle = True
+        self.cfl = False
         self.max_iteration = 1000
+        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.dx_adv = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
-        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.Dii = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.Hii = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.Ap  = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.y   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.b   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.z_pcg   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.r_pcg   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.Hii = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.r_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
 
-        self.Ap_b   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        # self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.p_pcg    = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.y_b    = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.b_b    = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.z_pcg    = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.r_pcg    = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.grad_b = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        # Additional fields for Normal Equations approach
-        self.tmp2 = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.b_normal = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.tmp_vec = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.Ap_b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.p_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.y_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.b_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.r_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
 
         self.stats_iter = 0
         self.stats_pcg_iter = 0
@@ -109,21 +69,7 @@ class PBF2Solver(SPHBase):
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
         self.current_frame = 0
-        
-        # Spectral radius analysis
-        self.spectral_radius_analyzer = None
-        self.enable_spectral_analysis = False
-        
-    def initialize_spectral_radius_analysis(self):
-        """Initialize spectral radius analyzer"""
-        try:
-            from spectral_radius_analysis import SpectralRadiusAnalyzer
-            self.spectral_radius_analyzer = SpectralRadiusAnalyzer(self)
-            self.enable_spectral_analysis = True
-            print("Spectral radius analysis initialized")
-        except ImportError as e:
-            print(f"Warning: Could not initialize spectral radius analysis: {e}")
-            self.enable_spectral_analysis = False
+
 
     # @ti.kernel
     # def initialize_boundary_particles(self):
@@ -180,6 +126,7 @@ class PBF2Solver(SPHBase):
                 continue
             Jdx_i = 0.0
             Aii = 0.0
+            Hii = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
             dx_i = self.ps.x[p_i] - self.ps.y[p_i]
             for j in range(self.ps.fluid_neighbors_num[p_i]):
@@ -189,6 +136,8 @@ class PBF2Solver(SPHBase):
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
 
+
+                Hii += J_ij.outer_product(J_ij)
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
@@ -200,12 +149,13 @@ class PBF2Solver(SPHBase):
                     Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
 
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
-                
-            c = ti.max(self.ps.density[p_i] - self.ps.density0[p_i], 0.0)
-            ret += (c / self.ps.density0[p_i]) 
+            Hii += J_ii.outer_product(J_ii)
+            c = self.ps.density[p_i] - self.ps.density0[p_i]
+            ret += (ti.max(c, 0.0) / self.ps.density0[p_i])
             self.c[p_i] = c
+            self.Hii[p_i] = Hii
             self.Aii[p_i] = Aii + eps
-            self.p[p_i] = c / (Aii + eps)
+            self.p[p_i] = ti.max(c, 0.0) / self.Aii[p_i]
 
         ret /= self.ps.fluid_particle_num 
         return ret 
@@ -458,7 +408,30 @@ class PBF2Solver(SPHBase):
         
         
         self.advect_position(self.dt)
-        
+
+    @ti.kernel
+    def compute_gradient(self, grad: ti.template(), adv: bool):
+
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            grad[p_i] = self.tmp[p_i]
+            if adv:
+                grad[p_i] += self.ps.m[p_i] * (self.ps.x[p_i] - self.ps.y[p_i])
+
+    @ti.kernel
+    def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
+
+        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            H = self.ps.m[p_i] * I3x3 + Hii[p_i] / self.Aii[p_i]
+            dx[p_i] = H.inverse() @ grad[p_i]
+
 
     def PBF(self):
 
@@ -493,15 +466,44 @@ class PBF2Solver(SPHBase):
             # PBD approximation: p = diag(JM^-1Jt)^-1 * max(c, 0)
             error = self.compute_pressure_pbf()
             if error < tol and iter > 1 or iter == self.max_iteration:
-                print(f" converged iter: {iter}. error: {error}")
+                if self.print_info:
+                    print(f" converged iter: {iter}. error: {error}")
                 break
 
+            # dx = self.tmp
+            # self.compute_J_tr_x(self.tmp, self.p)
+            # coef_wise_op(dx, dx, self.ps.m, 1)
 
-            self.compute_J_tr_x(self.tmp, self.p)
-            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+            step_size = 0.5
+            if self.gauss_newton_pcg:
+
+                add(self.dx_adv, self.ps.y, -1.0, self.ps.x)
+                self.compute_J_x(self.dp, self.dx_adv)
+                max(self.dp)
+                max(self.c)
+                # add(self.c, self.c, 1.0, self.dp)  # Initialize p with b
+                coef_wise_op(self.p, self.c, self.Aii, 1)
+                self.compute_J_tr_x(self.tmp, self.p)
+
+                self.compute_gradient(self.grad, False)
+                self.apply_precondition(self.dx, self.Hii, self.grad)
+                step_size = 1.0
+            else:
+                self.compute_J_tr_x(self.tmp, self.p)
+                coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
+
+            if self.adaptive_step_size:
+                  div = self.dp
+                  self.compute_J_x(div, self.dx)
+                  aTa = dot2(div, div)
+                  aTb = dot2(div, self.c)
+
+                  k = 1e8
+                  alpha = (k * aTb) / (k * aTa + 1.0)
+                  step_size = ti.min(1.0, alpha)
 
             # x^k+1 = x^k - step_size(=0.5) * M^-1 J^t * p
-            add(self.ps.x, self.ps.x, -0.5, self.tmp)
+            add(self.ps.x, self.ps.x, -step_size, self.dx)
 
             iter += 1
 
@@ -513,11 +515,22 @@ class PBF2Solver(SPHBase):
         
         self.ps.search_neighbours(self.ps.x)
         self.ps.initialize_boundary_particles()
+
+
+        dt_original = self.dt
+
+        if self.cfl:
+            v_max = inf_norm(self.ps.v)
+            dt_upper_bound = 0.4 * (self.ps.particle_diameter / (v_max + 1e-12))
+            dt_lower_bound = 0.001
+            self.dt = ti.max(dt_lower_bound, ti.min(dt_upper_bound, self.dt))
+            print(f"use smaller time step: {self.dt}")
+
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
-
         if self.method == 0:
             self.IISPH()
         elif self.method == 1:
             self.PBF()
 
+        self.dt = dt_original  # Reset dt to original value after substep

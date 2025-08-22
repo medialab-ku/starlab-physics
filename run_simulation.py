@@ -9,9 +9,7 @@ from matplotlib.colors import Normalize
 from matplotlib.colors import LinearSegmentedColormap
 
 
-
-ti.init(arch=ti.gpu, device_memory_fraction=0.5)
-
+ti.init(arch=ti.gpu, device_memory_fraction=0.7)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='SPH Taichi')
@@ -23,7 +21,8 @@ if __name__ == "__main__":
     config = SimConfig(scene_file_path=scene_path)
     scene_name = scene_path.split("/")[-1].split(".")[0]
 
-    substeps = config.get_cfg("numberOfStepsPerRenderUpdate")
+    substeps = config.get_cfg("numSubstepping")
+    print(substeps)
     output_frames = config.get_cfg("exportFrame")
     output_interval = int(0.02 / config.get_cfg("timeStepSize"))
     output_ply = config.get_cfg("exportPly")
@@ -67,13 +66,13 @@ if __name__ == "__main__":
     color_alpha = config.get_cfg("alpha")
     if not color_alpha:
         color_alpha = 1.0
-    
+
     # Invisible flag for transparent objects
     is_invisible = False
-    
+
     # Visualization mode
     viz_mode = 1  # 1: heatmap, 2: original colors
-    
+
     # Export options
     export_rigid_objects = False
 
@@ -118,12 +117,17 @@ if __name__ == "__main__":
         # global animate
         global export_ply
 
-        with gui.sub_window("Settings", 0., 0., 0.4, 0.4) as w:
-            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.01)
+        with gui.sub_window("Settings", 0., 0., 0.4, 0.3) as w:
+
+            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
+            solver.cfl = w.checkbox("CFL", solver.cfl)
+            solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
+
             if method == 2:
                 solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
                 solver.method = w.slider_int("method type", solver.method, 0, 2)
+                solver.print_info = w.checkbox("print", solver.print_info)
 
                 if solver.method == 0:
                     gui.text("IISPH")
@@ -132,28 +136,11 @@ if __name__ == "__main__":
 
                 elif solver.method == 1:
                     gui.text("PBF")
+                    solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
+                    solver.adaptive_step_size = w.checkbox("adaptive step size",  solver.adaptive_step_size)
 
-            #     solver.matrix_type = w.slider_int("mat type", solver.matrix_type, 0, 3)
-            #     if solver.matrix_type == 0:
-            #         gui.text("B")
-            #     elif solver.matrix_type == 1:
-            #         gui.text("sqrt(D) B sqrt(D)")
-            #     elif solver.matrix_type == 2:
-            #         gui.text("D B D")
-            #     elif solver.matrix_type == 3:
-            #         gui.text("A (non-symmetric)")
 
-            # elif solver.method == 1:
-            #     gui.text("ADMM")
-            # elif solver.method == 2:
-            #     gui.text("Barrier")
-                
-            # # Logging controls
-            # gui.text("")  # Spacer
-            # gui.text("Iteration Logging:")
-            # solver.enable_logging = w.checkbox("Enable logging", solver.enable_logging)
-            # if w.button("Reset & Save logs"):
-            #     solver.reset_logging()
+
 
 
             #     solver.k_rho = w.checkbox("use gn", solver.use_gn)
@@ -212,7 +199,7 @@ if __name__ == "__main__":
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
                 runSim = not runSim
-                print(runSim)
+                # print(runSim)
 
             if window.event.key == 'r':
                 frame_cnt = 0
@@ -226,9 +213,13 @@ if __name__ == "__main__":
             runSim = False
 
         if runSim:
-            for i in range(substeps):
+
+            dt = solver.dt
+            solver.dt = dt / solver.num_substep
+            for i in range(solver.num_substep):
                 solver.step()
 
+            solver.dt = dt
             frame_cnt += 1
 
             if frame_cnt > 0 and frame_cnt % output_interval == 0:
@@ -238,62 +229,62 @@ if __name__ == "__main__":
                         for obj_id in ps.object_collection:
                             obj_data = ps.dump(obj_id=obj_id)
                             np_pos = obj_data["position"]
-                            
+
                             # Only export if object has particles
                             if len(np_pos) > 0:
                                 if obj_id == 0:
                                     # Fluid particles (object id 0): position + RGB encoding velocity x,y,z
                                     np_vel = obj_data["velocity"]
-                                    
+
                                     # Normalize velocity components to 0-1 range for RGB encoding
                                     # Assume velocity range is roughly -5 to 5
                                     vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
                                     vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
                                     vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
-                                    
+
                                     # Create separate PLY file for fluid
                                     obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
                                     writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                                     writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
-                                    
+
                                     # Encode velocity x,y,z in RGB channels
                                     writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
-                                    
+
                                     writer.export_frame_ascii(cnt_ply, obj_series_prefix)
                                 else:
                                     # Rigid objects (object id > 0): position only
                                     obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
                                     writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                                     writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
-                                    
+
                                     # Add object ID as vertex color (R channel)
                                     object_id_color = np.full((len(np_pos), 3), 0.0)
                                     object_id_color[:, 0] = obj_id / 255.0  # Normalize object ID to 0-1 range
                                     writer.add_vertex_color(object_id_color[:, 0], object_id_color[:, 1], object_id_color[:, 2])
-                                    
+
                                     writer.export_frame_ascii(cnt_ply, obj_series_prefix)
                     else:
                         # Export only fluid particles (object id 0) with velocity encoding
                         obj_id = 0
                         obj_data = ps.dump(obj_id=obj_id)
                         np_pos = obj_data["position"]
-                        
+
                         # Only export if object has particles
                         if len(np_pos) > 0:
                             np_vel = obj_data["velocity"]
-                            
+
                             # Normalize velocity components to 0-1 range for RGB encoding
                             # Assume velocity range is roughly -5 to 5
                             vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
                             vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
                             vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
-                            
+
                             writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                             writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
-                            
+
                             # Encode velocity x,y,z in RGB channels
                             writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
-                            
+
                             writer.export_frame_ascii(cnt_ply, series_prefix.format(0))
                     cnt_ply += 1
 
@@ -314,24 +305,24 @@ if __name__ == "__main__":
             density0_np = ps.density0.to_numpy()
             pressure_np = ps.pressure.to_numpy()
             material_np = ps.material.to_numpy()
-            
+
             # v_np = solver.div.to_numpy()
-            
+
             v_norm = np.linalg.norm(v_np, axis = 1)
             # density_norm = density_np
             # pressure_norm = pressure_np
             # v_norm = solver.div.to_numpy()
-            
+
             # Calculate density ratio relative to rest density (ρ/ρ₀)
             # ρ/ρ₀ > 1: higher density (red)
-            # ρ/ρ₀ ≈ 1: normal density (green) 
+            # ρ/ρ₀ ≈ 1: normal density (green)
             # ρ/ρ₀ < 1: lower density (blue)
             density_ratio = density_np / density0_np
-            
+
             # Normalize density ratio: 0.5 (blue) to 1.1 (red)
             norm = Normalize(vmin=0.0, vmax=1.5)
             cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "green", "yellow", "red"])
-        
+
 
             # Step 5: Map normalized values to RGB (fluid particles only)
             rgba_array = cmap(norm(v_norm))
@@ -339,33 +330,33 @@ if __name__ == "__main__":
             # Create a color array that only applies heat map to fluid particles
             # Initialize with default colors (from color_vis_buffer)
             default_colors = ps.color_vis_buffer.to_numpy()
-            
+
             if viz_mode == 1:
                 # Heatmap mode
                 heat_map_colors = default_colors.copy()
-                
+
                 # Apply heat map colors only to fluid particles
                 fluid_mask = (material_np == ps.material_fluid)
                 heat_map_colors[fluid_mask] = rgba_array[fluid_mask]
-                
+
                 # Apply transparency to specific objects
                 object_id_np = ps.object_id.to_numpy()
                 for obj_id in transparent_objects:
                     obj_mask = (object_id_np == obj_id)
                     heat_map_colors[obj_mask, 3] = color_alpha # Set alpha to 0.2 for transparent objects
-                
+
                 # Filter out particles with very low alpha values for true transparency
                 if color_alpha < 0.01:
                     transparent_mask = np.zeros_like(heat_map_colors[:, 0], dtype=bool)
                     for obj_id in transparent_objects:
                         obj_mask = (object_id_np == obj_id)
                         transparent_mask |= obj_mask
-                    
+
                     # Set positions of transparent particles to far away so they're not rendered
                     transparent_positions = ps.x.to_numpy()
                     transparent_positions[transparent_mask] = [1000.0, 1000.0, 1000.0]  # Move far away
                     ps.x_vis_buffer.from_numpy(transparent_positions)
-                    
+
                     # Also set alpha to 0 for shadow casting purposes
                     heat_map_colors[transparent_mask, 3] = 0.0
                 else:
@@ -375,32 +366,32 @@ if __name__ == "__main__":
                         # Scale alpha for shadow casting - lower alpha means less shadow
                         shadow_alpha = color_alpha * 0.5  # Reduce shadow intensity
                         heat_map_colors[obj_mask, 3] = shadow_alpha
-                
+
                 ps.color_heat_map.from_numpy(heat_map_colors)
                 render_colors = ps.color_heat_map
-                
+
             else:
                 # Original colors mode
                 original_colors = default_colors.copy()
-                
+
                 # Apply transparency to specific objects
                 object_id_np = ps.object_id.to_numpy()
                 for obj_id in transparent_objects:
                     obj_mask = (object_id_np == obj_id)
                     original_colors[obj_mask, 3] = color_alpha
-                
+
                 # Filter out particles with very low alpha values for true transparency
                 if color_alpha < 0.01:
                     transparent_mask = np.zeros_like(original_colors[:, 0], dtype=bool)
                     for obj_id in transparent_objects:
                         obj_mask = (object_id_np == obj_id)
                         transparent_mask |= obj_mask
-                    
+
                     # Set positions of transparent particles to far away so they're not rendered
                     transparent_positions = ps.x.to_numpy()
                     transparent_positions[transparent_mask] = [1000.0, 1000.0, 1000.0]  # Move far away
                     ps.x_vis_buffer.from_numpy(transparent_positions)
-                    
+
                     # Also set alpha to 0 for shadow casting purposes
                     original_colors[transparent_mask, 3] = 0.0
                 else:
@@ -410,10 +401,10 @@ if __name__ == "__main__":
                         # Scale alpha for shadow casting - lower alpha means less shadow
                         shadow_alpha = color_alpha * 0.5  # Reduce shadow intensity
                         original_colors[obj_mask, 3] = shadow_alpha
-                
+
                 ps.color_heat_map.from_numpy(original_colors)
                 render_colors = ps.color_heat_map
-        
+
             # print(rgb_array.dtype)
             # print(rgb_array)
             # ps.color_heat_map.from_numpy(heat_map_colors)
@@ -440,3 +431,4 @@ if __name__ == "__main__":
         # if cnt > 6000:
         #     break
         window.show()
+
