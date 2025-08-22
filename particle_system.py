@@ -87,7 +87,7 @@ class ParticleSystem:
 
         #### TODO: Handle the Particle Emitter ####
         # self.particle_max_num += emitted particles
-        print(f"Current particle num: {self.particle_num[None]}, Particle max num: {self.particle_max_num}")
+        # print(f"Current particle num: {self.particle_num[None]}, Particle max num: {self.particle_max_num}")
 
         #========== Allocate memory ==========#
         # Rigid body properties
@@ -174,7 +174,7 @@ class ParticleSystem:
             density = fluid["density"]
             color = fluid["color"]
 
-            print(density)
+            # print(density)
             # print(color)
 
             self.add_cube(object_id=obj_id,
@@ -519,7 +519,7 @@ class ParticleSystem:
         # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
         # voxelized_mesh.show()
         voxelized_points_np = voxelized_mesh.points
-        print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")
+        # print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")
         
         return voxelized_points_np
 
@@ -547,7 +547,7 @@ class ParticleSystem:
         for i in range(self.dim):
             num_dim.append(np.arange(lower_corner[i], lower_corner[i] + cube_size[i], self.particle_diameter))
         num_new_particles = reduce(lambda x, y: x * y, [len(n) for n in num_dim])
-        print('particle num ', num_new_particles)
+        # print('particle num ', num_new_particles)
 
         new_positions = np.array(np.meshgrid(*num_dim,
                                              sparse=False,
@@ -555,7 +555,7 @@ class ParticleSystem:
                                  dtype=np.float32)
         new_positions = new_positions.reshape(-1,
                                               reduce(lambda x, y: x * y, list(new_positions.shape[1:]))).transpose()
-        print("new position shape ", new_positions.shape)
+        # print("new position shape ", new_positions.shape)
         if velocity is None:
             velocity_arr = np.full_like(new_positions, 0, dtype=np.float32)
         else:

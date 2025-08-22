@@ -4,7 +4,7 @@
         "domainStart": [0.0, 0.0, 0.0],
         "domainEnd": [5.0, 12.0, 5.0],
 		"particleRadius": 0.02,
-		"numberOfStepsPerRenderUpdate": 1,
+		"numSubstepping": 1,
 		"density0": 1000,
 		"simulationMethod": 2,
 		"gravitation": [0.0, -9.81, 0.0],

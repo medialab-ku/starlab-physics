@@ -22,7 +22,7 @@ if __name__ == "__main__":
     scene_name = scene_path.split("/")[-1].split(".")[0]
 
     substeps = config.get_cfg("numSubstepping")
-    print(substeps)
+    # print(substeps)
     output_frames = config.get_cfg("exportFrame")
     output_interval = int(0.02 / config.get_cfg("timeStepSize"))
     output_ply = config.get_cfg("exportPly")
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window = True, vsync=False)
     gui = window.get_gui()
-    scene = ti.ui.Scene()
+    scene = window.get_scene()
     camera = ti.ui.Camera()
     camera.position(5.5, 2.5, -4.0)
     camera.up(0.0, 1.0, 0.0)
@@ -128,6 +128,8 @@ if __name__ == "__main__":
                 solver.max_iteration = w.slider_int("max iter", solver.max_iteration, 1, 1000)
                 solver.method = w.slider_int("method type", solver.method, 0, 2)
                 solver.print_info = w.checkbox("print", solver.print_info)
+
+                solver.divergence_free_solve = w.checkbox("divergence-free solve", solver.divergence_free_solve)
 
                 if solver.method == 0:
                     gui.text("IISPH")

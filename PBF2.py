@@ -24,6 +24,7 @@ class PBF2Solver(SPHBase):
 
         self.adaptive_step_size = False
         self.gauss_newton_pcg = True
+        self.divergence_free_solve = False
         self.print_info = True
         self.tol = 2
         self.omega = 0.5 
@@ -60,9 +61,8 @@ class PBF2Solver(SPHBase):
 
         self.stats_iter = 0
         self.stats_pcg_iter = 0
-        print("method: PBF2")
-        print("Available methods: 0=ProjectedJacobi, 1=ADMM, 2=Barrier, 3=NormalEquations")
-
+        # print("method: PBF2")
+        # print("Available methods: 0=ProjectedJacobi, 1=ADMM, 2=Barrier, 3=NormalEquations")
         self.matrix_type = 0
         
         # Iteration logging system
@@ -135,7 +135,6 @@ class PBF2Solver(SPHBase):
                 dx_j = self.ps.x[p_j] - self.ps.y[p_i]
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
-
 
                 Hii += J_ij.outer_product(J_ij)
                 if self.ps.material[p_j] == self.ps.material_fluid:
@@ -338,7 +337,7 @@ class PBF2Solver(SPHBase):
     def pressure_solve(self):
         
         if self.method == 0:
-            self.IISPH()
+            self.constant_density_solve_IISPH()
 
 
 
@@ -366,7 +365,11 @@ class PBF2Solver(SPHBase):
 
             ret[p_i] = ret_i
 
-    def IISPH(self):
+    def divergence_free_sovle_IISPH(self):
+
+        print("TODO")
+
+    def constant_density_solve_IISPH(self):
         
         self.compute_density()
         # self.precompute_values()
@@ -433,7 +436,7 @@ class PBF2Solver(SPHBase):
             dx[p_i] = H.inverse() @ grad[p_i]
 
 
-    def PBF(self):
+    def constant_density_solve_PBF(self):
 
         # objective: min_x ||x - y||^2_{M/h^2} s.t. c(x) <= 0
         # linearization:  min_x ||x^k+1 - y||^2_{M/h^2} s.t. c(x^k) + J * (x^k+1 - x^k) <= 0
@@ -528,9 +531,16 @@ class PBF2Solver(SPHBase):
 
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
+
+        #divergence-free condition solve
+        if self.divergence_free_solve:
+            if self.method == 0:
+                self.divergence_free_sovle_IISPH()
+
+        #constant density condition solve
         if self.method == 0:
-            self.IISPH()
+            self.constant_density_solve_IISPH()
         elif self.method == 1:
-            self.PBF()
+            self.constant_density_solve_PBF()
 
         self.dt = dt_original  # Reset dt to original value after substep
