@@ -29,7 +29,9 @@ class PBF2Solver(SPHBase):
         self.tol = 2
         self.omega = 0.5 
         self.cfl = False
-        self.max_iteration = 1000
+        self.max_iteration_opt = 1000
+        self.max_iteration_pcg = 1000
+        self.pcg_tol = 1e-4
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
@@ -37,28 +39,19 @@ class PBF2Solver(SPHBase):
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-
+        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        
+        
         self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.Hii = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.Ap  = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
         self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-
-
-        self.Ap_b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        # self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.y_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b_b    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.z_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.r_pcg    = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.grad_b = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-
+        self.b_pcg   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.z_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.r_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.p_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         # print("method: PBF2")
@@ -380,7 +373,7 @@ class PBF2Solver(SPHBase):
         tol = pow(10, -self.tol)
         self.p.fill(0.0)
         iter = 0
-        for _ in range(self.max_iteration):
+        for _ in range(self.max_iteration_opt):
         
             if self.iisph_vanilla:
                 coef_wise_mul(self.y, self.Dii, self.p)
@@ -461,14 +454,14 @@ class PBF2Solver(SPHBase):
         self.ps.x.copy_from(self.ps.y)
         iter = 0
 
-        for _ in range(self.max_iteration):
+        for _ in range(self.max_iteration_opt):
 
             self.compute_density()
 
             # original problem: (JM^-1Jt) * p = c
             # PBD approximation: p = diag(JM^-1Jt)^-1 * max(c, 0)
             error = self.compute_pressure_pbf()
-            if error < tol and iter > 1 or iter == self.max_iteration:
+            if error < tol and iter > 1 or iter == self.max_iteration_opt:
                 if self.print_info:
                     print(f" converged iter: {iter}. error: {error}")
                 break
@@ -479,18 +472,50 @@ class PBF2Solver(SPHBase):
 
             step_size = 0.5
             if self.gauss_newton_pcg:
-
-                add(self.dx_adv, self.ps.y, -1.0, self.ps.x)
-                self.compute_J_x(self.dp, self.dx_adv)
-                max(self.dp)
+                
+                # Preconditioned Conjugate Gradient (PCG) Pseudo Code:
+                # Given: A*x = b, preconditioner M
+                # 1. r_0 = b - A*x_0  (initial residual)
+                # 2. z_0 = M^(-1) * r_0  (apply preconditioner)
                 max(self.c)
-                # add(self.c, self.c, 1.0, self.dp)  # Initialize p with b
+
+                x = self.dx
+                z =self.z_pcg
+                r = self.r_pcg
+                p = self.p_pcg
+                Ap = self.Ap
+                b = self.b_pcg 
                 coef_wise_op(self.p, self.c, self.Aii, 1)
                 self.compute_J_tr_x(self.tmp, self.p)
 
                 self.compute_gradient(self.grad, False)
-                self.apply_precondition(self.dx, self.Hii, self.grad)
-                step_size = 1.0
+                b.copy_from(self.grad)
+                z.copy_from(b)
+                self.apply_precondition(z, self.Hii, b)
+
+                rz_old = dot(r, z)
+                # 3. p_0 = z_0  (initial search direction)
+                p.copy_from(z)
+
+                for _ in range(self.max_iteration_pcg):
+    
+                    alpha = rz_old / (dot(p, Ap))
+                    add(x, x, alpha, p)
+                    add(r, r, -alpha, Ap)
+                    self.apply_precondition(z, self.Hii, r)
+
+                    rz_new = dot(r, z)
+
+                    if rz_new < self.pcg_tol:
+                        break
+
+                    beta = rz_new / rz_old
+                    add(p, z, beta, p)
+                    rz_old = rz_new
+
+                alpha = 1.0 
+                # self.apply_precondition(self.dx, self.Hii, self.grad)
+                # step_size = 1.0
             else:
                 self.compute_J_tr_x(self.tmp, self.p)
                 coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
