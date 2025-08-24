@@ -123,6 +123,11 @@ class PBF2Solver(SPHBase):
             Hii = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
             dx_i = self.ps.x[p_i] - self.ps.y[p_i]
+            self.c[p_i] = 0.0
+
+            if self.ps.density[p_i] <= self.ps.density0[p_i]:
+                continue
+
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
@@ -136,10 +141,10 @@ class PBF2Solver(SPHBase):
 
                 J_ii -= J_ij
 
-                if self.ps.material[p_j] == self.ps.material_fluid:
-                    Jdx_i += self.ps.m[p_j] * (dx_i - dx_j).dot(grad_ij)
-                else:
-                    Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
+                # if self.ps.material[p_j] == self.ps.material_fluid:
+                #     Jdx_i += self.ps.m[p_j] * (dx_i - dx_j).dot(grad_ij)
+                # else:
+                #     Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
 
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
             Hii += J_ii.outer_product(J_ii)
@@ -280,6 +285,24 @@ class PBF2Solver(SPHBase):
             ret[p_i] = ret_i
 
     @ti.kernel
+    def compute_J_x_active(self, ret: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            ret[p_i] = 0.0
+
+            if self.ps.density[p_i] <= self.ps.density0[p_i]:
+                continue
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    ret[p_i] += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                else:
+                    ret[p_i] += self.ps.m[p_j] * (x[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
+
+            # ret[p_i] = ret_i
+
+    @ti.kernel
     def num_negative_p(self, p: ti.template()) -> int:
         cnt = 0
         for i in p:
@@ -306,6 +329,33 @@ class PBF2Solver(SPHBase):
                         ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
                     else:
                         ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
+
+    
+    @ti.kernel
+    def compute_J_tr_x_active(self, ret: ti.template(), x: ti.template()):
+
+        # num_f = 0
+        for p_i in ti.grouped(x):
+            ret[p_i] = ti.math.vec3(0.0)
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            # num_f += 1
+
+            if self.ps.density[p_i] <= self.ps.density0[p_i]:
+                continue
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                # val = ti.cast(self.ps.material[p_i], float)
+                if self.ps.material[p_i] == self.ps.material_fluid:
+                    if self.ps.material[p_j] == self.ps.material_fluid:
+                        gradWij = self.ps.fluid_neighbors_values[p_i, j]
+                        ret[p_i] += self.ps.m[p_j] * x[p_i] * gradWij
+                        ret[p_j] -= self.ps.m[p_j] * x[p_i] * gradWij
+                    else:
+                        ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
+
 
         # print(num_f)
             # ret[p_i] = ret_i
@@ -524,58 +574,58 @@ class PBF2Solver(SPHBase):
                 Jp = self.dp  
                 
                 coef_wise_op(self.p, self.c, self.Aii, 1)
-                self.compute_J_tr_x(self.tmp, self.p)
+                self.compute_J_tr_x_active(self.tmp, self.p)
                 self.compute_gradient(self.grad, False)
 
                 b.copy_from(self.grad)
                 r.copy_from(b)
                 self.apply_precondition(z, self.Hii, r)
 
-                rz_old = dot(r, z)
+                # rz_old = dot(r, z)
 
-                if rz_old > self.pcg_tol:
-                    # print(rz_old)
-                # 3. p_0 = z_0  (initial search direction)
-                    p.copy_from(z)
+                # if rz_old > self.pcg_tol:
+                #     # print(rz_old)
+                # # 3. p_0 = z_0  (initial search direction)
+                #     p.copy_from(z)
 
-                    for _ in range(self.max_iteration_pcg):
+                #     for _ in range(self.max_iteration_pcg):
             
-                        self.compute_Ax(Ap, Jp, p)
-                        pAp = dot(p, Ap)
-                        # # if pAp < 0.0:
-                        # #     print("Warning: non-positive definite matrix!")
-                        # #     break
-                        alpha = rz_old / pAp
-                        # print(alpha)
-                        # alpha
-                        add(dx, dx, alpha, p)
+                #         self.compute_Ax(Ap, Jp, p)
+                #         pAp = dot(p, Ap)
+                #         # # if pAp < 0.0:
+                #         # #     print("Warning: non-positive definite matrix!")
+                #         # #     break
+                #         alpha = rz_old / pAp
+                #         # print(alpha)
+                #         # alpha
+                #         add(dx, dx, alpha, p)
 
-                        # debug
-                        self.compute_J_x(self.dp, dx)
-                        print("# compressed dir: ", self.num_negative_p(self.dp))
+                #         # debug
+                #         self.compute_J_x_active(self.dp, dx)
+                #         print("# compressed dir: ", self.num_negative_p(self.dp))
 
-                        add(r, r, -alpha, Ap)
-                        self.apply_precondition(z, self.Hii, r)
+                #         add(r, r, -alpha, Ap)
+                #         self.apply_precondition(z, self.Hii, r)
 
-                        rz_new = dot(r, z)
+                #         rz_new = dot(r, z)
 
-                        if rz_new < self.pcg_tol:
-                            break
+                #         if rz_new < self.pcg_tol:
+                #             break
 
-                        beta = rz_new / rz_old
-                        add(p, z, beta, p)
-                        rz_old = rz_new
+                #         beta = rz_new / rz_old
+                #         add(p, z, beta, p)
+                #         rz_old = rz_new
 
                 step_size = 0.9 
-                # self.apply_precondition(dx, self.Hii, b)
+                self.apply_precondition(dx, self.Hii, b)
 
             else:
-                self.compute_J_tr_x(self.tmp, self.p)
+                self.compute_J_tr_x_active(self.tmp, self.p)
                 coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
             if self.adaptive_step_size:
                   div = self.dp
-                  self.compute_J_x(div, self.dx)
+                  self.compute_J_x_active(div, self.dx)
                   aTa = dot2(div, div)
                   aTb = dot2(div, self.c)
 
