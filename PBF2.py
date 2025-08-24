@@ -119,11 +119,13 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
             Jdx_i = 0.0
-            Aii = 0.0
+            self.Aii[p_i] = eps
             Hii = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
             dx_i = self.ps.x[p_i] - self.ps.y[p_i]
+
             self.c[p_i] = 0.0
+            self.p[p_i] = 0.0
 
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
@@ -137,7 +139,7 @@ class PBF2Solver(SPHBase):
 
                 Hii += J_ij.outer_product(J_ij)
                 if self.ps.material[p_j] == self.ps.material_fluid:
-                    Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
+                    self.Aii[p_i] += J_ij.dot(J_ij) / self.ps.m[p_j]
 
                 J_ii -= J_ij
 
@@ -146,13 +148,12 @@ class PBF2Solver(SPHBase):
                 # else:
                 #     Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
 
-            Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
+            self.Aii[p_i] += J_ii.dot(J_ii) / self.ps.m[p_i]
             Hii += J_ii.outer_product(J_ii)
             c = self.ps.density[p_i] - self.ps.density0[p_i]
             ret += (ti.max(c, 0.0) / self.ps.density0[p_i])
             self.c[p_i] = c
             self.Hii[p_i] = Hii
-            self.Aii[p_i] = Aii + eps
             self.p[p_i] = ti.max(c, 0.0) / self.Aii[p_i]
 
         ret /= self.ps.fluid_particle_num 
