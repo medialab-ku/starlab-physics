@@ -114,16 +114,14 @@ class PBF2Solver(SPHBase):
     def compute_pressure_pbf(self) -> float:
         
         ret = 0.0
-        eps = 1e-3 
+        eps = 1e-3
+        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-            Jdx_i = 0.0
-            self.Aii[p_i] = eps
-            Hii = ti.math.mat3(0.0)
-            J_ii = ti.math.vec3(0.0)
-            dx_i = self.ps.x[p_i] - self.ps.y[p_i]
 
+            self.Aii[p_i] = eps
+            J_ii = ti.math.vec3(0.0)
             self.c[p_i] = 0.0
             self.p[p_i] = 0.0
 
@@ -133,28 +131,37 @@ class PBF2Solver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
-                dx_j = self.ps.x[p_j] - self.ps.y[p_i]
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
-
-                Hii += J_ij.outer_product(J_ij)
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     self.Aii[p_i] += J_ij.dot(J_ij) / self.ps.m[p_j]
 
                 J_ii -= J_ij
-
-                # if self.ps.material[p_j] == self.ps.material_fluid:
-                #     Jdx_i += self.ps.m[p_j] * (dx_i - dx_j).dot(grad_ij)
-                # else:
-                #     Jdx_i += self.ps.m[p_j] * (dx_i).dot(grad_ij)
-
             self.Aii[p_i] += J_ii.dot(J_ii) / self.ps.m[p_i]
-            Hii += J_ii.outer_product(J_ii)
             c = self.ps.density[p_i] - self.ps.density0[p_i]
             ret += (ti.max(c, 0.0) / self.ps.density0[p_i])
             self.c[p_i] = c
-            self.Hii[p_i] = Hii
             self.p[p_i] = ti.max(c, 0.0) / self.Aii[p_i]
+
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            self.Hii[p_i] = self.ps.m[p_i] * I3x3
+            J_ii = ti.math.vec3(0.0)
+
+            if self.ps.density[p_i] <= self.ps.density0[p_i]:
+                continue
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                grad_ij = self.ps.fluid_neighbors_values[p_i, j]
+                J_ij = self.ps.m[p_j] * grad_ij
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    self.Hii[p_i] += J_ij.outer_product(J_ij) / self.Aii[p_i]
+
+                J_ii -= J_ij
+            self.Hii[p_i] += J_ii.outer_product(J_ii) / self.Aii[p_i]
 
         ret /= self.ps.fluid_particle_num 
         return ret 
@@ -506,12 +513,12 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
 
-        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        # I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            H = self.ps.m[p_i] * I3x3 + Hii[p_i] / self.Aii[p_i]
+            H = Hii[p_i]
             dx[p_i] = H.inverse() @ grad[p_i]
 
 
@@ -564,7 +571,6 @@ class PBF2Solver(SPHBase):
                 # 1. r_0 = b - A*x_0  (initial residual)
                 # 2. z_0 = M^(-1) * r_0  (apply preconditioner)
                 max(self.c)
-
                 dx = self.dx
                 self.dx.fill(0.0)
                 z = self.z_pcg
