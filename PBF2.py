@@ -272,7 +272,6 @@ class PBF2Solver(SPHBase):
                 self.Aii[p_i] = Aii + eps
  
 
-
     @ti.kernel
     def update_velocities(self, dt: float):
 
@@ -303,6 +302,9 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(x):
             ret[p_i] = 0.0
+
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
 
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
@@ -354,21 +356,17 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            # num_f += 1
-
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                # val = ti.cast(self.ps.material[p_i], float)
-                if self.ps.material[p_i] == self.ps.material_fluid:
-                    if self.ps.material[p_j] == self.ps.material_fluid:
-                        gradWij = self.ps.fluid_neighbors_values[p_i, j]
-                        ret[p_i] += x[p_i] * self.ps.m[p_j] * gradWij
-                        ret[p_j] -= x[p_i] * self.ps.m[p_j] * gradWij
-                    else:
-                        ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    gradWij = self.ps.fluid_neighbors_values[p_i, j]
+                    ret[p_i] += x[p_i] * self.ps.m[p_j] * gradWij
+                    ret[p_j] -= x[p_i] * self.ps.m[p_j] * gradWij
+                else:
+                    ret[p_i] += x[p_i] * self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
 
 
         # print(num_f)
@@ -504,7 +502,11 @@ class PBF2Solver(SPHBase):
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                Jx[p_i] += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Jx[p_i] += (x[p_i] - x[p_j]).dot(val_ij)
+                else:
+                    Jx[p_i] += x[p_i].dot(val_ij)
 
             Jx[p_i] /= self.Aii[p_i]
 
@@ -525,7 +527,9 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 Ax[p_i] += Jx[p_i] * val_ij
-                Ax[p_j] -= Jx[p_i] * val_ij
+
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Ax[p_j] -= Jx[p_i] * val_ij
 
 
     @ti.kernel
@@ -539,6 +543,26 @@ class PBF2Solver(SPHBase):
             H = Hii[p_i]
             dx[p_i] = H.inverse() @ grad[p_i]
 
+    @ti.kernel
+    def dot(self, a: ti.template(), b: ti.template()) -> float:
+
+        ret = 0.0
+        for i in a:
+            if self.ps.material[i] != self.ps.material_fluid:
+                continue
+
+            ret += ti.math.dot(a[i], b[i])
+
+        return ret
+
+    @ti.kernel
+    def add(self, ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
+        for i in ret:
+
+            if self.ps.material[i] != self.ps.material_fluid:
+                continue
+
+            ret[i] = v0[i] + scale * v1[i]
 
     def constant_density_solve_PBF(self):
 
@@ -600,13 +624,15 @@ class PBF2Solver(SPHBase):
                 
                 coef_wise_op(self.p, self.c, self.Aii, 1)
                 self.compute_J_tr_x_active(self.tmp, self.p)
+
+                self.grad.fill(0.0)
                 self.compute_gradient(self.grad, False)
 
                 b.copy_from(self.grad)
                 r.copy_from(b)
                 self.apply_precondition(z, self.Hii, r)
 
-                rz_old = dot(r, z)
+                rz_old = self.dot(r, z)
 
                 if rz_old > self.pcg_tol:
                 #     # print(rz_old)
@@ -616,15 +642,14 @@ class PBF2Solver(SPHBase):
                     for _ in range(self.max_iteration_pcg):
 
                         self.compute_Ax(Ap, Jp, p)
-                        pAp = dot(p, Ap)
+                        pAp = self.dot(p, Ap)
                         if pAp < 0.0:
                             print("Warning: non-positive definite matrix!")
                         # #     break
                         alpha = rz_old / pAp
-                        add(dx, dx, alpha, p)
-
-                        add(r, r, -alpha, Ap)
-                        err = dot(r, r)
+                        self.add(dx, dx, alpha, p)
+                        self.add(r, r, -alpha, Ap)
+                        err = self.dot(r, r)
                         self.apply_precondition(z, self.Hii, r)
 
                         rz_new = dot(r, z)
@@ -633,7 +658,7 @@ class PBF2Solver(SPHBase):
                             break
                         pcg_iter += 1
                         beta = rz_new / rz_old
-                        add(p, z, beta, p)
+                        self.add(p, z, beta, p)
                         rz_old = rz_new
 
                 step_size = 1.0
@@ -654,7 +679,7 @@ class PBF2Solver(SPHBase):
                   step_size = ti.min(1.0, alpha)
 
             # x^k+1 = x^k - step_size(=0.5) * M^-1 J^t * p
-            add(self.ps.x, self.ps.x, -step_size, self.dx)
+            self.add(self.ps.x, self.ps.x, -step_size, self.dx)
 
             iter += 1
 
