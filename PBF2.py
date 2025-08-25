@@ -32,27 +32,33 @@ class PBF2Solver(SPHBase):
         self.max_iteration_opt = 1000
         self.max_iteration_pcg = 1000
         self.pcg_tol = 1e-4
-        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.dx_adv = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.dp   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.c   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.p   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
+        self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.dx_adv = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         
         
-        self.Aii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Dii = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.Hii = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.Ap  = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.x   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.y   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b   = ti.field(dtype=float, shape=self.ps.fluid_particle_num)
-        self.b_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.z_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.r_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
-        self.p_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.fluid_particle_num)
+        self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Dii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.y   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.b   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.r_jacobi = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+
+        self.Hii     = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
+        self.Ap      = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.b_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.z_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.r_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.p_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         # print("method: PBF2")
@@ -461,10 +467,10 @@ class PBF2Solver(SPHBase):
             
             iter += 1 
 
-            self.compute_J_x(self.Ap, self.tmp)
-            add(self.r_pcg, self.b, -1.0, self.Ap)
+            self.compute_J_x(self.Jx, self.tmp)
+            add(self.r_jacobi, self.b, -1.0, self.Jx)
 
-            coef_wise_op(self.dp, self.r_pcg, self.Aii, 1)
+            coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
 
     
             add(self.p, self.p, self.omega, self.dp)  # Initialize p with b

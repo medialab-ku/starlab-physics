@@ -209,8 +209,18 @@ if __name__ == "__main__":
 
             if window.event.key == 'r':
                 frame_cnt = 0
+                # Restore all particle states to initial
                 ps.x.copy_from(ps.x_0)
+                ps.x_old.copy_from(ps.x_0)
+                ps.y.copy_from(ps.x_0)
                 ps.v.fill(0.0)
+                ps.v_adv.fill(0.0)
+                ps.acceleration.fill(0.0)
+                ps.pressure.fill(0.0)
+                ps.density.copy_from(ps.density0)
+                # Reinitialize solver-side precomputations and boundary volumes
+                solver.initialize()
+                ps.initialize_particle_system()
                 runSim = False
                 # Reset logging and save current data
                 # solver.reset_logging()
