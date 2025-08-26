@@ -38,6 +38,20 @@ if __name__ == "__main__":
     solver = ps.build_solver()
     solver.initialize()
 
+    # Add a kernel for moving the boundary object
+    @ti.kernel
+    def move_boundary_object(dt: float):
+        amplitude = -0.3
+        frequency = 4.0
+    
+        for p_i in ti.grouped(ps.x):
+            if ps.object_id[p_i] == 2:
+                # Update position based on the initial position x_0
+                new_y = ti.cos(dt) * ps.x[p_i][1] + ti.sin(dt) * ps.v[p_i][1]
+                new_v = -ti.sin(dt) * ps.x[p_i][1] + ti.cos(dt) * ps.v[p_i][1]
+                ps.x[p_i][1] = new_y
+                ps.v[p_i][1] = new_v
+
     window = ti.ui.Window('SPH', (1024, 1024), show_window = True, vsync=False)
     gui = window.get_gui()
     scene = window.get_scene()
@@ -218,6 +232,7 @@ if __name__ == "__main__":
                 ps.acceleration.fill(0.0)
                 ps.pressure.fill(0.0)
                 ps.density.copy_from(ps.density0)
+                ps.divergence.fill(0,0)
                 # Reinitialize solver-side precomputations and boundary volumes
                 solver.initialize()
                 ps.initialize_particle_system()
@@ -230,7 +245,13 @@ if __name__ == "__main__":
 
         if runSim:
 
+            # Move boundary object if the scene is moving_boundary
+
             dt = solver.dt
+            if scene_name == "moving_boundary":
+                dt = config.get_cfg("timeStepSize")
+                move_boundary_object(dt)
+                
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
                 solver.step()
@@ -319,15 +340,13 @@ if __name__ == "__main__":
             v_np = ps.v.to_numpy()
             density_np = ps.density.to_numpy()
             density0_np = ps.density0.to_numpy()
-            pressure_np = ps.pressure.to_numpy()
+            div_np = ps.divergence.to_numpy()
             material_np = ps.material.to_numpy()
 
             # v_np = solver.div.to_numpy()
 
             v_norm = np.linalg.norm(v_np, axis = 1)
-            # density_norm = density_np
-            # pressure_norm = pressure_np
-            # v_norm = solver.div.to_numpy()
+            # v_norm = solver.div.to_numpy
 
             # Calculate density ratio relative to rest density (ρ/ρ₀)
             # ρ/ρ₀ > 1: higher density (red)
@@ -335,13 +354,14 @@ if __name__ == "__main__":
             # ρ/ρ₀ < 1: lower density (blue)
             density_ratio = density_np / density0_np
 
-            # Normalize density ratio: 0.5 (blue) to 1.1 (red)
-            norm = Normalize(vmin=0.0, vmax=1.5)
-            cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "green", "yellow", "red"])
+            # Normalize values
+            norm_v = Normalize(vmin=0.0, vmax=1.5)
+            norm_div = Normalize(vmin=-1.0, vmax=1.0)
+            cmap = LinearSegmentedColormap.from_list("heatmap", ["red", "white","red"])
 
 
             # Step 5: Map normalized values to RGB (fluid particles only)
-            rgba_array = cmap(norm(v_norm))
+            rgba_array = cmap(norm_div(div_np))
 
             # Create a color array that only applies heat map to fluid particles
             # Initialize with default colors (from color_vis_buffer)

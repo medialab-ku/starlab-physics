@@ -117,6 +117,7 @@ class ParticleSystem:
         self.density  = ti.field(dtype=float, shape=self.particle_max_num)
         self.density0 = ti.field(dtype=float, shape=self.particle_max_num)
         self.pressure = ti.field(dtype=float, shape=self.particle_max_num)
+        self.divergence = ti.field(dtype=float, shape=self.particle_max_num)
         self.material = ti.field(dtype=int, shape=self.particle_max_num)
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
@@ -433,7 +434,7 @@ class ParticleSystem:
                         continue
                     sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
 
-                if sum_Wij > 1e-9:
+                if sum_Wij > 1e-6:
                     self.m[p_i] = self.density0[p_i] / sum_Wij
 
     @ti.kernel
