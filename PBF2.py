@@ -423,7 +423,6 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def measure_divergence(self, v: ti.template(), dt: float) -> float:
         avg_error = 0.0
-
         for p_i in ti.grouped(v):
             div_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
@@ -434,8 +433,10 @@ class PBF2Solver(SPHBase):
                     div_i += self.ps.m[p_j] * (self.ps.v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 # div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-            avg_error += ti.abs(div_i) / (self.ps.density[p_i] + 1e-12)
-            self.ps.divergence[p_i] = avg_error
+            avg_error += ti.max(div_i, 0.0) / (self.ps.density[p_i] + 1e-12)
+            self.ps.divergence[p_i] = div_i
+
+
         avg_error /= float(self.ps.fluid_particle_num)
 
         return dt*avg_error
@@ -803,6 +804,7 @@ class PBF2Solver(SPHBase):
         elif self.method == 1:
             self.constant_density_solve_PBF()
 
-        self.compute_divergence()
+        # self.com_divergence()
+        self.measure_divergence(self.ps.v, self.dt)
 
         self.dt = dt_original  # Reset dt to original value after substep
