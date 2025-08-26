@@ -392,12 +392,13 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(b):
             div_i = 0.0
-
+            b[p_i] = 0.0
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
+
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
@@ -429,31 +430,17 @@ class PBF2Solver(SPHBase):
             div_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                else:
+                    div_i += self.ps.m[p_j] * (self.ps.v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                # div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
             avg_error += ti.abs(div_i) / (self.ps.density[p_i] + 1e-12)
+            self.ps.divergence[p_i] = avg_error
         avg_error /= float(self.ps.fluid_particle_num)
 
-        return dt * avg_error
-    
-
-    @ti.kernel
-    def compute_divergence(self):
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                self.ps.divergence[p_i] = 0.0
-                continue
-            
-            div_i = 0.0
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
-                # if self.ps.material[p_j] == self.ps.material_fluid:
-                #     div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
-                # else:
-                #     div_i += self.ps.m[p_j] * (self.ps.v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
-
-            self.ps.divergence[p_i] = div_i / (self.ps.density[p_i] + 1e-12)
+        return dt*avg_error
 
 
     def pressure_solve(self):
@@ -492,12 +479,12 @@ class PBF2Solver(SPHBase):
         self.compute_density()
         # self.precompute_values()
         self.ps.v.copy_from(self.ps.v_adv)
-        self.v_tmp.copy_from(self.ps.v_adv)
+        self.v_tmp.copy_from(self.ps.v)
         self.compute_Aii(self.iisph_vanilla)
         # self.compute_b(self.b, self.ps.v, self.dt)
         self.compute_b_div(self.b, self.ps.v_adv, self.dt)
 
-        tol = pow(10, -self.tol + 1.0)
+        tol = pow(10, -self.tol+1)
         self.p.fill(0.0)
         iter = 0
         for _ in range(self.max_iteration_opt):
@@ -525,12 +512,13 @@ class PBF2Solver(SPHBase):
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
 
 
-            add(self.p, self.p, 0.2, self.dp)  # Initialize p with b
-            min(self.p)  # Ensure non-negativity
+            add(self.p, self.p, 0.3, self.dp)  # Initialize p with b
+            max(self.p)  # Ensure non-negativity
 
         print(f"iter: {iter}. div: {error}")
         self.ps.v.copy_from(self.v_tmp)
         self.ps.v_adv.copy_from(self.ps.v)
+
 
     def constant_density_solve_IISPH(self):
         

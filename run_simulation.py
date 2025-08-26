@@ -86,7 +86,7 @@ if __name__ == "__main__":
 
     # Visualization mode
     viz_mode = 1  # 1: heatmap, 2: original colors
-    heatmap_type = 1  # 1: velocity, 2: divergence, 3: density
+    heatmap_type = 2  # 1: velocity, 2: divergence, 3: density
 
     # Export options
     export_rigid_objects = False
@@ -365,7 +365,7 @@ if __name__ == "__main__":
 
             # Normalize values
             norm_v = Normalize(vmin=0.0, vmax=1.5)
-            norm_div = Normalize(vmin=-1.0, vmax=1.0)
+            norm_div = Normalize(vmin=0.0, vmax=5.0)
             norm_density = Normalize(vmin=-50.0, vmax=50.0)
             
 
@@ -378,7 +378,7 @@ if __name__ == "__main__":
                     rgba_array = cmap(norm_v(v_norm))
                 elif heatmap_type == 2:
                     # Divergence heatmap
-                    cmap = LinearSegmentedColormap.from_list("heatmap", ["red", "white","red"])
+                    cmap = LinearSegmentedColormap.from_list("heatmap", ["white","red"])
                     rgba_array = cmap(norm_div(div_np))
                 elif heatmap_type == 3:
                     # Density heatmap
