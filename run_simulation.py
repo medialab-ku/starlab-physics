@@ -86,6 +86,7 @@ if __name__ == "__main__":
 
     # Visualization mode
     viz_mode = 1  # 1: heatmap, 2: original colors
+    heatmap_type = 1  # 1: velocity, 2: divergence, 3: density
 
     # Export options
     export_rigid_objects = False
@@ -122,6 +123,7 @@ if __name__ == "__main__":
         global color_alpha
         global is_invisible
         global viz_mode
+        global heatmap_type
         global export_rigid_objects
         # global stop_frame
         # global output_obj
@@ -186,6 +188,13 @@ if __name__ == "__main__":
             viz_mode = w.slider_int("visualization mode", viz_mode, 1, 2)
             if viz_mode == 1:
                 gui.text("Heatmap Mode")
+                heatmap_type = w.slider_int("heatmap type", heatmap_type, 1, 3)
+                if heatmap_type == 1:
+                    gui.text("Velocity")
+                elif heatmap_type == 2:
+                    gui.text("Divergence")
+                elif heatmap_type == 3:
+                    gui.text("Density")
             elif viz_mode == 2:
                 gui.text("Original Colors Mode")
             #
@@ -232,7 +241,7 @@ if __name__ == "__main__":
                 ps.acceleration.fill(0.0)
                 ps.pressure.fill(0.0)
                 ps.density.copy_from(ps.density0)
-                ps.divergence.fill(0,0)
+                ps.divergence.fill(0.0)
                 # Reinitialize solver-side precomputations and boundary volumes
                 solver.initialize()
                 ps.initialize_particle_system()
@@ -343,7 +352,7 @@ if __name__ == "__main__":
             div_np = ps.divergence.to_numpy()
             material_np = ps.material.to_numpy()
 
-            # v_np = solver.div.to_numpy()
+            # v_np = solver.div.to_numpy
 
             v_norm = np.linalg.norm(v_np, axis = 1)
             # v_norm = solver.div.to_numpy
@@ -352,16 +361,31 @@ if __name__ == "__main__":
             # ρ/ρ₀ > 1: higher density (red)
             # ρ/ρ₀ ≈ 1: normal density (green)
             # ρ/ρ₀ < 1: lower density (blue)
-            density_ratio = density_np / density0_np
+            density = density_np - density0_np
 
             # Normalize values
             norm_v = Normalize(vmin=0.0, vmax=1.5)
             norm_div = Normalize(vmin=-1.0, vmax=1.0)
-            cmap = LinearSegmentedColormap.from_list("heatmap", ["red", "white","red"])
+            norm_density = Normalize(vmin=-50.0, vmax=50.0)
+            
 
 
             # Step 5: Map normalized values to RGB (fluid particles only)
-            rgba_array = cmap(norm_div(div_np))
+            if viz_mode == 1:
+                if heatmap_type == 1:
+                    # Velocity heatmap
+                    cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white"])
+                    rgba_array = cmap(norm_v(v_norm))
+                elif heatmap_type == 2:
+                    # Divergence heatmap
+                    cmap = LinearSegmentedColormap.from_list("heatmap", ["red", "white","red"])
+                    rgba_array = cmap(norm_div(div_np))
+                elif heatmap_type == 3:
+                    # Density heatmap
+                    cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white","red"])
+                    rgba_array = cmap(norm_density(density))
+            else:
+                rgba_array = cmap(norm_density(density))  # Default for non-heatmap mode
 
             # Create a color array that only applies heat map to fluid particles
             # Initialize with default colors (from color_vis_buffer)
