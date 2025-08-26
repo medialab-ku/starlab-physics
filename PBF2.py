@@ -773,7 +773,40 @@ class PBF2Solver(SPHBase):
 
         self.update_velocities(self.dt)
 
-        
+    def constant_volume_solve_PBF(self):
+
+        # vol_0 = m_i / rho_0
+        # c_i(x) = vol_0 * (vol_i / vol_0 - 1.0) >= 0
+
+        tol = pow(10, -self.tol)
+        # tol = 0.1
+        self.ps.x_old.copy_from(self.ps.x)
+
+        # y = x_n + dt * v_n + dt * M^-1 * f_ext
+        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+
+        self.ps.x.copy_from(self.ps.y)
+        iter = 0
+
+        for _ in range(self.max_iteration_opt):
+
+            self.compute_density()
+            self.dx.fill(0.0)
+
+            print("TODO")
+            error = 0.0
+            if error < tol and iter > 1 or iter == self.max_iteration_opt:
+                if self.print_info:
+                    print(f" converged iter: {iter}. error: {error}")
+                break
+
+
+            step_size = 0.5
+            self.add(self.ps.x, self.ps.x, -step_size, self.dx)
+
+            iter += 1
+
+        self.update_velocities(self.dt)
 
     def substep(self):
         self.ps.initialize_particle_system()
@@ -803,6 +836,8 @@ class PBF2Solver(SPHBase):
             self.constant_density_solve_IISPH()
         elif self.method == 1:
             self.constant_density_solve_PBF()
+        elif self.method == 2:
+            self.constant_volume_solve_PBF()
 
         # self.com_divergence()
         self.measure_divergence(self.ps.v, self.dt)

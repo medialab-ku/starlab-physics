@@ -133,7 +133,7 @@ if __name__ == "__main__":
         # global animate
         global export_ply
 
-        with gui.sub_window("Settings", 0., 0., 0.4, 0.3) as w:
+        with gui.sub_window("Settings", 0., 0., 0.4, 1.0) as w:
 
             solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
             solver.cfl = w.checkbox("CFL", solver.cfl)
@@ -161,28 +161,22 @@ if __name__ == "__main__":
                         solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
                     solver.adaptive_step_size = w.checkbox("adaptive step size",  solver.adaptive_step_size)
 
+                elif solver.method == 2:
+                    gui.text("PBF-volume")
+                    # solver.gauss_newton_pcg = w.checkbox("GN-PCG", solver.gauss_newton_pcg)
+                    #
+                    # if solver.gauss_newton_pcg:
+                    #     solver.max_iteration_pcg = w.slider_int("max pcg iter", solver.max_iteration_pcg, 1, 1000)
+                    #     solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
+                    # solver.adaptive_step_size = w.checkbox("adaptive step size", solver.adaptive_step_size)
 
-
-
-
-            #     solver.k_rho = w.checkbox("use gn", solver.use_gn)
-            #     solver.use_div = w.checkbox("use div", solver.use_div)
-            #
-            # # pbf_num_iters = w.slider_int("# iter", pbf_num_iters, 1, 1000)
-            # # solver_type = w.slider_int("solver type", solver_type, 0, 2)
-            #
-            # stop_frame = w.checkbox("stop frame ?", stop_frame)
             export_ply = w.checkbox("export", export_ply)
             if export_ply:
                 export_rigid_objects = w.checkbox("Export rigid objects", export_rigid_objects)
-            # output_obj = w.checkbox("output_obj", output_obj)
-            # output_vtk = w.checkbox("output_vtk", output_vtk)
-            # is_plot_option = w.checkbox("plot option", is_plot_option)
-            # animate = w.checkbox("animate", animate)
-            #
+
             if export_ply:
                 end_frame = w.slider_int("end frame", end_frame, 0, int(5e3))
-            #
+
             gui.text("")  # Spacer
             gui.text("Visualization Controls:")
             viz_mode = w.slider_int("visualization mode", viz_mode, 1, 2)
@@ -228,7 +222,7 @@ if __name__ == "__main__":
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
                 runSim = not runSim
-                # print(runSim)
+
 
             if window.event.key == 'r':
                 frame_cnt = 0
