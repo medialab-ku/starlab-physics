@@ -24,6 +24,12 @@ def max(x: ti.template()):
         x[i] = ti.max(x[i], 0.0)
 
 @ti.kernel
+def min(x: ti.template()):
+     for i in x:
+        x[i] = ti.min(x[i], 0.0)
+
+
+@ti.kernel
 def add(ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
     for i in ret:
         ret[i] = v0[i] + scale * v1[i]
@@ -40,9 +46,13 @@ def inf_norm(x: ti.template()) -> float:
     ret = 0.0
     for i in x:
 
-        tmp = x[i].norm()
-
-        ti.atomic_max(ret, tmp)
+        tmp = x[i]
+        a = ti.abs(tmp[0])
+        for j in range(2):
+            if a < ti.abs(tmp[j]):
+                a = ti.abs(tmp[j])
+        
+        ti.atomic_max(ret, a)
 
     return ret
 

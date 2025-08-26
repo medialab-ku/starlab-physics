@@ -9,6 +9,7 @@ from PBF2 import PBF2Solver
 from IISPH import IISPHSolver
 from scan_single_buffer import parallel_prefix_sum_inclusive_inplace
 
+
 @ti.data_oriented
 class ParticleSystem:
     def __init__(self, config: SimConfig, GGUI=False):
@@ -86,7 +87,7 @@ class ParticleSystem:
 
         #### TODO: Handle the Particle Emitter ####
         # self.particle_max_num += emitted particles
-        print(f"Current particle num: {self.particle_num[None]}, Particle max num: {self.particle_max_num}")
+        # print(f"Current particle num: {self.particle_num[None]}, Particle max num: {self.particle_max_num}")
 
         #========== Allocate memory ==========#
         # Rigid body properties
@@ -116,8 +117,9 @@ class ParticleSystem:
         self.density  = ti.field(dtype=float, shape=self.particle_max_num)
         self.density0 = ti.field(dtype=float, shape=self.particle_max_num)
         self.pressure = ti.field(dtype=float, shape=self.particle_max_num)
+        self.divergence = ti.field(dtype=float, shape=self.particle_max_num)
         self.material = ti.field(dtype=int, shape=self.particle_max_num)
-        self.color = ti.Vector.field(3, dtype=int, shape=self.particle_max_num)
+        self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
 
         self.cache_size = 50 
@@ -141,7 +143,7 @@ class ParticleSystem:
         self.density0_buffer = ti.field(dtype=float, shape=self.particle_max_num)
         self.pressure_buffer = ti.field(dtype=float, shape=self.particle_max_num)
         self.material_buffer = ti.field(dtype=int, shape=self.particle_max_num)
-        self.color_buffer = ti.Vector.field(3, dtype=int, shape=self.particle_max_num)
+        self.color_buffer = ti.Vector.field(4, dtype=int, shape=self.particle_max_num)
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
 
         if self.cfg.get_cfg("simulationMethod") == 4:
@@ -156,8 +158,8 @@ class ParticleSystem:
         self.x_vis_buffer = None
         if self.GGUI:
             self.x_vis_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
-            self.color_vis_buffer = ti.Vector.field(3, dtype=float, shape=self.particle_max_num)
-            self.color_heat_map = ti.Vector.field(3, dtype=float, shape=self.particle_max_num)
+            self.color_vis_buffer = ti.Vector.field(4, dtype=float, shape=self.particle_max_num)
+            self.color_heat_map = ti.Vector.field(4, dtype=float, shape=self.particle_max_num)
 
 
         #========== Initialize particles ==========#
@@ -173,7 +175,7 @@ class ParticleSystem:
             density = fluid["density"]
             color = fluid["color"]
 
-            print(density)
+            # print(density)
             # print(color)
 
             self.add_cube(object_id=obj_id,
@@ -210,7 +212,7 @@ class ParticleSystem:
                           density=density, 
                           is_dynamic=is_dynamic,
                           color=color,
-                          material=0) # 1 indicates solid
+                          material=0) # 0 indicates solid
 
 
         # Rigid bodies
@@ -240,12 +242,16 @@ class ParticleSystem:
     def build_solver(self):
         solver_type = self.cfg.get_cfg("simulationMethod")
         if solver_type == 0:
+            self.solver = WCSPHSolver(self)
             return WCSPHSolver(self)
         elif solver_type == 2:
+            self.solver = PBF2Solver(self)
             return PBF2Solver(self)
         elif solver_type == 3:
+            self.solver = IISPHSolver(self)
             return IISPHSolver(self)
         elif solver_type == 4:
+            self.solver = DFSPHSolver(self)
             return DFSPHSolver(self)
 
         else:
@@ -316,7 +322,10 @@ class ParticleSystem:
                               new_particle_pressure[p - self.particle_num[None]],
                               new_particles_material[p - self.particle_num[None]],
                               new_particles_is_dynamic[p - self.particle_num[None]],
-                              ti.Vector([new_particles_color[p - self.particle_num[None], i] for i in range(3)])
+                              ti.Vector([new_particles_color[p - self.particle_num[None], 0],
+                                         new_particles_color[p - self.particle_num[None], 1],
+                                         new_particles_color[p - self.particle_num[None], 2],
+                                         255])
                               )
         self.particle_num[None] += new_particles_num
 
@@ -414,6 +423,21 @@ class ParticleSystem:
         self.counting_sort()
 
     @ti.kernel
+    def initialize_boundary_particles(self):
+        for p_i in ti.grouped(self.x):
+            sum_Wij = 0.0
+            # Condition for boundary particles
+            if self.material[p_i] == self.material_solid:
+                for j in range(self.fluid_neighbors_num[p_i]):
+                    p_j = self.fluid_neighbors[p_i, j]
+                    if self.material[p_i] != self.material_solid or self.material[p_j] != self.material_solid:
+                        continue
+                    sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
+
+                if sum_Wij > 1e-6:
+                    self.m[p_i] = self.density0[p_i] / sum_Wij
+
+    @ti.kernel
     def search_neighbours(self, x: ti.template()):
         for p_i in x:
             self.fluid_neighbors_num[p_i] = 0
@@ -489,12 +513,14 @@ class ParticleSystem:
         rigid_body["restCenterOfMass"] = mesh_backup.vertices.mean(axis=0)
         is_success = tm.repair.fill_holes(mesh)
             # print("Is the mesh successfully repaired? ", is_success)
-        voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter)
-        voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).fill()
+
+        a = 1.0 
+        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
+        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
         # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
         # voxelized_mesh.show()
         voxelized_points_np = voxelized_mesh.points
-        print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")
+        # print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")
         
         return voxelized_points_np
 
@@ -522,7 +548,7 @@ class ParticleSystem:
         for i in range(self.dim):
             num_dim.append(np.arange(lower_corner[i], lower_corner[i] + cube_size[i], self.particle_diameter))
         num_new_particles = reduce(lambda x, y: x * y, [len(n) for n in num_dim])
-        print('particle num ', num_new_particles)
+        # print('particle num ', num_new_particles)
 
         new_positions = np.array(np.meshgrid(*num_dim,
                                              sparse=False,
@@ -530,7 +556,7 @@ class ParticleSystem:
                                  dtype=np.float32)
         new_positions = new_positions.reshape(-1,
                                               reduce(lambda x, y: x * y, list(new_positions.shape[1:]))).transpose()
-        print("new position shape ", new_positions.shape)
+        # print("new position shape ", new_positions.shape)
         if velocity is None:
             velocity_arr = np.full_like(new_positions, 0, dtype=np.float32)
         else:
