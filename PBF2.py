@@ -40,8 +40,7 @@ class PBF2Solver(SPHBase):
         self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        
-        
+
         self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.Dii = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
@@ -51,7 +50,6 @@ class PBF2Solver(SPHBase):
 
         self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.r_jacobi = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
 
         self.Hii     = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.Ap      = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
