@@ -39,6 +39,7 @@ class PBF2Solver(SPHBase):
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Dc   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -652,12 +653,54 @@ class PBF2Solver(SPHBase):
 
             ret[i] = v0[i] + scale * v1[i]
 
-    def constant_density_solve_PBF(self):
+    def PCG(self):
 
-        # objective: min_x ||x - y||^2_{M/h^2} s.t. c(x) <= 0
-        # linearization:  min_x ||x^k+1 - y||^2_{M/h^2} s.t. c(x^k) + J * (x^k+1 - x^k) <= 0
-        # (1) M/h^2 * (x^k + dx - y) + J^k^T p = 0
-        # (2)  J^k * dx = 0
+        dx = self.dx
+        dx.fill(0.0)
+        z = self.z_pcg
+        r = self.r_pcg
+        p = self.p_pcg
+        Ap = self.Ap
+        b = self.b_pcg
+        Jp = self.dp
+
+        self.grad.fill(0.0)
+        self.compute_gradient(self.grad, False)
+
+        b.copy_from(self.grad)
+        r.copy_from(b)
+        self.apply_precondition(z, self.Hii, r)
+
+        rz_old = self.dot(r, z)
+
+        if rz_old > self.pcg_tol:
+            #     # print(rz_old)
+            # # 3. p_0 = z_0  (initial search direction)
+            p.copy_from(z)
+            pcg_iter = 1
+            for _ in range(self.max_iteration_pcg):
+
+                self.compute_Ax(Ap, Jp, p)
+                pAp = self.dot(p, Ap)
+                if pAp < 0.0:
+                    print("Warning: non-positive definite matrix!")
+                # #     break
+                alpha = rz_old / pAp
+                self.add(dx, dx, alpha, p)
+                self.add(r, r, -alpha, Ap)
+                err = self.dot(r, r)
+                self.apply_precondition(z, self.Hii, r)
+
+                rz_new = dot(r, z)
+                if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
+                    print(f"PCG iter: , {pcg_iter}: error: {err}")
+                    break
+                pcg_iter += 1
+                beta = rz_new / rz_old
+                self.add(p, z, beta, p)
+                rz_old = rz_new
+
+    def constant_density_solve_PBF(self):
 
         tol = pow(10, -self.tol)
         # tol = 0.1
@@ -665,15 +708,6 @@ class PBF2Solver(SPHBase):
 
         # y = x_n + dt * v_n + dt * M^-1 * f_ext
         add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
-
-        # x^0 = y (warm start)
-        # A = dtSq * JM^-1J^t
-        # p = c / diag(A)
-
-        # IISPH: x^k+1 = y   - M^-1 J^t * p (with full linear solve for p, Ap = b, single iteration )
-        # PBF  : x^k+1 = x^k - M^-1 J^t * p (with approximation, diag(A) * p = b, multiple iterations)
-        # ???  : (M + H) * dx = M * (y - x) - J^t p, x^k+1 = x^k + alpha * dx, what is best H?
-
         self.ps.x.copy_from(self.ps.y)
         iter = 0
 
@@ -689,65 +723,20 @@ class PBF2Solver(SPHBase):
                     print(f" converged iter: {iter}. error: {error}")
                 break
 
-            # dx = self.tmp
-            # self.compute_J_tr_x(self.tmp, self.p)
-            # coef_wise_op(dx, dx, self.ps.m, 1)
 
             step_size = 0.5
             if self.gauss_newton_pcg:
-                
-                # Preconditioned Conjugate Gradient (PCG) Pseudo Code:
-                # Given: A*x = b, preconditioner M
-                # 1. r_0 = b - A*x_0  (initial residual)
-                # 2. z_0 = M^(-1) * r_0  (apply preconditioner)
-                max(self.c)
-                dx = self.dx
+
+                # max(self.c)
+                self.p.fill(0.0)
                 self.dx.fill(0.0)
-                z = self.z_pcg
-                r = self.r_pcg
-                p = self.p_pcg
-                Ap = self.Ap
-                b = self.b_pcg
-                Jp = self.dp  
-                
-                coef_wise_op(self.p, self.c, self.Aii, 1)
-                self.compute_J_tr_x_active(self.tmp, self.p)
+                coef_wise_op(self.Dc, self.c, self.Aii, 1)
 
-                self.grad.fill(0.0)
-                self.compute_gradient(self.grad, False)
+                add(self.b, self.p, 1.0, self.Dc)
+                self.compute_J_tr_x(self.tmp, self.b)
 
-                b.copy_from(self.grad)
-                r.copy_from(b)
-                self.apply_precondition(z, self.Hii, r)
+                self.PCG()
 
-                rz_old = self.dot(r, z)
-
-                if rz_old > self.pcg_tol:
-                #     # print(rz_old)
-                # # 3. p_0 = z_0  (initial search direction)
-                    p.copy_from(z)
-                    pcg_iter = 1
-                    for _ in range(self.max_iteration_pcg):
-
-                        self.compute_Ax(Ap, Jp, p)
-                        pAp = self.dot(p, Ap)
-                        if pAp < 0.0:
-                            print("Warning: non-positive definite matrix!")
-                        # #     break
-                        alpha = rz_old / pAp
-                        self.add(dx, dx, alpha, p)
-                        self.add(r, r, -alpha, Ap)
-                        err = self.dot(r, r)
-                        self.apply_precondition(z, self.Hii, r)
-
-                        rz_new = dot(r, z)
-                        if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
-                            print(f"PCG iter: , {pcg_iter}: error: {err}")
-                            break
-                        pcg_iter += 1
-                        beta = rz_new / rz_old
-                        self.add(p, z, beta, p)
-                        rz_old = rz_new
 
                 step_size = 1.0
 
