@@ -11,7 +11,6 @@ class PBF2Solver(SPHBase):
     def __init__(self, particle_system):
         super().__init__(particle_system)
 
-
         self.surface_tension = 0.001
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
@@ -167,7 +166,7 @@ class PBF2Solver(SPHBase):
                 J_ii -= J_ij
             self.Hii[p_i] += J_ii.outer_product(J_ii) / self.Aii[p_i]
 
-        ret /= self.ps.fluid_particle_num 
+        ret /= self.ps.fluid_particle_num
         return ret
     
 
@@ -380,7 +379,10 @@ class PBF2Solver(SPHBase):
             div_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                else:
+                    div_i += self.ps.m[p_j] * (v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
             b[p_i] = (self.ps.density[p_i] + dt * div_i - self.ps.density0[p_i]) / dtSq
 
@@ -413,7 +415,10 @@ class PBF2Solver(SPHBase):
             div_i = 0.0
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                else:
+                    div_i += self.ps.m[p_j] * (self.ps.v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
             avg_error = ti.max(self.ps.density[p_i] + dt * div_i - self.ps.density0[p_i], 0.0) / self.ps.density0[p_i]
 
@@ -437,7 +442,7 @@ class PBF2Solver(SPHBase):
             self.ps.divergence[p_i] = div_i
 
 
-        avg_error /= float(self.ps.fluid_particle_num)
+        avg_error /= self.ps.fluid_particle_num
 
         return dt*avg_error
 
@@ -773,14 +778,32 @@ class PBF2Solver(SPHBase):
 
         self.update_velocities(self.dt)
 
-        
+    @ti.kernel
+    def apply_rigid_pressure(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            if self.ps.density[p_i] <= self.ps.density0[p_i]:
+                continue
+            p_i_val = self.p[p_i]
+            density_i_sq = self.ps.density[p_i] * self.ps.density[p_i]
+            if p_i_val <= 0.0:
+                continue
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                F_b = ti.math.vec3(0.0)
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                body = self.ps.object_id[p_j]
+                if self.ps.is_dynamic_rigid_body(p_j):
+                    grad = self.ps.fluid_neighbors_values[p_i, j]
+                    m_ij = self.ps.m[p_i] * self.ps.m[p_j]
+
+                    F_b = (m_ij * p_i_val) * grad
+                    self.ps.acceleration[p_j] += F_b / self.ps.m[p_j]
 
     def substep(self):
         self.ps.initialize_particle_system()
         self.ps.search_neighbours(self.ps.x)
-        self.ps.initialize_boundary_particles()
-
-
+        # self.ps.initialize_boundary_neighbors()
         dt_original = self.dt
 
         if self.cfl:
@@ -791,6 +814,7 @@ class PBF2Solver(SPHBase):
             print(f"use smaller time step: {self.dt}")
 
         self.compute_non_pressure_forces()
+        # self.apply_rigid_pressure()
         self.advect_velocity(self.dt)
 
         #divergence-free condition solve
@@ -804,7 +828,6 @@ class PBF2Solver(SPHBase):
         elif self.method == 1:
             self.constant_density_solve_PBF()
 
-        # self.com_divergence()
         self.measure_divergence(self.ps.v, self.dt)
 
         self.dt = dt_original  # Reset dt to original value after substep

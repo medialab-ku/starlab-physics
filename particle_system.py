@@ -65,11 +65,14 @@ class ParticleSystem:
         #### Process Rigid Blocks ####
         rigid_blocks = self.cfg.get_rigid_blocks()
         rigid_particle_num = 0
+        rigid_dynamic_particle_num = 0
         for rigid in rigid_blocks:
             particle_num = self.compute_cube_particle_num(rigid["start"], rigid["end"])
             rigid["particleNum"] = particle_num
             self.object_collection[rigid["objectId"]] = rigid
             rigid_particle_num += particle_num
+            if rigid["isDynamic"]:
+                rigid_dynamic_particle_num += particle_num
         
         #### Process Rigid Bodies ####
         rigid_bodies = self.cfg.get_rigid_bodies()
@@ -79,9 +82,12 @@ class ParticleSystem:
             rigid_body["voxelizedPoints"] = voxelized_points_np
             self.object_collection[rigid_body["objectId"]] = rigid_body
             rigid_particle_num += voxelized_points_np.shape[0]
+            if rigid_body["isDynamic"]:
+                rigid_dynamic_particle_num += voxelized_points_np.shape[0]
         
         self.fluid_particle_num = fluid_particle_num
         self.solid_particle_num = rigid_particle_num
+        self.dynamic_particle_num = fluid_particle_num + rigid_dynamic_particle_num
         self.particle_max_num = fluid_particle_num + rigid_particle_num
         self.num_rigid_bodies = len(rigid_blocks)+len(rigid_bodies)
 
@@ -91,9 +97,13 @@ class ParticleSystem:
 
         #========== Allocate memory ==========#
         # Rigid body properties
+        print(f"Number of rigid bodies: {self.num_rigid_bodies}")
         if self.num_rigid_bodies > 0:
             # TODO: Here we actually only need to store rigid boides, however the object id of rigid may not start from 0, so allocate center of mass for all objects
             self.rigid_rest_cm = ti.Vector.field(self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
+            self.mass_rb = ti.field(dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
+            self.cm = ti.Vector.field(self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
+            self.R = ti.Matrix.field(self.dim, self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
 
         # Particle num of each grid
         self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
@@ -124,7 +134,9 @@ class ParticleSystem:
 
         self.cache_size = 50 
         self.fluid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
+        self.solid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
         self.fluid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
+        self.solid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_values = ti.Vector.field(n=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
 
         if self.cfg.get_cfg("simulationMethod") == 4:
@@ -421,21 +433,33 @@ class ParticleSystem:
         self.update_grid_id()
         self.prefix_sum_executor.run(self.grid_particles_num)
         self.counting_sort()
+        
 
     @ti.kernel
-    def initialize_boundary_particles(self):
+    def initialize_rigid_mass(self):
+        self.mass_rb.fill(0.0)
+        for p_i in ti.grouped(self.x):
+            # Condition for boundary particles
+            if self.is_dynamic_rigid_body(p_i):
+                
+                object_id = self.object_id[p_i]
+                self.mass_rb[object_id] += self.m[p_i]
+
+    @ti.kernel
+    def initialize_boundary_neighbors(self):
         for p_i in ti.grouped(self.x):
             sum_Wij = 0.0
             # Condition for boundary particles
             if self.material[p_i] == self.material_solid:
+
                 for j in range(self.fluid_neighbors_num[p_i]):
                     p_j = self.fluid_neighbors[p_i, j]
-                    if self.material[p_i] != self.material_solid or self.material[p_j] != self.material_solid:
+                    if self.material[p_j] != self.material_solid:
                         continue
                     sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
 
-                if sum_Wij > 1e-6:
-                    self.m[p_i] = self.density0[p_i] / sum_Wij
+                self.m[p_i] = self.density0[p_i] / sum_Wij
+                self.density[p_i] = self.density0[p_i]
 
     @ti.kernel
     def search_neighbours(self, x: ti.template()):
@@ -448,7 +472,7 @@ class ParticleSystem:
                     if p_i != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
                         if self.fluid_neighbors_num[p_i] < self.cache_size:
                             self.fluid_neighbors[p_i, self.fluid_neighbors_num[p_i]] = p_j 
-                            self.fluid_neighbors_num[p_i] += 1 
+                            self.fluid_neighbors_num[p_i] += 1
 
 
     @ti.func

@@ -38,19 +38,19 @@ if __name__ == "__main__":
     solver = ps.build_solver()
     solver.initialize()
 
-    # Add a kernel for moving the boundary object
-    @ti.kernel
-    def move_boundary_object(dt: float):
-        amplitude = -0.3
-        frequency = 4.0
+    # # Add a kernel for moving the boundary object
+    # @ti.kernel
+    # def move_boundary_object(dt: float):
+    #     amplitude = -0.3
+    #     frequency = 4.0
     
-        for p_i in ti.grouped(ps.x):
-            if ps.object_id[p_i] == 2:
-                # Update position based on the initial position x_0
-                new_y = ti.cos(dt) * ps.x[p_i][1] + ti.sin(dt) * ps.v[p_i][1]
-                new_v = -ti.sin(dt) * ps.x[p_i][1] + ti.cos(dt) * ps.v[p_i][1]
-                ps.x[p_i][1] = new_y
-                ps.v[p_i][1] = new_v
+    #     for p_i in ti.grouped(ps.x):
+    #         if ps.object_id[p_i] == 2:
+    #             # Update position based on the initial position x_0
+    #             new_y = ti.cos(dt) * ps.x[p_i][1] + ti.sin(dt) * ps.v[p_i][1]
+    #             new_v = -ti.sin(dt) * ps.x[p_i][1] + ti.cos(dt) * ps.v[p_i][1]
+    #             ps.x[p_i][1] = new_y
+    #             ps.v[p_i][1] = new_v
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window = True, vsync=False)
     gui = window.get_gui()
@@ -244,7 +244,7 @@ if __name__ == "__main__":
                 ps.divergence.fill(0.0)
                 # Reinitialize solver-side precomputations and boundary volumes
                 solver.initialize()
-                ps.initialize_particle_system()
+                # ps.initialize_particle_system()
                 runSim = False
                 # Reset logging and save current data
                 # solver.reset_logging()
