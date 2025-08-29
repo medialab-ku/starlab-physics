@@ -257,9 +257,9 @@ if __name__ == "__main__":
             # Move boundary object if the scene is moving_boundary
 
             dt = solver.dt
-            if scene_name == "moving_boundary":
-                dt = config.get_cfg("timeStepSize")
-                move_boundary_object(dt)
+            # if scene_name == "moving_boundary":
+            #     dt = config.get_cfg("timeStepSize")
+            #     move_boundary_object(dt)
                 
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
@@ -351,6 +351,7 @@ if __name__ == "__main__":
             density0_np = ps.density0.to_numpy()
             div_np = ps.divergence.to_numpy()
             material_np = ps.material.to_numpy()
+            dynamic_mask = ps.is_dynamic.to_numpy()
 
             # v_np = solver.div.to_numpy
 

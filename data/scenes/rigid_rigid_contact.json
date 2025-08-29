@@ -15,24 +15,13 @@
        "exportFrame": false,
        "exportPly": false,
        "exportObj": false,
-        "transparentObjects": [1],
+        "transparentObjects": [0],
         "alpha": 0.2
     },
-    "FluidBlocks": [
-        {
-            "objectId": 0,
-            "start": [1.2, 0.7, 1.2],
-            "end": [3.8, 0.8, 3.8],
-            "translation": [0.0, 0.1, 0.0],
-            "scale": [1, 1, 1],
-            "velocity": [0.0, 0.0, 0.0],
-            "density": 1000.0,
-            "color": [10, 100, 200]
-        }
-    ],
+
     "RigidBodies" : [
         {
-            "objectId": 1,
+            "objectId": 0,
             "geometryFile": "./data/models/BoxOpened2.obj",
             "translation": [2.5, 0.3, 2.5],
             "rotationAxis": [0, 0, 1],
@@ -44,17 +33,29 @@
             "isDynamic": false
         },
         {
-            "objectId": 2,
-            "geometryFile": "./data/models/Dragon_50k.obj",
-            "translation": [2.4, 1.2, 2.4],
+            "objectId": 1,
+            "geometryFile": "./data/models/sphere.obj",
+            "translation": [2.4, 1.7, 2.4],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.2, 1.2, 1.2],
+            "scale": [0.3, 0.3, 0.3],
             "velocity": [0.0, 0.0, 0.0],
-            "density": 30000.0,
+            "density": 3000.0,
             "color": [255, 255, 255, 1.0],
             "isDynamic": true
-        }
+        },
+    {
+			"objectId": 2,
+			"geometryFile": "./data/models/sphere.obj",
+            "translation": [2.4, 2.7, 2.4],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.2, 0.2, 0.2],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true
+		}
     ]
 }
 

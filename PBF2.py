@@ -36,6 +36,7 @@ class PBF2Solver(SPHBase):
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_adv = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.x_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -94,10 +95,14 @@ class PBF2Solver(SPHBase):
     def compute_density(self):
         # for p_i in range(self.ps.particle_num[None]):
 
+        cnt = 0
+        total_static_neighbors = 0
+        num_dynamic_rigid = 0
         # print(self.ps.m[0] * self.cubic_kernel(0.0))
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
+
             self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
             den = 0.0
             x_i = self.ps.x[p_i]
@@ -111,7 +116,35 @@ class PBF2Solver(SPHBase):
 
             # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
             self.ps.density[p_i] += den
-            # self.ps.density[p_i] *= self.density_0
+
+            # if self.ps.is_dynamic_rigid_body(p_i):
+            #     # self.ps.density[p_i] *= self.density_0
+            #     den = 0.0
+            #     self.ps.density[p_i] = self.ps.density0[p_i]
+            #     x_i = self.ps.x[p_i]
+            #     static_cnt = 0
+            #     # self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
+            #     for j in range(self.ps.fluid_neighbors_num[p_i]):
+            #         p_j = self.ps.fluid_neighbors[p_i, j]
+            #         if self.ps.material[p_j] != self.ps.material_solid:
+            #             continue
+
+            #         if self.ps.is_static_rigid_body(p_j) and (self.ps.object_id[p_j] != self.ps.object_id[p_i]):
+            #             den += self.ps.m[p_j] * self.cubic_kernel((x_i - self.ps.x[p_j]).norm())
+            #             static_cnt += 1
+
+            #     self.ps.density[p_i] += den
+            #     if self.ps.is_dynamic_rigid_body(p_i):
+            #         num_dynamic_rigid += 1
+            #         total_static_neighbors += static_cnt
+            #         if self.ps.density[p_i] > self.ps.density0[p_i]:
+            #             cnt += 1
+
+
+        avg_static_neighbors = 0.0
+        if num_dynamic_rigid > 0:
+            avg_static_neighbors = total_static_neighbors / num_dynamic_rigid
+        # print(f"num high density rigid body: {cnt}, avg static neighbors per dynamic rigid: {avg_static_neighbors}")
 
     @ti.kernel
     def compute_pressure_pbf(self) -> float:
@@ -136,10 +169,12 @@ class PBF2Solver(SPHBase):
                 # Fluid neighbors
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
+
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     self.Aii[p_i] += J_ij.dot(J_ij) / self.ps.m[p_j]
-
+                
                 J_ii -= J_ij
+            
             self.Aii[p_i] += J_ii.dot(J_ii) / self.ps.m[p_i]
             c = self.ps.density[p_i] - self.ps.density0[p_i]
             ret += (ti.max(c, 0.0) / self.ps.density0[p_i])
@@ -220,9 +255,9 @@ class PBF2Solver(SPHBase):
             d_v = ti.Vector(self.g)
             # d_v = ti.Vector([0.0, 0.0, 0.0])
             self.ps.acceleration[p_i] = d_v
-            if self.ps.material[p_i] == self.ps.material_fluid:
-                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
-                self.ps.acceleration[p_i] = d_v
+            # if self.ps.material[p_i] == self.ps.material_fluid:
+            #     self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
+            #     self.ps.acceleration[p_i] = d_v
 
     @ti.kernel
     def advect_velocity(self, dt: float):
@@ -240,6 +275,7 @@ class PBF2Solver(SPHBase):
             if self.ps.is_dynamic[p_i]:
                 # self.ps.v[p_i] += self.dt * self.ps.acceleration[p_i]
                 self.ps.x[p_i] += dt * self.ps.v[p_i]
+            
 
 
     @ti.kernel
@@ -248,7 +284,7 @@ class PBF2Solver(SPHBase):
         eps = 1e-3
 
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             Aii = 0.0
@@ -257,7 +293,7 @@ class PBF2Solver(SPHBase):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
 
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
                 J_ii -= J_ij
@@ -287,9 +323,11 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(x):
             ret_i = 0.0
+            if not self.ps.is_dynamic[p_i]:
+                continue
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     ret_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
                     ret_i += self.ps.m[p_j] * (x[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -332,18 +370,17 @@ class PBF2Solver(SPHBase):
         # num_f = 0
         for p_i in ti.grouped(x):
             ret[p_i] = ti.math.vec3(0.0)
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             # num_f += 1
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # val = ti.cast(self.ps.material[p_i], float)
-                if self.ps.material[p_i] == self.ps.material_fluid:
-                    if self.ps.material[p_j] == self.ps.material_fluid:
-                        ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
-                    else:
-                        ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
+                if self.ps.is_dynamic[p_j]:
+                    ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
+                else:
+                    ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
 
     
     @ti.kernel
@@ -377,9 +414,12 @@ class PBF2Solver(SPHBase):
         dtSq = dt ** 2
         for p_i in ti.grouped(b):
             div_i = 0.0
+            if not self.ps.is_dynamic[p_i]:
+                continue
+
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
                     div_i += self.ps.m[p_j] * (v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -413,9 +453,11 @@ class PBF2Solver(SPHBase):
         avg_error = 0.0
         for p_i in ti.grouped(v):
             div_i = 0.0
+            if not self.ps.is_dynamic[p_i]:
+                continue
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
                     div_i += self.ps.m[p_j] * (self.ps.v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -430,6 +472,8 @@ class PBF2Solver(SPHBase):
         avg_error = 0.0
         for p_i in ti.grouped(v):
             div_i = 0.0
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] == self.ps.material_fluid:
@@ -564,8 +608,10 @@ class PBF2Solver(SPHBase):
             add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
             max(self.p)  # Ensure non-negativity
         
-        
+        # self.apply_rigid_pressure(self.dt)
         self.advect_position(self.dt)
+
+
 
 
     @ti.kernel
@@ -656,6 +702,7 @@ class PBF2Solver(SPHBase):
                 continue
 
             ret[i] = v0[i] + scale * v1[i]
+            
 
     def constant_density_solve_PBF(self):
 
@@ -779,7 +826,7 @@ class PBF2Solver(SPHBase):
         self.update_velocities(self.dt)
 
     @ti.kernel
-    def apply_rigid_pressure(self):
+    def apply_rigid_pressure(self, dt: float):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
@@ -790,15 +837,29 @@ class PBF2Solver(SPHBase):
             if p_i_val <= 0.0:
                 continue
             for j in range(self.ps.fluid_neighbors_num[p_i]):
-                F_b = ti.math.vec3(0.0)
+                f_b = ti.math.vec3(0.0)
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 body = self.ps.object_id[p_j]
                 if self.ps.is_dynamic_rigid_body(p_j):
                     grad = self.ps.fluid_neighbors_values[p_i, j]
+                    n = grad.normalized()
                     m_ij = self.ps.m[p_i] * self.ps.m[p_j]
 
-                    F_b = (m_ij * p_i_val) * grad
-                    self.ps.acceleration[p_j] += F_b / self.ps.m[p_j]
+                    f_b = (m_ij * p_i_val / density_i_sq) * grad
+                    dv = dt * f_b / (self.ps.m[p_j] + 1e-12)
+                    # # only normal, repulsive only
+                    # fn_mag = ti.max(f_b.dot(n), 0.0)
+                    # fn = fn_mag * n
+
+                    # dv = dt * fn / (self.ps.m[p_j] + 1e-12)
+
+                    # # impulse cap (tune vmax)
+                    # vmax = 2.0 * dt  # e.g., ~2 m/s per step
+                    # vnorm = dv.norm()
+                    # if vnorm > vmax:
+                    #     dv *= vmax / (vnorm + 1e-12)
+
+                    self.ps.v[p_j] += dv
 
     def substep(self):
         self.ps.initialize_particle_system()
@@ -814,7 +875,6 @@ class PBF2Solver(SPHBase):
             print(f"use smaller time step: {self.dt}")
 
         self.compute_non_pressure_forces()
-        # self.apply_rigid_pressure()
         self.advect_velocity(self.dt)
 
         #divergence-free condition solve
@@ -828,6 +888,6 @@ class PBF2Solver(SPHBase):
         elif self.method == 1:
             self.constant_density_solve_PBF()
 
-        self.measure_divergence(self.ps.v, self.dt)
-
+        # self.solve_constraints(self.dt)   
+        # self.measure_divergence(self.ps.v, self.dt)
         self.dt = dt_original  # Reset dt to original value after substep

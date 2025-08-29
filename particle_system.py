@@ -90,6 +90,7 @@ class ParticleSystem:
         self.dynamic_particle_num = fluid_particle_num + rigid_dynamic_particle_num
         self.particle_max_num = fluid_particle_num + rigid_particle_num
         self.num_rigid_bodies = len(rigid_blocks)+len(rigid_bodies)
+        self.object_particle_num = ti.field(dtype=int, shape=self.num_rigid_bodies + len(fluid_blocks))
 
         #### TODO: Handle the Particle Emitter ####
         # self.particle_max_num += emitted particles
@@ -104,7 +105,7 @@ class ParticleSystem:
             self.mass_rb = ti.field(dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
             self.cm = ti.Vector.field(self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
             self.R = ti.Matrix.field(self.dim, self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
-
+            self.body_mass = ti.field(dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
         # Particle num of each grid
         self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
         self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
@@ -433,7 +434,7 @@ class ParticleSystem:
         self.update_grid_id()
         self.prefix_sum_executor.run(self.grid_particles_num)
         self.counting_sort()
-        
+
 
     @ti.kernel
     def initialize_rigid_mass(self):
@@ -446,7 +447,17 @@ class ParticleSystem:
                 self.mass_rb[object_id] += self.m[p_i]
 
     @ti.kernel
-    def initialize_boundary_neighbors(self):
+    def initialize_object_particle_num(self):
+        # reset counts
+        for i in ti.grouped(self.object_particle_num):
+            self.object_particle_num[i] = 0
+        # accumulate counts per object id over active particles
+        for p_i in range(self.particle_num[None]):
+            obj_id = self.object_id[p_i]
+            ti.atomic_add(self.object_particle_num[obj_id], 1)
+
+    @ti.kernel
+    def initialize_boundary_neighbors(self, fluid_density: float):
         for p_i in ti.grouped(self.x):
             sum_Wij = 0.0
             # Condition for boundary particles
@@ -456,15 +467,28 @@ class ParticleSystem:
                     p_j = self.fluid_neighbors[p_i, j]
                     if self.material[p_j] != self.material_solid:
                         continue
+
+                    if self.object_id[p_j] != self.object_id[p_i]:
+                        continue
+
                     sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
 
-                self.m[p_i] = self.density0[p_i] / sum_Wij
-                self.density[p_i] = self.density0[p_i]
+                if sum_Wij > 1e-12:
+                    # if self.is_static_rigid_body(p_i):
+                    #     self.m[p_i] = fluid_density / sum_Wij
+                    #     # print(f"static particle {p_i} mass: {self.m[p_i]} / density: {self.m[p_i] * sum_Wij}")
+                    # elif self.is_dynamic_rigid_body(p_i):
+                    #     self.m[p_i] = self.density0[p_i] / sum_Wij
+                    #     # print(f"dynamic particle {p_i} mass: {self.m[p_i]} / density: {self.m[p_i] * sum_Wij}")
+                    self.m[p_i] = self.density0[p_i] / sum_Wij
+
+            # if self.is_dynamic_rigid_body(p_i):
 
     @ti.kernel
     def search_neighbours(self, x: ti.template()):
         for p_i in x:
             self.fluid_neighbors_num[p_i] = 0
+            self.solid_neighbors_num[p_i] = 0
             center_cell = self.pos_to_index(x[p_i])
             for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
                 grid_index = self.flatten_grid_index(center_cell + offset)
@@ -473,6 +497,10 @@ class ParticleSystem:
                         if self.fluid_neighbors_num[p_i] < self.cache_size:
                             self.fluid_neighbors[p_i, self.fluid_neighbors_num[p_i]] = p_j 
                             self.fluid_neighbors_num[p_i] += 1
+                        if self.material[p_i] == self.material_solid and self.material[p_j] == self.material_solid:
+                            if self.solid_neighbors_num[p_i] < self.cache_size:
+                                self.solid_neighbors[p_i, self.solid_neighbors_num[p_i]] = p_j 
+                                self.solid_neighbors_num[p_i] += 1
 
 
     @ti.func
