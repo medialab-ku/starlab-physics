@@ -117,10 +117,17 @@ class SPHBase:
             self.compute_rigid_rest_cm(r_obj_id)
         self.compute_static_boundary_volume()
         self.compute_moving_boundary_volume()
+
         self.ps.search_neighbours(self.ps.x)
         # self.ps.initialize_boundary_neighbors(self.density_0)
-        # self.ps.initialize_rigid_mass()
+        self.ps.initialize_rigid_mass()
         print(f"body mass: {self.ps.body_mass.to_numpy()}")
+
+    @ti.kernel
+    def compute_mass_tmp(self):
+        for p_i in range(self.ps.particle_num[None]):
+            m = self.ps.m[p_i]
+            self.ps.body_mass[self.ps.object_id[p_i]] = m * self.ps.object_particle_num[self.ps.object_id[p_i]]
 
 
     @ti.kernel
@@ -153,11 +160,6 @@ class SPHBase:
             self.ps.for_all_neighbors(p_i, self.compute_boundary_volume_task, delta)
             self.ps.m_V[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
             # self.ps.m_V[p_i] = self.ps.m[p_i] / self.ps.density0[p_i]
-            self.ps.m[p_i] = self.ps.m_V[p_i] * self.ps.density0[p_i]
-            m = self.ps.m[p_i]
-            rho0 = self.ps.density0[p_i]
-        
-            self.ps.body_mass[self.ps.object_id[p_i]] = m * self.ps.object_particle_num[self.ps.object_id[p_i]]
 
     def substep(self):
         pass
@@ -165,10 +167,18 @@ class SPHBase:
     @ti.func
     def simulate_collisions(self, p_i, vec):
         # Collision factor, assume roughly (1-c_f)*velocity loss after collision
+        # c_f = 0.5
+        # self.ps.v[p_i] -= (
+        #     1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
         c_f = 0.5
-        self.ps.v[p_i] -= (
-            1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
-
+        mu  = 0.2
+        v = self.ps.v[p_i]
+        v_n = v.dot(vec) * vec
+        v_t = v - v_n
+        v = v - (1.0 + c_f) * v_n
+        v = v - mu * v_t
+        # if v_t.norm() < 1e-3: v -= v_t
+        self.ps.v[p_i] = v
     @ti.kernel
     def enforce_boundary_2D(self, particle_type:int):
         for p_i in ti.grouped(self.ps.x):
@@ -267,8 +277,23 @@ class SPHBase:
     #             self.ps.x[p_i] += corr
     #     return R
     
+
+    @ti.func
+    def contact_normal(self, p_i):
+        n = ti.Vector([0.0, 0.0, 0.0])
+        pos = self.ps.x[p_i]
+        if pos[0] <= self.ps.padding: n[0] -= 1.0
+        if pos[0] >= self.ps.domain_size[0] - self.ps.padding: n[0] += 1.0
+        if pos[1] <= self.ps.padding: n[1] -= 1.0
+        if pos[1] >= self.ps.domain_size[1] - self.ps.padding: n[1] += 1.0
+        if pos[2] <= self.ps.padding: n[2] -= 1.0
+        if pos[2] >= self.ps.domain_size[2] - self.ps.padding: n[2] += 1.0
+        if n.norm() > 1e-6:
+            n = n / (n.norm() + 1e-12)
+        return n
+    
     @ti.kernel
-    def solve_constraints(self, dt:float):
+    def solve_constraints(self):
         self.ps.R.fill(0.0)
         self.ps.cm.fill(0.0)
         # compute center of mass
@@ -278,29 +303,35 @@ class SPHBase:
                 self.ps.cm[object_id] += self.ps.m[p_i] * self.ps.x[p_i]
 
         for object_id in ti.grouped(self.ps.cm):
-            self.ps.cm[object_id] /= self.ps.body_mass[object_id]
+            self.ps.cm[object_id] /= self.ps.mass_rb[object_id]
 
         for p_i in range(self.ps.particle_num[None]):
             object_id = self.ps.object_id[p_i]
             if self.ps.is_dynamic_rigid_body(p_i):
                 q = self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id]
                 p = self.ps.x[p_i] - self.ps.cm[object_id]
-                self.ps.R[object_id] += self.ps.m_V0 * self.ps.density[p_i] * p.outer_product(q)
+                self.ps.R[object_id] += self.ps.m[p_i] * p.outer_product(q)
 
         for object_id in ti.grouped(self.ps.R):
                 A = self.ps.R[object_id]
                 R, S = ti.polar_decompose(A)
+                alpha = 0.4
                 if all(abs(R) < 1e-6):
                     R = ti.Matrix.identity(ti.f32, 3)
+                R = (1 - alpha) * ti.Matrix.identity(ti.f32, 3) + alpha * R
                 self.ps.R[object_id] = R
 
         for p_i in range(self.ps.particle_num[None]):
             object_id = self.ps.object_id[p_i]
             if self.ps.is_dynamic_rigid_body(p_i):
                 goal = self.ps.cm[object_id] + self.ps.R[object_id] @ (self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id])
-                corr = (goal - self.ps.x[p_i]) * 1.0
-                self.ps.x[p_i] += corr
-                # self.ps.v[p_i] += corr / dt
+                corr = (goal - self.ps.x[p_i])
+                n = self.contact_normal(p_i)
+                if n.norm() > 1e-6:
+                    corr_n = corr.dot(n) * n
+                    self.ps.x[p_i] += corr_n
+                else:
+                    self.ps.x[p_i] += corr
             
 
 
@@ -357,7 +388,7 @@ class SPHBase:
         self.ps.initialize_particle_system()
         self.compute_moving_boundary_volume()
         self.substep()
-
+        self.solve_constraints()
         self.enforce_boundary_3D(self.ps.material_solid)
         if self.ps.dim == 2:
             self.enforce_boundary_2D(self.ps.material_fluid)

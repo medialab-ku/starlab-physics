@@ -40,7 +40,7 @@
             "rotationAngle": 0,
             "scale": [0.3, 0.3, 0.3],
             "velocity": [0.0, 0.0, 0.0],
-            "density": 3000.0,
+            "density": 1000.0,
             "color": [255, 255, 255, 1.0],
             "isDynamic": true
         },

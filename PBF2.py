@@ -573,40 +573,40 @@ class PBF2Solver(SPHBase):
         self.compute_density()
         # self.precompute_values()
         self.ps.v.copy_from(self.ps.v_adv)
-        self.compute_Aii(self.iisph_vanilla)
-        self.compute_b(self.b, self.ps.v, self.dt)
+        # self.compute_Aii(self.iisph_vanilla)
+        # self.compute_b(self.b, self.ps.v, self.dt)
 
-        tol = pow(10, -self.tol)
-        self.p.fill(0.0)
-        iter = 0
-        for _ in range(self.max_iteration_opt):
+        # tol = pow(10, -self.tol)
+        # self.p.fill(0.0)
+        # iter = 0
+        # for _ in range(self.max_iteration_opt):
         
-            if self.iisph_vanilla:
-                coef_wise_mul(self.y, self.Dii, self.p)
-                self.compute_J_tr_x(self.tmp, self.y)
-            else:
-                self.compute_J_tr_x(self.tmp, self.p)
+        #     if self.iisph_vanilla:
+        #         coef_wise_mul(self.y, self.Dii, self.p)
+        #         self.compute_J_tr_x(self.tmp, self.y)
+        #     else:
+        #         self.compute_J_tr_x(self.tmp, self.p)
                 
                 
-            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
-            add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
-            error = self.measure_error(self.ps.v, self.dt)
+        #     coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+        #     add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
+        #     error = self.measure_error(self.ps.v, self.dt)
 
-            if error < tol and iter > 2:
+        #     if error < tol and iter > 2:
 
-                print(f" converged iter: {iter}. error: {error}")
-                break 
+        #         print(f" converged iter: {iter}. error: {error}")
+        #         break 
             
-            iter += 1 
+        #     iter += 1 
 
-            self.compute_J_x(self.Jx, self.tmp)
-            add(self.r_jacobi, self.b, -1.0, self.Jx)
+        #     self.compute_J_x(self.Jx, self.tmp)
+        #     add(self.r_jacobi, self.b, -1.0, self.Jx)
 
-            coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+        #     coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
 
     
-            add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
-            max(self.p)  # Ensure non-negativity
+        #     add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
+        #     max(self.p)  # Ensure non-negativity
         
         # self.apply_rigid_pressure(self.dt)
         self.advect_position(self.dt)
