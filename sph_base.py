@@ -170,15 +170,15 @@ class SPHBase:
         c_f = 0.5
         self.ps.v[p_i] -= (
             1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
-        c_f = 0.5
-        mu  = 0.3
-        v = self.ps.v[p_i]
-        v_n = v.dot(vec) * vec
-        v_t = v - v_n
-        v = v - (1.0 + c_f) * v_n
-        v = v - mu * v_t
-        # if v_t.norm() < 1e-3: v -= v_t
-        self.ps.v[p_i] = v
+        # c_f = 0.5
+        # mu  = 0.3
+        # v = self.ps.v[p_i]
+        # v_n = v.dot(vec) * vec
+        # v_t = v - v_n
+        # v = v - (1.0 + c_f) * v_n
+        # v = v - mu * v_t
+        # # if v_t.norm() < 1e-3: v -= v_t
+        # self.ps.v[p_i] = v
 
     @ti.func
     def simulate_collisions_fluid(self, p_i, vec):
@@ -339,9 +339,9 @@ class SPHBase:
             if self.ps.is_dynamic_rigid_body(p_i):
                 goal = self.ps.cm[object_id] + self.ps.R[object_id] @ (self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id])
                 corr = (goal - self.ps.x[p_i])
-                n = self.contact_normal_from_static(p_i)
                 corr *= alpha
                 self.ps.x[p_i] += corr
+                # n = self.contact_normal_from_static(p_i)
                 # if n.norm() > 1e-6:
                 #     corr_n = (corr.dot(n) * n) * alpha
                 #     self.ps.x[p_i] += corr_n
