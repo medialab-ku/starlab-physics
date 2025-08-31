@@ -255,9 +255,9 @@ class PBF2Solver(SPHBase):
             d_v = ti.Vector(self.g)
             # d_v = ti.Vector([0.0, 0.0, 0.0])
             self.ps.acceleration[p_i] = d_v
-            # if self.ps.material[p_i] == self.ps.material_fluid:
-            #     self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
-            #     self.ps.acceleration[p_i] = d_v
+            if self.ps.material[p_i] == self.ps.material_fluid:
+                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
+                self.ps.acceleration[p_i] = d_v
 
     @ti.kernel
     def advect_velocity(self, dt: float):
@@ -573,40 +573,40 @@ class PBF2Solver(SPHBase):
         self.compute_density()
         # self.precompute_values()
         self.ps.v.copy_from(self.ps.v_adv)
-        # self.compute_Aii(self.iisph_vanilla)
-        # self.compute_b(self.b, self.ps.v, self.dt)
+        self.compute_Aii(self.iisph_vanilla)
+        self.compute_b(self.b, self.ps.v, self.dt)
 
-        # tol = pow(10, -self.tol)
-        # self.p.fill(0.0)
-        # iter = 0
-        # for _ in range(self.max_iteration_opt):
+        tol = pow(10, -self.tol)
+        self.p.fill(0.0)
+        iter = 0
+        for _ in range(self.max_iteration_opt):
         
-        #     if self.iisph_vanilla:
-        #         coef_wise_mul(self.y, self.Dii, self.p)
-        #         self.compute_J_tr_x(self.tmp, self.y)
-        #     else:
-        #         self.compute_J_tr_x(self.tmp, self.p)
+            if self.iisph_vanilla:
+                coef_wise_mul(self.y, self.Dii, self.p)
+                self.compute_J_tr_x(self.tmp, self.y)
+            else:
+                self.compute_J_tr_x(self.tmp, self.p)
                 
                 
-        #     coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
-        #     add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
-        #     error = self.measure_error(self.ps.v, self.dt)
+            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+            add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
+            error = self.measure_error(self.ps.v, self.dt)
 
-        #     if error < tol and iter > 2:
+            if error < tol and iter > 2:
 
-        #         print(f" converged iter: {iter}. error: {error}")
-        #         break 
+                print(f" converged iter: {iter}. error: {error}")
+                break 
             
-        #     iter += 1 
+            iter += 1 
 
-        #     self.compute_J_x(self.Jx, self.tmp)
-        #     add(self.r_jacobi, self.b, -1.0, self.Jx)
+            self.compute_J_x(self.Jx, self.tmp)
+            add(self.r_jacobi, self.b, -1.0, self.Jx)
 
-        #     coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+            coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
 
     
-        #     add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
-        #     max(self.p)  # Ensure non-negativity
+            add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
+            max(self.p)  # Ensure non-negativity
         
         # self.apply_rigid_pressure(self.dt)
         self.advect_position(self.dt)
@@ -825,41 +825,7 @@ class PBF2Solver(SPHBase):
 
         self.update_velocities(self.dt)
 
-    @ti.kernel
-    def apply_rigid_pressure(self, dt: float):
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-            if self.ps.density[p_i] <= self.ps.density0[p_i]:
-                continue
-            p_i_val = self.p[p_i]
-            density_i_sq = self.ps.density[p_i] * self.ps.density[p_i]
-            if p_i_val <= 0.0:
-                continue
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                f_b = ti.math.vec3(0.0)
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                body = self.ps.object_id[p_j]
-                if self.ps.is_dynamic_rigid_body(p_j):
-                    grad = self.ps.fluid_neighbors_values[p_i, j]
-                    n = grad.normalized()
-                    m_ij = self.ps.m[p_i] * self.ps.m[p_j]
 
-                    f_b = (m_ij * p_i_val / density_i_sq) * grad
-                    dv = dt * f_b / (self.ps.m[p_j] + 1e-12)
-                    # # only normal, repulsive only
-                    # fn_mag = ti.max(f_b.dot(n), 0.0)
-                    # fn = fn_mag * n
-
-                    # dv = dt * fn / (self.ps.m[p_j] + 1e-12)
-
-                    # # impulse cap (tune vmax)
-                    # vmax = 2.0 * dt  # e.g., ~2 m/s per step
-                    # vnorm = dv.norm()
-                    # if vnorm > vmax:
-                    #     dv *= vmax / (vnorm + 1e-12)
-
-                    self.ps.v[p_j] += dv
 
     def substep(self):
         self.ps.initialize_particle_system()
@@ -888,6 +854,5 @@ class PBF2Solver(SPHBase):
         elif self.method == 1:
             self.constant_density_solve_PBF()
 
-        # self.solve_constraints(self.dt)   
         # self.measure_divergence(self.ps.v, self.dt)
         self.dt = dt_original  # Reset dt to original value after substep

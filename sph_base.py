@@ -19,6 +19,7 @@ class SPHBase:
         self.dt = ti.field(float, shape=())
         self.dt[None] = 1e-4
         self.nablaWij = self.spiky_kernel_derivative
+        self.rigid_radius_constraint_alpha = 0.5
 
 
 
@@ -118,7 +119,6 @@ class SPHBase:
         self.compute_static_boundary_volume()
         self.compute_moving_boundary_volume()
 
-        self.ps.search_neighbours(self.ps.x)
         # self.ps.initialize_boundary_neighbors(self.density_0)
         self.ps.initialize_rigid_mass()
         print(f"body mass: {self.ps.body_mass.to_numpy()}")
@@ -165,13 +165,13 @@ class SPHBase:
         pass
 
     @ti.func
-    def simulate_collisions(self, p_i, vec):
+    def simulate_collisions_rigid(self, p_i, vec):
         # Collision factor, assume roughly (1-c_f)*velocity loss after collision
-        # c_f = 0.5
-        # self.ps.v[p_i] -= (
-        #     1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
         c_f = 0.5
-        mu  = 0.2
+        self.ps.v[p_i] -= (
+            1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
+        c_f = 0.5
+        mu  = 0.3
         v = self.ps.v[p_i]
         v_n = v.dot(vec) * vec
         v_t = v - v_n
@@ -179,6 +179,15 @@ class SPHBase:
         v = v - mu * v_t
         # if v_t.norm() < 1e-3: v -= v_t
         self.ps.v[p_i] = v
+
+    @ti.func
+    def simulate_collisions_fluid(self, p_i, vec):
+        # Collision factor, assume roughly (1-c_f)*velocity loss after collision
+        c_f = 0.5
+        self.ps.v[p_i] -= (
+            1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
+
+
     @ti.kernel
     def enforce_boundary_2D(self, particle_type:int):
         for p_i in ti.grouped(self.ps.x):
@@ -232,7 +241,10 @@ class SPHBase:
 
                 collision_normal_length = collision_normal.norm()
                 if collision_normal_length > 1e-6:
-                    self.simulate_collisions(p_i, collision_normal / collision_normal_length)
+                    if particle_type == self.ps.material_fluid:
+                        self.simulate_collisions_fluid(p_i, collision_normal / collision_normal_length)
+                    else:
+                        self.simulate_collisions_rigid(p_i, collision_normal / collision_normal_length)
 
     @ti.func
     def compute_com(self, object_id):
@@ -279,15 +291,15 @@ class SPHBase:
     
 
     @ti.func
-    def contact_normal(self, p_i):
+    def contact_normal_from_static(self, p_i):
         n = ti.Vector([0.0, 0.0, 0.0])
-        pos = self.ps.x[p_i]
-        if pos[0] <= self.ps.padding: n[0] -= 1.0
-        if pos[0] >= self.ps.domain_size[0] - self.ps.padding: n[0] += 1.0
-        if pos[1] <= self.ps.padding: n[1] -= 1.0
-        if pos[1] >= self.ps.domain_size[1] - self.ps.padding: n[1] += 1.0
-        if pos[2] <= self.ps.padding: n[2] -= 1.0
-        if pos[2] >= self.ps.domain_size[2] - self.ps.padding: n[2] += 1.0
+        x_i = self.ps.x[p_i]
+        for k in range(self.ps.fluid_neighbors_num[p_i]):
+            p_j = self.ps.fluid_neighbors[p_i, k]
+            if self.ps.is_static_rigid_body(p_j):
+                x_j = self.ps.x[p_j]
+                grad = self.nablaWij(x_i - x_j)
+                n += self.ps.m_V[p_j] * grad
         if n.norm() > 1e-6:
             n = n / (n.norm() + 1e-12)
         return n
@@ -322,18 +334,64 @@ class SPHBase:
                 self.ps.R[object_id] = R
 
         for p_i in range(self.ps.particle_num[None]):
+            alpha = 1.0
             object_id = self.ps.object_id[p_i]
             if self.ps.is_dynamic_rigid_body(p_i):
                 goal = self.ps.cm[object_id] + self.ps.R[object_id] @ (self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id])
                 corr = (goal - self.ps.x[p_i])
-                n = self.contact_normal(p_i)
-                if n.norm() > 1e-6:
-                    corr_n = corr.dot(n) * n
-                    self.ps.x[p_i] += corr_n
-                else:
-                    self.ps.x[p_i] += corr
-            
+                n = self.contact_normal_from_static(p_i)
+                corr *= alpha
+                self.ps.x[p_i] += corr
+                # if n.norm() > 1e-6:
+                #     corr_n = (corr.dot(n) * n) * alpha
+                #     self.ps.x[p_i] += corr_n
+                # else:
+                #     corr *= alpha
+                #     self.ps.x[p_i] += corr
 
+                r_cur = self.ps.x[p_i] - self.ps.cm[object_id]
+                r_rest = self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id]
+                rest_len = r_rest.norm()
+                cur_len = r_cur.norm()
+                if cur_len > 1e-6:
+                    delta_len = rest_len - cur_len
+                    self.ps.x[p_i] += self.rigid_radius_constraint_alpha * delta_len * (r_cur / cur_len)
+
+    @ti.kernel
+    def apply_rigid_pressure(self, dt: float):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            if self.ps.density[p_i] <= self.ps.density0[p_i]:
+                continue
+            p_i_val = self.p[p_i]
+            density_i_sq = self.ps.density[p_i] * self.ps.density[p_i]
+            if p_i_val <= 0.0:
+                continue
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                f_b = ti.math.vec3(0.0)
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                body = self.ps.object_id[p_j]
+                if self.ps.is_dynamic_rigid_body(p_j):
+                    grad = self.ps.fluid_neighbors_values[p_i, j]
+                    n = grad.normalized()
+                    m_ij = self.ps.m[p_i] * self.ps.m[p_j]
+
+                    f_b = (m_ij * p_i_val / density_i_sq) * grad
+                    dv = dt * f_b / (self.ps.m[p_j] + 1e-12)
+                    # # only normal, repulsive only
+                    # fn_mag = ti.max(f_b.dot(n), 0.0)
+                    # fn = fn_mag * n
+
+                    # dv = dt * fn / (self.ps.m[p_j] + 1e-12)
+
+                    # # impulse cap (tune vmax)
+                    # vmax = 2.0 * dt  # e.g., ~2 m/s per step
+                    # vnorm = dv.norm()
+                    # if vnorm > vmax:
+                    #     dv *= vmax / (vnorm + 1e-12)
+
+                    self.ps.v[p_j] += dv
 
     # @ti.kernel
     # def compute_rigid_collision(self):
@@ -380,6 +438,7 @@ class SPHBase:
         #             #     ret = R.to_numpy() @ (self.ps.object_collection[r_obj_id]["restPosition"] - self.ps.object_collection[r_obj_id]["restCenterOfMass"]).T
         #             #     self.ps.object_collection[r_obj_id]["mesh"].vertices = cm.to_numpy() + ret.T
         # self.compute_rigid_collision()
+        self.enforce_boundary_3D(self.ps.material_solid)
 
 
 
@@ -388,9 +447,9 @@ class SPHBase:
         self.ps.initialize_particle_system()
         self.compute_moving_boundary_volume()
         self.substep()
-        self.solve_constraints()
-        self.enforce_boundary_3D(self.ps.material_solid)
+        self.solve_rigid_body()
+
         if self.ps.dim == 2:
             self.enforce_boundary_2D(self.ps.material_fluid)
         # elif self.ps.dim == 3:
-        #     self.enforce_boundary_3D(self.ps.material_fluid)
+            self.enforce_boundary_3D(self.ps.material_fluid)

@@ -446,6 +446,7 @@ class ParticleSystem:
                 object_id = self.object_id[p_i]
                 self.mass_rb[object_id] += self.m[p_i]
 
+
     @ti.kernel
     def initialize_object_particle_num(self):
         # reset counts
@@ -455,6 +456,7 @@ class ParticleSystem:
         for p_i in range(self.particle_num[None]):
             obj_id = self.object_id[p_i]
             ti.atomic_add(self.object_particle_num[obj_id], 1)
+
 
     @ti.kernel
     def initialize_boundary_neighbors(self, fluid_density: float):
