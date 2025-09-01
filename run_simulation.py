@@ -238,52 +238,42 @@ if __name__ == "__main__":
                 # print(runSim)
 
             if window.event.key == 'r':
-                frame_cnt = 0
+                # Preserve solver settings that can be tuned via GUI
+                preserve_names = [
+                    'dt', 'num_substep', 'cfl',
+                    'tol', 'max_iteration_opt', 'method', 'print_info', 'divergence_free_solve',
+                    'omega', 'iisph_vanilla',
+                    'gauss_newton_pcg', 'max_iteration_pcg', 'pcg_tol', 'adaptive_step_size',
+                ]
+                preserved = {}
+                for name in preserve_names:
+                    if hasattr(solver, name):
+                        try:
+                            preserved[name] = getattr(solver, name)
+                        except Exception:
+                            pass
 
-                # 1) position init
-                ps.x.copy_from(ps.x_0)
-                ps.x_old.copy_from(ps.x_0)
-                ps.y.copy_from(ps.x_0)
-
-                # 2) solver initialize
+                # Rebuild particle system and solver to fully drop emitted particles/state
+                ps = ParticleSystem(config, GGUI=True)
+                solver = ps.build_solver()
                 solver.initialize()
 
-                # 3) velocity init
-                n_active = int(ps.particle_num.to_numpy())
-                obj_ids_np = ps.object_id.to_numpy()[:n_active]
-                v_init = np.zeros((ps.particle_max_num, ps.dim), dtype=np.float32)
-                for obj_id, obj in ps.object_collection.items():
-                    vel = obj.get('velocity', [0.0 for _ in range(ps.dim)])
-                    vel_np = np.array(vel, dtype=np.float32)
-                    mask = (obj_ids_np == obj_id)
-                    v_init[:n_active][mask] = vel_np
-                ps.v.from_numpy(v_init)
+                # Restore preserved settings
+                for name, value in preserved.items():
+                    try:
+                        if hasattr(solver, name):
+                            setattr(solver, name, value)
+                    except Exception:
+                        pass
+                try:
+                    solver.t = 0.0
+                except Exception:
+                    pass
 
-                # sync
-                ps.v_adv.copy_from(ps.v)
-                ps.v_old.copy_from(ps.v)
-                ps.x_old.copy_from(ps.x)
-                ps.y.copy_from(ps.x)
-
-                # 4) scarlar/auxiliary buffer reset
-                ps.acceleration.fill(0.0)
-                ps.pressure.fill(0.0)
-                ps.density.copy_from(ps.density0)
-                ps.divergence.fill(0.0)
-
-                # 5) dynamic rigid body reset
-                if hasattr(ps, 'cm'):
-                    ps.cm.fill(0.0)
-                if hasattr(ps, 'v_cm_rb'):
-                    ps.v_cm_rb.fill(0.0)
-                if hasattr(ps, 'omega_rb'):
-                    ps.omega_rb.fill(0.0)
-                if hasattr(ps, 'R'):
-                    reset_R_identity(ps.R)
-
+                # Reset counters and pause sim
+                frame_cnt = 0
+                cnt_ply = 0
                 runSim = False
-                # Reset logging and save current data
-                # solver.reset_logging()
 
         if export_ply and frame_cnt > end_frame:
             runSim = False

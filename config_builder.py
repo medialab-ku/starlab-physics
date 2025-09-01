@@ -35,3 +35,9 @@ class SimConfig:
             return self.config["FluidBlocks"]
         else:
             return []
+
+    def get_emitter(self):
+        if "Emitter" in self.config:
+            return self.config["Emitter"]
+        else:
+            return []

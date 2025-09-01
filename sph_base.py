@@ -12,10 +12,11 @@ class SPHBase:
             self.g = ti.Vector([0.0, -9.81])
         # self.g = np.array(self.ps.cfg.get_cfg("gravitation"))
 
-        self.viscosity = 0.005  # viscosity
+        self.viscosity = 0.1  # viscosity
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")
+        self.t = 0.0
         self.dt = ti.field(float, shape=())
         self.dt[None] = 1e-4
         self.nablaWij = self.spiky_kernel_derivative
@@ -374,6 +375,12 @@ class SPHBase:
     #     self.enforce_boundary_3D(self.ps.material_solid)
 
     def step(self):
+
+        if hasattr(self.ps, 'emitter_system') and self.ps.emitter_system is not None:
+            dt = float(self.dt[None]) if isinstance(self.dt, ti.lang.matrix.Matrix) else float(self.dt)
+            self.ps.emitter_system.step(self.t, dt)
+            self.t += dt
+
         self.ps.initialize_particle_system()
         self.compute_moving_boundary_volume()
         self.substep()
