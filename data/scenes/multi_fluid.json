@@ -37,25 +37,8 @@
 			"translation": [0.0, 0.1, 0.0],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
-			"density": 1000.0,
+			"density": 10000.0,
 			"color": [200, 100, 10]
 		}
-	],
-
-
-	"RigidBodies" : [
-		{
-			"objectId": 1,
-			"geometryFile": "./data/models/BoxOpened.obj",
-			"translation": [0.6, -7.1, 0.6],
-			"rotationAxis": [0, 0, 1],
-			"rotationAngle": 0,
-			"scale": [0.8, 8.0, 0.8],
-			"velocity": [0.0, 0.0, 0.0],
-			"density": 1000.0,
-			"color": [255, 255, 255, 1.0],
-			"isDynamic": false
-		}
-
 	]
 }

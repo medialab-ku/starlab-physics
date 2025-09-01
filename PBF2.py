@@ -67,6 +67,9 @@ class PBF2Solver(SPHBase):
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
         self.current_frame = 0
+        
+        self.total_ratio = ti.field(dtype=float, shape=())
+        self.active_particle_count = ti.field(dtype=float, shape=())
 
 
     # @ti.kernel
@@ -827,6 +830,68 @@ class PBF2Solver(SPHBase):
             iter += 1
 
         self.update_velocities(self.dt)
+        
+    # PBF2Solver 클래스 내부에 새로운 함수로 추가
+    @ti.kernel
+    def compare_dx_ratio(self):
+        eps = 1e-9
+        
+        for p_i in ti.grouped(self.ps.x):
+            if not (self.ps.material[p_i] == self.ps.material_fluid and self.ps.density[p_i] > self.ps.density0[p_i]):
+                continue
+            
+            aii_geo = eps
+            J_ii = ti.math.vec3(0.0)
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                grad_ij = self.ps.fluid_neighbors_values[p_i, j]
+                J_ij = self.ps.m[p_j] * grad_ij
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    aii_geo += J_ij.dot(J_ij) / self.ps.m[p_j]
+                J_ii -= J_ij
+            aii_geo += J_ii.dot(J_ii) / self.ps.m[p_i]
+
+            c_dens = self.ps.density[p_i] - self.ps.density0[p_i]
+            lambda_dens = c_dens / aii_geo
+            m_i = self.ps.m[p_i]
+            rho_i = self.ps.density[p_i]
+            rho_0 = self.ps.density0[p_i]
+            c_vol = m_i * (1.0 / rho_i - 1.0 / rho_0)
+            Dii = -m_i / (rho_0**2)
+            denominator_vol = Dii**2 * aii_geo
+            lambda_vol = 0.0
+            if denominator_vol > eps:
+                lambda_vol = -c_vol / denominator_vol
+            term_to_compare = -Dii * lambda_vol
+            
+            # --- 비율 계산 및 누적 ---
+            ratio = 0.0
+            # lambda_dens가 0에 가까우면 비율 계산이 무의미하므로 건너뛰기
+            if abs(lambda_dens) > eps:
+                ratio = term_to_compare / lambda_dens
+
+            # atomic 연산을 사용하여 여러 스레드가 안전하게 값을 더하도록 함
+            ti.atomic_add(self.total_ratio[None], ratio)
+            ti.atomic_add(self.active_particle_count[None], 1.0)
+
+
+    def run_comparison_test(self):
+        self.total_ratio[None] = 0.0
+        self.active_particle_count[None] = 0.0
+        
+        self.compute_density()
+        self.compare_dx_ratio()
+        
+        # 4. 최종 평균 비율 계산
+        count = self.active_particle_count[None]
+        if count > 0:
+            average_ratio = self.total_ratio[None] / count
+            print("======================================================")
+            print(f"DX Ratio Test Result (based on {int(count)} active particles):")
+            print(f"Average ratio of (-Dii*lambda_vol) / (lambda_dens) = {average_ratio:.6f}")
+            print("======================================================")
+        else:
+            print("DX Ratio Test: No active particles found.")
 
     def substep(self):
         self.ps.initialize_particle_system()
@@ -845,6 +910,8 @@ class PBF2Solver(SPHBase):
 
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
+        
+        self.run_comparison_test()
 
         #divergence-free condition solve
         if self.divergence_free_solve:
