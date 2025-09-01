@@ -154,11 +154,17 @@ if __name__ == "__main__":
 
                 elif solver.method == 1:
                     gui.text("PBF")
-                    solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
+                    solver.test = w.slider_int("opt type", solver.test, 0, 2)
 
-                    if solver.gauss_newton_pcg:
-                        solver.max_iteration_pcg = w.slider_int("max pcg iter", solver.max_iteration_pcg, 1, 1000)
-                        solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
+                    if solver.test == 0:
+                        gui.text("Projected Jacobi")
+                    if solver.test == 1:
+                        gui.text("Augmented Lagrangian")
+
+                    # solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
+                    # if solver.gauss_newton_pcg:
+                    #     solver.max_iteration_pcg = w.slider_int("max pcg iter", solver.max_iteration_pcg, 1, 1000)
+                    #     solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
                     solver.adaptive_step_size = w.checkbox("adaptive step size",  solver.adaptive_step_size)
 
 
