@@ -448,7 +448,7 @@ class SPHBase:
 
     @ti.kernel
     def rigid_compute_cm_and_vcm(self):
-        # com, v_cm 계산
+        # com, v_cm
         self.ps.cm.fill(0.0)
         self.vsum_rb.fill(0.0)
         for p_i in ti.grouped(self.ps.x):

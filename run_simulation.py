@@ -221,6 +221,13 @@ if __name__ == "__main__":
     cnt_ply = 0
     runSim = False
 
+    @ti.kernel
+    def reset_R_identity(R: ti.template()):
+        for i in ti.grouped(R):
+            R[i] = ti.math.mat3([[1.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0],
+                                [0.0, 0.0, 1.0]])
+
     while window.running:
 
         show_options()
@@ -232,11 +239,16 @@ if __name__ == "__main__":
 
             if window.event.key == 'r':
                 frame_cnt = 0
-                # Restore all particle states to initial
+
+                # 1) position init
                 ps.x.copy_from(ps.x_0)
                 ps.x_old.copy_from(ps.x_0)
                 ps.y.copy_from(ps.x_0)
-                # Rebuild initial velocities from scene config per object
+
+                # 2) solver initialize
+                solver.initialize()
+
+                # 3) velocity init
                 n_active = int(ps.particle_num.to_numpy())
                 obj_ids_np = ps.object_id.to_numpy()[:n_active]
                 v_init = np.zeros((ps.particle_max_num, ps.dim), dtype=np.float32)
@@ -246,22 +258,29 @@ if __name__ == "__main__":
                     mask = (obj_ids_np == obj_id)
                     v_init[:n_active][mask] = vel_np
                 ps.v.from_numpy(v_init)
-                ps.v_adv.from_numpy(v_init)
-                ps.v_old.from_numpy(v_init)
+
+                # sync
+                ps.v_adv.copy_from(ps.v)
+                ps.v_old.copy_from(ps.v)
+                ps.x_old.copy_from(ps.x)
+                ps.y.copy_from(ps.x)
+
+                # 4) scarlar/auxiliary buffer reset
                 ps.acceleration.fill(0.0)
                 ps.pressure.fill(0.0)
                 ps.density.copy_from(ps.density0)
                 ps.divergence.fill(0.0)
-                # Reset rigid transforms and masses (solver.initialize recomputes as well)
+
+                # 5) dynamic rigid body reset
                 if hasattr(ps, 'cm'):
                     ps.cm.fill(0.0)
+                if hasattr(ps, 'v_cm_rb'):
+                    ps.v_cm_rb.fill(0.0)
+                if hasattr(ps, 'omega_rb'):
+                    ps.omega_rb.fill(0.0)
                 if hasattr(ps, 'R'):
-                    ps.R.fill(0.0)
-                if hasattr(ps, 'mass_rb'):
-                    ps.mass_rb.fill(0.0)
-                # Reinitialize solver-side precomputations and boundary volumes
-                solver.initialize()
-                # ps.initialize_particle_system()
+                    reset_R_identity(ps.R)
+
                 runSim = False
                 # Reset logging and save current data
                 # solver.reset_logging()
