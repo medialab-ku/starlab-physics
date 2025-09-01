@@ -445,9 +445,58 @@ class SPHBase:
             if xcorr.norm() > 0.0:
                 self.ps.x[p_i] += 0.15 * xcorr
 
+
+    @ti.kernel
+    def rigid_compute_cm_and_vcm(self):
+        # com, v_cm 계산
+        self.ps.cm.fill(0.0)
+        self.vsum_rb.fill(0.0)
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic_rigid_body(p_i):
+                obj = self.ps.object_id[p_i]
+                mi = self.ps.m[p_i]
+                ti.atomic_add(self.ps.cm[obj], mi * self.ps.x[p_i])
+                ti.atomic_add(self.vsum_rb[obj], mi * self.ps.v[p_i])
+        for obj in ti.grouped(self.ps.cm):
+            M = self.ps.mass_rb[obj]
+            invM = 1.0 / (M + 1e-12)
+            self.ps.cm[obj] *= invM
+            self.ps.v_cm_rb[obj] = self.vsum_rb[obj] * invM
+
+    @ti.kernel
+    def rigid_compute_angular_velocity(self):
+        # omega = I^-1 t
+        self.I_rb.fill(0.0)
+        self.t_rb.fill(0.0)
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic_rigid_body(p_i):
+                obj = self.ps.object_id[p_i]
+                mi = self.ps.m[p_i]
+                r  = self.ps.x[p_i] - self.ps.cm[obj]
+                v_rel = self.ps.v[p_i] - self.ps.v_cm_rb[obj]
+                rrT = r.outer_product(r)
+                I3 = ti.math.mat3([[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]])
+                self.I_rb[obj] += mi * ((r.dot(r)) * I3 - rrT)
+                self.t_rb[obj] += mi * ti.math.cross(r, v_rel)
+        for obj in ti.grouped(self.ps.cm):
+            I = self.I_rb[obj]
+            eps = 1e-8
+            I += ti.math.mat3([[eps,0.0,0.0],[0.0,eps,0.0],[0.0,0.0,eps]])
+            self.ps.omega_rb[obj] = I.inverse() @ self.t_rb[obj]
+
+    @ti.kernel
+    def rigid_project_velocities(self):
+        # v = v_cm + omega × r
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic_rigid_body(p_i):
+                obj = self.ps.object_id[p_i]
+                r = self.ps.x[p_i] - self.ps.cm[obj]
+                self.ps.v[p_i] = self.ps.v_cm_rb[obj] + ti.math.cross(self.ps.omega_rb[obj], r)
+
+
     def solve_rigid_body(self):
 
-        self.solve_constraints()
+        # self.solve_constraints()
         # self.enforce_rigid_static_contact()
         # for i in range(1):
         #     # print(self.ps.object_id_rigid_body)

@@ -106,6 +106,9 @@ class ParticleSystem:
             self.cm = ti.Vector.field(self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
             self.R = ti.Matrix.field(self.dim, self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
             self.body_mass = ti.field(dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
+            self.v_cm_rb = ti.Vector.field(self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
+            self.omega_rb = ti.Vector.field(self.dim, dtype=float, shape=self.num_rigid_bodies + len(fluid_blocks))
+            
         # Particle num of each grid
         self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
         self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))

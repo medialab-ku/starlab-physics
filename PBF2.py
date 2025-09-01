@@ -57,6 +57,11 @@ class PBF2Solver(SPHBase):
         self.z_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.r_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+
+        self.I_rb   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.mass_rb.shape)  # per rigid
+        self.t_rb   = ti.Vector.field(n=3, dtype=float, shape=self.ps.mass_rb.shape)       # per rigid
+        self.vsum_rb= ti.Vector.field(n=3, dtype=float, shape=self.ps.mass_rb.shape)       # per rigid
+        
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         # print("method: PBF2")
@@ -600,6 +605,11 @@ class PBF2Solver(SPHBase):
                 
             coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
             add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
+
+            self.rigid_compute_cm_and_vcm()
+            self.rigid_compute_angular_velocity()
+            self.rigid_project_velocities()
+
             error = self.measure_error(self.ps.v, self.dt)
 
             if error < tol and iter > 2:

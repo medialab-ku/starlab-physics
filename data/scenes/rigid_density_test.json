@@ -15,8 +15,8 @@
 		"exportFrame": false,
 		"exportPly": false,
 		"exportObj": false,
-		"transparentObjects": [0, 1],
-		"alpha": 0.3
+		"transparentObjects": [1],
+        "alpha": 0.3
 	},
 	"FluidBlocks": [
 		{
@@ -30,8 +30,6 @@
 			"color": [10, 100, 200]
 		}
 	],
-
-
 	"RigidBodies" : [
 		{
 			"objectId": 1,
@@ -53,22 +51,9 @@
             "rotationAngle": 0,
             "scale": [0.1, 0.1, 0.1],
             "velocity": [0.0, 0.0, 0.0],
-            "density": 300.0,
-            "color": [255, 255, 255, 1.0],
-            "isDynamic": true
-		},
-        {
-            "objectId": 3,
-            "geometryFile": "./data/models/sphere.obj",
-            "translation": [0.6, 6.7, 0.6],
-            "rotationAxis": [0, 0, 1],
-            "rotationAngle": 0,
-            "scale": [0.1, 0.1, 0.1],
-            "velocity": [0.0, 0.0, 0.0],
-            "density": 3000.0,
+            "density": 600.0,
             "color": [255, 255, 255, 1.0],
             "isDynamic": true
 		}
-
 	]
 }
