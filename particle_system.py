@@ -462,7 +462,7 @@ class ParticleSystem:
 
 
     @ti.kernel
-    def initialize_boundary_neighbors(self, fluid_density: float):
+    def initialize_boundary_neighbors(self):
         for p_i in ti.grouped(self.x):
             sum_Wij = 0.0
             # Condition for boundary particles
