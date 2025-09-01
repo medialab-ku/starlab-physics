@@ -168,18 +168,18 @@ class SPHBase:
     @ti.func
     def simulate_collisions_rigid(self, p_i, vec):
         # Collision factor, assume roughly (1-c_f)*velocity loss after collision
-        # c_f = 0.5
-        # self.ps.v[p_i] -= (
-        #     1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
         c_f = 0.5
-        mu  = 0.3
-        v = self.ps.v[p_i]
-        v_n = v.dot(vec) * vec
-        v_t = v - v_n
-        v = v - (1.0 + c_f) * v_n
-        v = v - mu * v_t
-        # if v_t.norm() < 1e-3: v -= v_t
-        self.ps.v[p_i] = v
+        self.ps.v[p_i] -= (
+            1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
+        # c_f = 0.5
+        # mu  = 0.3
+        # v = self.ps.v[p_i]
+        # v_n = v.dot(vec) * vec
+        # v_t = v - v_n
+        # v = v - (1.0 + c_f) * v_n
+        # v = v - mu * v_t
+        # # if v_t.norm() < 1e-3: v -= v_t
+        # self.ps.v[p_i] = v
 
     @ti.func
     def simulate_collisions_fluid(self, p_i, vec):
@@ -328,10 +328,8 @@ class SPHBase:
         for object_id in ti.grouped(self.ps.R):
                 A = self.ps.R[object_id]
                 R, S = ti.polar_decompose(A)
-                alpha = 0.4
                 if all(abs(R) < 1e-6):
                     R = ti.Matrix.identity(ti.f32, 3)
-                R = (1 - alpha) * ti.Matrix.identity(ti.f32, 3) + alpha * R
                 self.ps.R[object_id] = R
 
         for p_i in range(self.ps.particle_num[None]):
@@ -340,23 +338,24 @@ class SPHBase:
             if self.ps.is_dynamic_rigid_body(p_i):
                 goal = self.ps.cm[object_id] + self.ps.R[object_id] @ (self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id])
                 corr = (goal - self.ps.x[p_i])
-                # corr *= alpha
-                # self.ps.x[p_i] += corr
-                n = self.contact_normal_from_static(p_i)
-                if n.norm() > 1e-6:
-                    corr_n = (corr.dot(n) * n) * alpha
-                    self.ps.x[p_i] += corr_n
-                else:
-                    corr *= alpha
-                    self.ps.x[p_i] += corr
+                
+                corr *= alpha
+                self.ps.x[p_i] += corr
+                # n = self.contact_normal_from_static(p_i)
+                # if n.norm() > 1e-6:
+                #     corr_n = (corr.dot(n) * n) * alpha
+                #     self.ps.x[p_i] += corr_n
+                # else:
+                #     corr *= alpha
+                #     self.ps.x[p_i] += corr
 
-                r_cur = self.ps.x[p_i] - self.ps.cm[object_id]
-                r_rest = self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id]
-                rest_len = r_rest.norm()
-                cur_len = r_cur.norm()
-                if cur_len > 1e-6:
-                    delta_len = rest_len - cur_len
-                    self.ps.x[p_i] += self.rigid_radius_constraint_alpha * delta_len * (r_cur / cur_len)
+                # r_cur = self.ps.x[p_i] - self.ps.cm[object_id]
+                # r_rest = self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id]
+                # rest_len = r_rest.norm()
+                # cur_len = r_cur.norm()
+                # if cur_len > 1e-6:
+                #     delta_len = rest_len - cur_len
+                #     self.ps.x[p_i] += self.rigid_radius_constraint_alpha * delta_len * (r_cur / cur_len)
 
     @ti.kernel
     def apply_rigid_pressure(self, dt: float):
@@ -444,12 +443,12 @@ class SPHBase:
                         pen = c_r - dist
                         xcorr += pen * n
             if xcorr.norm() > 0.0:
-                self.ps.x[p_i] += 0.12 * xcorr
+                self.ps.x[p_i] += 0.15 * xcorr
 
     def solve_rigid_body(self):
 
         self.solve_constraints()
-        self.enforce_rigid_static_contact()
+        # self.enforce_rigid_static_contact()
         # for i in range(1):
         #     # print(self.ps.object_id_rigid_body)
         #     for r_obj_id in self.ps.object_id_rigid_body:
@@ -471,5 +470,5 @@ class SPHBase:
 
         if self.ps.dim == 2:
             self.enforce_boundary_2D(self.ps.material_fluid)
-        # elif self.ps.dim == 3:
+        elif self.ps.dim == 3:
             self.enforce_boundary_3D(self.ps.material_fluid)

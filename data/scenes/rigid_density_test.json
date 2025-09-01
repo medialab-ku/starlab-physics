@@ -15,37 +15,26 @@
 		"exportFrame": false,
 		"exportPly": false,
 		"exportObj": false,
-		"transparentObjects": [1],
+		"transparentObjects": [0, 1],
 		"alpha": 0.3
 	},
 	"FluidBlocks": [
 		{
             "objectId": 0,
 			"start": [0.35, 1.4, 0.35],
-			"end": [0.85, 3.4, 0.85],
+			"end": [0.85, 6.4, 0.85],
 			"translation": [0.0, 0.1, 0.0],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
 			"density": 1000.0,
 			"color": [10, 100, 200]
-		},
-
-		{
-            "objectId": 1,
-			"start": [0.35, 3.5, 0.35],
-			"end": [0.85, 5.5, 0.85],
-			"translation": [0.0, 0.1, 0.0],
-			"scale": [1, 1, 1],
-			"velocity": [0.0, 0.0, 0.0],
-			"density": 1000.0,
-			"color": [200, 100, 10]
 		}
 	],
 
 
 	"RigidBodies" : [
 		{
-			"objectId": 2,
+			"objectId": 1,
 			"geometryFile": "./data/models/BoxOpened.obj",
 			"translation": [0.6, -7.1, 0.6],
 			"rotationAxis": [0, 0, 1],
@@ -55,6 +44,30 @@
 			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
 			"isDynamic": false
+		},
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/torus.obj",
+            "translation": [0.6, 7.0, 0.6],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.1, 0.1, 0.1],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 300.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": true
+		},
+        {
+            "objectId": 3,
+            "geometryFile": "./data/models/sphere.obj",
+            "translation": [0.6, 6.7, 0.6],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.1, 0.1, 0.1],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 3000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": true
 		}
 
 	]

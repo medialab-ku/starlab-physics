@@ -291,8 +291,10 @@ class PBF2Solver(SPHBase):
             J_ii = ti.math.vec3(0.0)
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
 
+                J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                    continue
                 if self.ps.is_dynamic[p_j]:
                     Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
 
@@ -327,6 +329,9 @@ class PBF2Solver(SPHBase):
                 continue
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
+                if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                    continue
+
                 if self.ps.is_dynamic[p_j]:
                     ret_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
@@ -377,6 +382,9 @@ class PBF2Solver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # val = ti.cast(self.ps.material[p_i], float)
+                if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                    continue
+
                 if self.ps.is_dynamic[p_j]:
                     ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
                 else:
@@ -419,6 +427,8 @@ class PBF2Solver(SPHBase):
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
+                if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                    continue
                 if self.ps.is_dynamic[p_j]:
                     div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
@@ -607,7 +617,6 @@ class PBF2Solver(SPHBase):
     
             add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
             max(self.p)  # Ensure non-negativity
-        
         # self.apply_rigid_pressure(self.dt)
         self.advect_position(self.dt)
 
