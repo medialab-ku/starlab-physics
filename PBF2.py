@@ -35,14 +35,17 @@ class PBF2Solver(SPHBase):
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.dx_proj = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_adv = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dp   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.c   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Dc   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.Dii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Wii = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.y   = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -67,9 +70,11 @@ class PBF2Solver(SPHBase):
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
         self.current_frame = 0
-        
+
         self.total_ratio = ti.field(dtype=float, shape=())
         self.active_particle_count = ti.field(dtype=float, shape=())
+
+        self.test = 0
 
 
     # @ti.kernel
@@ -122,12 +127,14 @@ class PBF2Solver(SPHBase):
         
         ret = 0.0
         eps = 1e-3
+
         I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
+
+            self.Aii[p_i] = eps
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            self.Aii[p_i] = eps
             J_ii = ti.math.vec3(0.0)
             self.c[p_i] = 0.0
             self.p[p_i] = 0.0
@@ -166,7 +173,7 @@ class PBF2Solver(SPHBase):
             denom_i = eps
             Dii = 1.0
             if is_volume_constraint:
-                Dii = self.Dii[p_i] 
+                Dii = self.Dii[p_i]
                 denom_i = self.Aii[p_i] * (Dii ** 2)
             else:
                 denom_i = self.Aii[p_i]
@@ -186,7 +193,28 @@ class PBF2Solver(SPHBase):
 
         ret /= self.ps.fluid_particle_num 
         return ret
-    
+
+    @ti.kernel
+    def update_variables_pbf(self):
+
+        ret = 0.0
+        eps = 1e-3
+        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        for p_i in ti.grouped(self.ps.x):
+
+            self.c[p_i] = 0.0
+            self.p[p_i] = 0.0
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            self.c[p_i] = self.ps.density[p_i] - self.ps.density0[p_i]
+
+            if self.c[p_i] <= 0.0:
+                self.Wii[p_i] = 0.0
+            else:
+                self.Wii[p_i] = 1.0
+
+            self.p[p_i] = (self.Wii[p_i] / self.Aii[p_i]) * ti.max(self.c[p_i], 0.0)
 
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
@@ -305,6 +333,10 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(x):
             ret_i = 0.0
+
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] == self.ps.material_fluid:
@@ -339,7 +371,7 @@ class PBF2Solver(SPHBase):
     def num_negative_p(self, p: ti.template()) -> int:
         cnt = 0
         for i in p:
-            if p[i] < 0.0:
+            if p[i] > 0.0:
                 cnt += 1
         return cnt  
     
@@ -375,7 +407,7 @@ class PBF2Solver(SPHBase):
 
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
-            
+
             scaled_x = x[p_i]
             if is_volume_constraint:
                 # Why should we put minus in front of the Dii??????
@@ -564,20 +596,18 @@ class PBF2Solver(SPHBase):
             coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
             add(self.ps.v, self.ps.v_adv, -self.dt, self.tmp)
             error = self.measure_error(self.ps.v, self.dt)
-
-            if error < tol and iter > 2:
-
-                print(f" converged iter: {iter}. error: {error}")
-                break 
-            
+            #
+            # if error < tol and iter > 2:
+            #
+            #     print(f" converged iter: {iter}. error: {error}")
+            #     break
+            #
             iter += 1 
 
             self.compute_J_x(self.Jx, self.tmp)
             add(self.r_jacobi, self.b, -1.0, self.Jx)
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
-
-    
             add(self.p, self.p, self.omega, self.dp)  # Initialize p with b
             max(self.p)  # Ensure non-negativity
         
@@ -588,14 +618,14 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_gradient(self, grad: ti.template(), adv: bool):
 
-
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            grad[p_i] = self.tmp[p_i]
-            if adv:
-                grad[p_i] += self.ps.m[p_i] * (self.ps.x[p_i] - self.ps.y[p_i])
+            Dii = 1.0 / self.Aii[p_i]
+            # grad[p_i] = self.tmp[p_i]
+            # if adv:
+            grad[p_i] = self.ps.m[p_i] * (self.ps.y[p_i] - self.ps.x[p_i]) + self.Wii[p_i] * (Dii * grad[p_i])
 
 
     @ti.kernel
@@ -607,8 +637,8 @@ class PBF2Solver(SPHBase):
 
             Jx[p_i] = 0.0
 
-            if self.ps.density[p_i] <= self.ps.density0[p_i]:
-                continue
+            # if self.ps.density[p_i] <= self.ps.density0[p_i]:
+            #     continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
@@ -618,7 +648,7 @@ class PBF2Solver(SPHBase):
                 else:
                     Jx[p_i] += x[p_i].dot(val_ij)
 
-            Jx[p_i] /= self.Aii[p_i]
+            Jx[p_i] *= self.Wii[p_i] / self.Aii[p_i]
 
         for p_i in ti.grouped(x):
             if self.ps.material[p_i] != self.ps.material_fluid:
@@ -629,9 +659,9 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-
-            if self.ps.density[p_i] <= self.ps.density0[p_i]:
-                continue
+            #
+            # if self.ps.density[p_i] <= self.ps.density0[p_i]:
+            #     continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
@@ -674,125 +704,128 @@ class PBF2Solver(SPHBase):
 
             ret[i] = v0[i] + scale * v1[i]
 
-    def constant_density_solve_PBF(self):
+    def PCG(self):
 
-        # objective: min_x ||x - y||^2_{M/h^2} s.t. c(x) <= 0
-        # linearization:  min_x ||x^k+1 - y||^2_{M/h^2} s.t. c(x^k) + J * (x^k+1 - x^k) <= 0
-        # (1) M/h^2 * (x^k + dx - y) + J^k^T p = 0
-        # (2)  J^k * dx = 0
+        dx = self.dx
+        # add(dx, self.ps.y, -1.0, self.ps.x)
+        dx.fill(0.0)
+        z = self.z_pcg
+        r = self.r_pcg
+        p = self.p_pcg
+        Ap = self.Ap
+        b = self.b_pcg
+        Jp = self.dp
 
-        tol = pow(10, -self.tol)
-        # tol = 0.1
-        self.ps.x_old.copy_from(self.ps.x)
+        # self.grad.fill(0.0)
+        self.update_active_set()
+        self.compute_J_tr_x(self.grad, self.c)
+        self.compute_gradient(self.grad, True)
 
-        # y = x_n + dt * v_n + dt * M^-1 * f_ext
-        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+        b.copy_from(self.grad)
+        r.copy_from(b)
+        self.apply_precondition(z, self.Hii, r)
 
-        # x^0 = y (warm start)
-        # A = dtSq * JM^-1J^t
-        # p = c / diag(A)
+        rz_old = self.dot(r, z)
+        # print(rz_old)
+        if rz_old > 1e-12:
+            # print(rz_old)
+            # 3. p_0 = z_0  (initial search direction)
+            p.copy_from(z)
+            pcg_iter = 1
+            for _ in range(100):
 
-        # IISPH: x^k+1 = y   - M^-1 J^t * p (with full linear solve for p, Ap = b, single iteration )
-        # PBF  : x^k+1 = x^k - M^-1 J^t * p (with approximation, diag(A) * p = b, multiple iterations)
-        # ???  : (M + H) * dx = M * (y - x) - J^t p, x^k+1 = x^k + alpha * dx, what is best H?
-
-        self.ps.x.copy_from(self.ps.y)
-        iter = 0
-
-        for _ in range(self.max_iteration_opt):
-
-            self.compute_density()
-
-            # original problem: (JM^-1Jt) * p = c
-            # PBD approximation: p = diag(JM^-1Jt)^-1 * max(c, 0)
-            error = self.compute_pressure_pbf(False)
-            if error < tol and iter > 1 or iter == self.max_iteration_opt:
-                if self.print_info:
-                    print(f" converged iter: {iter}. error: {error}")
-                break
-
-            # dx = self.tmp
-            # self.compute_J_tr_x(self.tmp, self.p)
-            # coef_wise_op(dx, dx, self.ps.m, 1)
-
-            step_size = 1.0
-            if self.gauss_newton_pcg:
-                
-                # Preconditioned Conjugate Gradient (PCG) Pseudo Code:
-                # Given: A*x = b, preconditioner M
-                # 1. r_0 = b - A*x_0  (initial residual)
-                # 2. z_0 = M^(-1) * r_0  (apply preconditioner)
-                max(self.c)
-                dx = self.dx
-                self.dx.fill(0.0)
-                z = self.z_pcg
-                r = self.r_pcg
-                p = self.p_pcg
-                Ap = self.Ap
-                b = self.b_pcg
-                Jp = self.dp  
-                
-                coef_wise_op(self.p, self.c, self.Aii, 1)
-                self.compute_J_tr_x_active(self.tmp, self.p, False)
-
-                self.grad.fill(0.0)
-                self.compute_gradient(self.grad, False)
-
-                b.copy_from(self.grad)
-                r.copy_from(b)
+                self.compute_Ax(Ap, Jp, p)
+                pAp = self.dot(p, Ap)
+                if pAp < 0.0:
+                    print("Warning: non-positive definite matrix!")
+                # #     break
+                alpha = rz_old / pAp
+                self.add(dx, dx, alpha, p)
+                # print("test")
+                self.add(r, r, -alpha, Ap)
+                err = self.dot(r, r)
                 self.apply_precondition(z, self.Hii, r)
 
-                rz_old = self.dot(r, z)
+                rz_new = dot(r, z)
+                if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
+                    print(f"PCG iter: , {pcg_iter}: error: {err}")
+                    break
+                pcg_iter += 1
+                beta = rz_new / rz_old
+                self.add(p, z, beta, p)
+                rz_old = rz_new
 
-                if rz_old > self.pcg_tol:
-                #     # print(rz_old)
-                # # 3. p_0 = z_0  (initial search direction)
-                    p.copy_from(z)
-                    pcg_iter = 1
-                    for _ in range(self.max_iteration_pcg):
+    @ti.kernel
+    def update_active_set(self):
 
-                        self.compute_Ax(Ap, Jp, p)
-                        pAp = self.dot(p, Ap)
-                        if pAp < 0.0:
-                            print("Warning: non-positive definite matrix!")
-                        # #     break
-                        alpha = rz_old / pAp
-                        self.add(dx, dx, alpha, p)
-                        self.add(r, r, -alpha, Ap)
-                        err = self.dot(r, r)
-                        self.apply_precondition(z, self.Hii, r)
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
 
-                        rz_new = dot(r, z)
-                        if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
-                            print(f"PCG iter: , {pcg_iter}: error: {err}")
-                            break
-                        pcg_iter += 1
-                        beta = rz_new / rz_old
-                        self.add(p, z, beta, p)
-                        rz_old = rz_new
-
-                step_size = 1.0
-
-
+            if self.c[p_i] <= 0.0:
+                self.Wii[p_i] = 1.0
             else:
+                self.Wii[p_i] = 0.0
                 self.compute_J_tr_x_active(self.tmp, self.p, False)
                 coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
-            if self.adaptive_step_size:
-                  div = self.dp
-                  self.compute_J_x_active(div, self.dx)
-                  aTa = dot2(div, div)
-                  aTb = dot2(div, self.c)
+    def ProjectedJacobian(self):
 
-                  k = 1e8
-                  alpha = (k * aTb) / (k * aTa + 1.0)
-                  step_size = ti.min(1.0, alpha)
+        self.p.fill(0.0)
+        iter = 0
+        for _ in range(self.max_iteration_opt):
+            self.compute_J_tr_x(self.dx, self.p)
+            coef_wise_op(self.dx, self.dx, self.ps.m, 1)
+            add(self.dx, self.dx_adv, -1.0, self.dx)
 
-            # x^k+1 = x^k - step_size(=0.5) * M^-1 J^t * p
-            self.add(self.ps.x, self.ps.x, -step_size, self.dx)
+            # self.PCG()
+            # error = self.measure_error(self.ps.dx, 1.0)
+            #
+            # if error < tol and iter > 2:
+            #     print(f" converged iter: {iter}. error: {error}")
+            #     break
 
             iter += 1
+            self.compute_J_x(self.Jx, self.dx)
+            add(self.r_jacobi, self.Jx, -1.0, self.c)
+            coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+            add(self.p, self.p, 0.5, self.dp)
+            max(self.p)
 
+    def constant_density_solve_PBF(self):
+
+        tol = pow(10, -self.tol)
+        self.ps.x_old.copy_from(self.ps.x)
+
+        self.compute_density()
+        self.compute_pressure_pbf()
+        # self.compute_Aii(False)
+
+        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+        add(self.dx_adv, self.ps.y, -1.0, self.ps.x)
+        self.compute_J_x(self.Jx, self.dx_adv)
+
+        add(self.c, self.ps.density0, -1.0, self.ps.density)
+
+        if self.test == 0:
+            self.ProjectedJacobian()
+        if self.test == 1:
+
+            self.p.fill(0.0)
+            # self.update_active_set()
+            # self.compute_J_tr_x(self.grad, self.c)
+            # self.compute_gradient(self.grad, True)
+            # self.apply_precondition(self.dx, self.Hii, self.grad)
+
+            # for _ in range(self.max_iteration_opt):
+            self.PCG()
+                # self.compute_J_x(self.Jx, self.dx)
+                # add(self.r_jacobi, self.Jx, -1.0, self.c)
+                # coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+                # add(self.p, self.p, 0.5, self.dp)
+                # max(self.p)
+
+        add(self.ps.x, self.ps.x, 1.0, self.dx)
         self.update_velocities(self.dt)
 
     def constant_volume_solve_PBF(self):
@@ -820,7 +853,7 @@ class PBF2Solver(SPHBase):
             #     if self.print_info:
             #         print(f" converged iter: {iter}. error: {error}")
             #     break
-            
+
             self.compute_J_tr_x_active(self.tmp, self.p, True)
             coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
@@ -830,16 +863,16 @@ class PBF2Solver(SPHBase):
             iter += 1
 
         self.update_velocities(self.dt)
-        
+
     # PBF2Solver 클래스 내부에 새로운 함수로 추가
     @ti.kernel
     def compare_dx_ratio(self):
         eps = 1e-9
-        
+
         for p_i in ti.grouped(self.ps.x):
             if not (self.ps.material[p_i] == self.ps.material_fluid and self.ps.density[p_i] > self.ps.density0[p_i]):
                 continue
-            
+
             aii_geo = eps
             J_ii = ti.math.vec3(0.0)
             for j in range(self.ps.fluid_neighbors_num[p_i]):
@@ -863,7 +896,7 @@ class PBF2Solver(SPHBase):
             if denominator_vol > eps:
                 lambda_vol = -c_vol / denominator_vol
             term_to_compare = -Dii * lambda_vol
-            
+
             # --- 비율 계산 및 누적 ---
             ratio = 0.0
             # lambda_dens가 0에 가까우면 비율 계산이 무의미하므로 건너뛰기
@@ -878,10 +911,10 @@ class PBF2Solver(SPHBase):
     def run_comparison_test(self):
         self.total_ratio[None] = 0.0
         self.active_particle_count[None] = 0.0
-        
+
         self.compute_density()
         self.compare_dx_ratio()
-        
+
         # 4. 최종 평균 비율 계산
         count = self.active_particle_count[None]
         if count > 0:
@@ -910,13 +943,13 @@ class PBF2Solver(SPHBase):
 
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
-        
+
         self.run_comparison_test()
 
         #divergence-free condition solve
-        if self.divergence_free_solve:
-            if self.method == 0:
-                self.divergence_free_sovle_IISPH()
+        # if self.divergence_free_solve:
+        #     if self.method == 0:
+        #         self.divergence_free_sovle_IISPH()
 
         #constant density condition solve
         if self.method == 0:
