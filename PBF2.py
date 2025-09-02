@@ -968,10 +968,59 @@ class PBF2Solver(SPHBase):
             self.constant_volume_solve_PBF()
 
         if self.divergence_free_solve:
-            #use density constraint
-            #  v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
-            print("TODO")
+            # use density constraint
+            # v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
+            
+            self.r_jacobi.fill(0.0)
+            tol = pow(10, -2)
+            
+            self.v_tmp.copy_from(self.ps.v)
+            # We need to calculate Aii again as to use the updated positions...
+            self.compute_Aii(False)
+            # b = divergence
+            self.compute_b_div(self.b, self.v_tmp, self.dt)
 
-        # self.com_divergence()
-        self.measure_divergence(self.ps.v, self.dt)
+            self.p.fill(0.0)
+            
+            iter = 0
+            for _ in range(1000):
+                # tmp = M⁻¹Jᵀp
+                self.compute_J_tr_x(self.tmp, self.p)
+                coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+                # v_current = v_tmp - dt * tmp
+                add(self.ps.v, self.v_tmp, -self.dt, self.tmp) 
+                
+                error = self.measure_divergence(self.v_tmp, self.dt)
+                # print(error, tol)
+                if (error < tol and iter > 2) or iter >= 999:
+                    print(f"Divergence-free converged iter: {iter}, Error : {error}")
+                    break
+                
+                # Jx = J(M⁻¹Jᵀp) = Ap
+                self.compute_J_x(self.Jx, self.tmp)
+                
+                # r = b - Ap
+                add(self.r_jacobi, self.b, -1.0, self.Jx)
+                # dp = r / Aii
+                coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+                
+                # pressure update : p = p + ω * dp
+                add(self.p, self.p, self.omega, self.dp)
+                
+                # Clamping pressure
+                max(self.p)
+
+                # error = sqrt(dot2(self.r_jacobi, self.r_jacobi))
+                
+                iter += 1
+            
+            # Final velocity update : v_(n+1) = v_tmp - hM⁻¹Jᵀp
+            self.compute_J_tr_x(self.tmp, self.p)
+            coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
+            add(self.ps.v, self.v_tmp, -self.dt, self.tmp)
+        
+        else:
+            error = self.measure_divergence(self.ps.v, self.dt)
+            print(f"Divergence-free is disabled. Last error: {error}")
+
         self.dt = dt_original  # Reset dt to original value after substep
