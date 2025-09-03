@@ -290,7 +290,7 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_Aii(self, pressure_boundary: bool, volume_constraint: bool):
 
-        eps = 1e-3
+        eps = 1e-6
 
         for p_i in ti.grouped(self.ps.x):
             self.Dii[p_i] = 0.0
@@ -308,10 +308,13 @@ class PBF2Solver(SPHBase):
 
                 J_ii -= J_ij
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
+            # Dii = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
             self.Aii[p_i] = Aii + eps
-            self.Dii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
+            # self.Dii[p_i] =  (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
 
             # if volume_constraint:
+            #     # print("test")
+            #     self.Aii[p_i] = self.Dii[p_i] * Aii + eps
             #     self.Dii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
             #     self.Aii[p_i] = Aii * (self.Dii[p_i]) ** 2
 
@@ -783,15 +786,15 @@ class PBF2Solver(SPHBase):
                 ret[p_i] = ti.math.vec3(0.0)
 
 
-
     def ProjectedJacobian(self):
 
         self.p.fill(0.0)
         iter = 0
         for _ in range(self.max_iteration_opt):
 
-            if not self.volume_constraint:
-                coef_wise_mul(self.p, self.p, self.Dii)
+            # self.Dc.copy_from(self.p)
+            # if self.volume_constraint:
+            #     coef_wise_mul(self.Dc, self.p, self.Dii)
 
             self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
             self.compute_inv_M_x(self.tmp, self.tmp)
@@ -802,8 +805,6 @@ class PBF2Solver(SPHBase):
 
             add(self.r_jacobi, self.Jx, 1.0, self.c)
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
-            if not self.volume_constraint:
-                coef_wise_div(self.dp, self.dp, self.Dii)
 
             add(self.p, self.p, self.omega, self.dp)
             max(self.p)
@@ -827,62 +828,21 @@ class PBF2Solver(SPHBase):
         self.ps.x_old.copy_from(self.ps.x)
         add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
 
-        # self.ps.x.copy_from(self.ps.y)
+        self.ps.x.copy_from(self.ps.y)
 
         # for _ in range(self.max_iteration_opt):
         self.compute_density(self.pressure_boundary)
         self.compute_constraint(self.pressure_boundary, self.volume_constraint)
         self.compute_Aii(self.pressure_boundary, self.volume_constraint)
         add(self.s, self.ps.y, -1.0, self.ps.x)
-        # self.s.fill(0.0)
+
+        #mark
         self.ProjectedJacobian()
 
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
 
         #v_n+1_tmp
-        self.update_velocities(self.dt)
-
-    def constant_volume_solve_PBF(self):
-
-        # vol_0 = m_i / rho_0
-        # c_i(x) = vol_0 * (vol_i / vol_0 - 1.0) >= 0
-
-        tol = pow(10, -self.tol)
-        # tol = 0.1
-        self.ps.x_old.copy_from(self.ps.x)
-
-        # y = x_n + dt * v_n + dt * M^-1 * f_ext
-        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
-
-        self.ps.x.copy_from(self.ps.y)
-        iter = 0
-
-        for _ in range(self.max_iteration_opt):
-
-            self.compute_density()
-            self.dx.fill(0.0)
-            self.compute_constraint(True)
-            self.compute_Aii(True)
-
-            # error = self.compute_pressure_pbf(True)
-            coef_wise_div(self.p, self.c, self.Aii)
-            # coef_wise_div(self.p, self.p, self.Dii)
-            # coef_wise_div(self.p, self.p, self.Dii)
-            max(self.p)
-            # if error < tol and iter > 1 or iter == self.max_iteration_opt:
-            #     if self.print_info:
-            #         print(f" converged iter: {iter}. error: {error}")
-            #     break
-            coef_wise_mul(self.p, self.p, self.Dii)
-            self.compute_J_tr_x(self.tmp, self.p)
-            coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
-
-            step_size = 1.0
-            self.add(self.ps.x, self.ps.x, -step_size, self.dx)
-
-            iter += 1
-
         self.update_velocities(self.dt)
 
     # PBF2Solver 클래스 내부에 새로운 함수로 추가
@@ -964,21 +924,7 @@ class PBF2Solver(SPHBase):
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
 
-        # self.run_comparison_test()
-
-        #divergence-free condition solve
-        # if self.divergence_free_solve:
-        #     if self.method == 0:
-        #         self.divergence_free_sovle_IISPH()
-
-        #constant density condition solve
-        # if self.method == 0:
-        self.constant_density_solve_IISPH()
-        # elif self.method == 1:
-        # self.constant_density_solve_PBF()
-        # elif self.method == 2:
-        #     self.constant_volume_solve_PBF()
-
+        self.constant_density_solve_PBF()
         if self.divergence_free_solve:
             #use density constraint
             #  v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
