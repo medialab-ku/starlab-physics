@@ -789,25 +789,29 @@ class PBF2Solver(SPHBase):
     def ProjectedJacobian(self):
 
         self.p.fill(0.0)
+        self.dx.copy_from(self.s)
         iter = 0
         for _ in range(self.max_iteration_opt):
 
-            # self.Dc.copy_from(self.p)
-            # if self.volume_constraint:
-            #     coef_wise_mul(self.Dc, self.p, self.Dii)
-
-            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-            self.compute_inv_M_x(self.tmp, self.tmp)
-
-            add(self.dx, self.s, -1.0, self.tmp)
-            iter += 1
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
-
             add(self.r_jacobi, self.Jx, 1.0, self.c)
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+            # max(self.dp)
 
             add(self.p, self.p, self.omega, self.dp)
             max(self.p)
+
+            if self.gauss_newton_pcg:
+
+                self.PCG()
+
+            else:
+                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
+                self.compute_inv_M_x(self.tmp, self.tmp)
+
+            add(self.dx, self.s, -1.0, self.tmp)
+            iter += 1
+
 
     @ti.kernel
     def compute_constraint(self,  pressure_boundary: bool, volume_constraint: bool):
