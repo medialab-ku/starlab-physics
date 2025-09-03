@@ -107,7 +107,7 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(self.ps.x):
 
             self.ps.density[p_i] = self.ps.density0[p_i]
-            if self.ps.material[p_i] != self.ps.material_fluid and pressure_boundary == False:
+            if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
             den = self.ps.m[p_i] * self.cubic_kernel(0.0)
@@ -294,7 +294,7 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(self.ps.x):
             self.Dii[p_i] = 0.0
-            if pressure_boundary == False and self.ps.material[p_i] != self.ps.material_fluid:
+            if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
             Aii = 0.0
@@ -309,10 +309,11 @@ class PBF2Solver(SPHBase):
                 J_ii -= J_ij
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
             self.Aii[p_i] = Aii + eps
+            self.Dii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
 
-            if volume_constraint:
-                self.Dii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
-                self.Aii[p_i] = Aii * (self.Dii[p_i]) ** 2
+            # if volume_constraint:
+            #     self.Dii[p_i] = (self.ps.m[p_i] / self.ps.density[p_i] ** 2)
+            #     self.Aii[p_i] = Aii * (self.Dii[p_i]) ** 2
 
 
     @ti.kernel
@@ -332,7 +333,7 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(x):
             ret_i = 0.0
 
-            if pressure_boundary == False and self.ps.material[p_i] != self.ps.material_fluid:
+            if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
@@ -380,7 +381,7 @@ class PBF2Solver(SPHBase):
         # num_f = 0
         for p_i in ti.grouped(x):
             ret[p_i] = ti.math.vec3(0.0)
-            if pressure_boundary == False and self.ps.material[p_i] != self.ps.material_fluid:
+            if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
             # num_f += 1
@@ -789,17 +790,17 @@ class PBF2Solver(SPHBase):
         iter = 0
         for _ in range(self.max_iteration_opt):
 
-            if self.volume_constraint:
-                coef_wise_mul(self.p, self.p, self.Dii)
+            # if self.volume_constraint:
+            #     coef_wise_mul(self.p, self.p, self.Dii)
 
             self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-            self.compute_inv_M_x(self.tmp, self.tmp)
+            coef_wise_div(self.tmp, self.tmp, self.ps.m)
+
+            # self.compute_inv_M_x(self.tmp, self.tmp)
 
             add(self.dx, self.s, -1.0, self.tmp)
             iter += 1
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
-            if self.volume_constraint:
-                coef_wise_mul(self.Jx, self.Jx, self.Dii)
 
             add(self.r_jacobi, self.Jx, 1.0, self.c)
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
@@ -810,11 +811,11 @@ class PBF2Solver(SPHBase):
     def compute_constraint(self,  pressure_boundary: bool, volume_constraint: bool):
 
         for p_i in ti.grouped(self.ps.x):
-            if pressure_boundary == False and self.ps.material[p_i] != self.ps.material_fluid:
+            if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
             if volume_constraint:
-                self.c[p_i] = self.ps.m[p_i] * (1.0 / self.ps.density0[p_i] - 1.0 / self.ps.density[p_i])
+                self.c[p_i] = self.ps.density[p_i] * (self.ps.density[p_i] / self.ps.density0[p_i] - 1.0)
             else:
                 self.c[p_i] = (self.ps.density[p_i] - self.ps.density0[p_i])
 
@@ -828,7 +829,6 @@ class PBF2Solver(SPHBase):
         # self.ps.x.copy_from(self.ps.y)
 
         # for _ in range(self.max_iteration_opt):
-
         self.compute_density(self.pressure_boundary)
         self.compute_constraint(self.pressure_boundary, self.volume_constraint)
         self.compute_Aii(self.pressure_boundary, self.volume_constraint)
