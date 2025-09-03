@@ -577,10 +577,10 @@ class PBF2Solver(SPHBase):
 
     def constant_density_solve_IISPH(self):
         
-        self.compute_density()
+        self.compute_density(self.pressure_boundary)
         # self.precompute_values()
         self.ps.v.copy_from(self.ps.v_adv)
-        self.compute_Aii(self.iisph_vanilla)
+        self.compute_Aii(self.pressure_boundary, self.iisph_vanilla)
         self.compute_b(self.b, self.ps.v, self.dt)
 
         tol = pow(10, -self.tol)
@@ -588,11 +588,11 @@ class PBF2Solver(SPHBase):
         iter = 0
         for _ in range(self.max_iteration_opt):
         
-            if self.iisph_vanilla:
-                coef_wise_mul(self.y, self.Dii, self.p)
-                self.compute_J_tr_x(self.tmp, self.y)
-            else:
-                self.compute_J_tr_x(self.tmp, self.p)
+            # if self.iisph_vanilla:
+            coef_wise_mul(self.y, self.Dii, self.p)
+            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.y)
+            # else:
+            #     self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
                 
                 
             coef_wise_op(self.tmp, self.tmp, self.ps.m, 1)
@@ -606,7 +606,7 @@ class PBF2Solver(SPHBase):
             #
             iter += 1 
 
-            self.compute_J_x(self.Jx, self.tmp)
+            self.compute_J_x(self.pressure_boundary, self.Jx, self.tmp)
             add(self.r_jacobi, self.b, -1.0, self.Jx)
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
@@ -790,13 +790,11 @@ class PBF2Solver(SPHBase):
         iter = 0
         for _ in range(self.max_iteration_opt):
 
-            # if self.volume_constraint:
-            #     coef_wise_mul(self.p, self.p, self.Dii)
+            if not self.volume_constraint:
+                coef_wise_mul(self.p, self.p, self.Dii)
 
             self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-            coef_wise_div(self.tmp, self.tmp, self.ps.m)
-
-            # self.compute_inv_M_x(self.tmp, self.tmp)
+            self.compute_inv_M_x(self.tmp, self.tmp)
 
             add(self.dx, self.s, -1.0, self.tmp)
             iter += 1
@@ -804,6 +802,9 @@ class PBF2Solver(SPHBase):
 
             add(self.r_jacobi, self.Jx, 1.0, self.c)
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+            if not self.volume_constraint:
+                coef_wise_div(self.dp, self.dp, self.Dii)
+
             add(self.p, self.p, self.omega, self.dp)
             max(self.p)
 
@@ -972,9 +973,9 @@ class PBF2Solver(SPHBase):
 
         #constant density condition solve
         # if self.method == 0:
-        #     self.constant_density_solve_IISPH()
+        self.constant_density_solve_IISPH()
         # elif self.method == 1:
-        self.constant_density_solve_PBF()
+        # self.constant_density_solve_PBF()
         # elif self.method == 2:
         #     self.constant_volume_solve_PBF()
 
