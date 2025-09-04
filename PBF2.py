@@ -844,11 +844,10 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-
             if volume_constraint:
                 self.c[p_i] = self.ps.density[p_i] * (self.ps.density[p_i] / self.ps.density0[p_i] - 1.0)
             else:
-                self.c[p_i] = (self.ps.density[p_i] - self.ps.density0[p_i])
+                self.c[p_i] =  self.ps.density0[p_i] *  (self.ps.density[p_i] / self.ps.density0[p_i] - 1.0)
 
     def constant_density_solve_PBF(self):
 
@@ -989,7 +988,7 @@ class PBF2Solver(SPHBase):
                 #     break
 
                 coef_wise_op(self.dp, Jv, self.Aii, 1)
-                add(self.p, self.p, 0.5, self.dp)
+                add(self.p, self.p, 1.0, self.dp)
                 max(self.p)
 
                 self.compute_J_tr_x(self.pressure_boundary, dv, self.p)
