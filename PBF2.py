@@ -37,6 +37,8 @@ class PBF2Solver(SPHBase):
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.dx_prev = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.error = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_proj = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.s = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -334,7 +336,7 @@ class PBF2Solver(SPHBase):
     def compute_J_x(self, pressure_boundary: bool, ret: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-            ret_i = 0.0
+            ret[p_i] = 0.0
 
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
@@ -342,11 +344,10 @@ class PBF2Solver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] == self.ps.material_fluid:
-                    ret_i += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                    ret[p_i] += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
-                    ret_i += self.ps.m[p_j] * (x[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
+                    ret[p_i] += self.ps.m[p_j] * (x[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
 
-            ret[p_i] = ret_i
 
     @ti.kernel
     def compute_J_x_active(self, ret: ti.template(), x: ti.template()):
@@ -481,6 +482,8 @@ class PBF2Solver(SPHBase):
         avg_error = 0.0
         for p_i in ti.grouped(v):
             div_i = 0.0
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] == self.ps.material_fluid:
@@ -774,6 +777,19 @@ class PBF2Solver(SPHBase):
                 self.compute_J_tr_x_active(self.tmp, self.p, False)
                 coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
+
+    @ti.kernel
+    def measure_error2(self, x: ti.template()) -> float:
+
+        avg_error = 0.0
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            avg_error += ti.max(x[p_i], 0.0) / self.ps.density0[p_i]
+
+        return avg_error / self.ps.fluid_particle_num
+
     @ti.kernel
     def compute_inv_M_x(self,ret: ti.template(), x: ti.template()):
 
@@ -789,12 +805,16 @@ class PBF2Solver(SPHBase):
     def ProjectedJacobian(self):
 
         self.p.fill(0.0)
-        self.dx.copy_from(self.s)
         iter = 0
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
             add(self.r_jacobi, self.Jx, 1.0, self.c)
+            err = self.measure_error2(self.r_jacobi)
+            if (err < tol and iter > 2)  or iter == self.max_iteration_opt:
+                print(f" CD converged iter: {iter}, err: {err}")
+                break
+
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
             # max(self.dp)
 
@@ -827,7 +847,6 @@ class PBF2Solver(SPHBase):
 
     def constant_density_solve_PBF(self):
 
-        tol = pow(10, -self.tol)
 
         self.ps.x_old.copy_from(self.ps.x)
         add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
@@ -930,10 +949,45 @@ class PBF2Solver(SPHBase):
 
         self.constant_density_solve_PBF()
         if self.divergence_free_solve:
-            #use density constraint
-            #  v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
-            print("TODO")
+            # use density constraint
+            # v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
 
-        # self.com_divergence()
-        self.measure_divergence(self.ps.v, self.dt)
+            # self.ps.initialize_particle_system()
+            # self.ps.search_neighbours(self.ps.x)
+            #
+            # self.compute_density()
+            # self.compute_Aii(False)
+
+            tol = pow(10, -self.tol)
+            self.v_tmp.copy_from(self.ps.v)
+            dv = self.dx
+            Jv = self.Jx
+            iter = 0
+
+            self.c.fill(0.0)
+            self.p.fill(0.0)
+            for _ in range(self.max_iteration_opt):
+
+                self.compute_J_tr_x(dv, self.p)
+                coef_wise_op(dv, dv, self.ps.m, 1)
+                add(self.ps.v, self.v_tmp, -1.0, dv)
+                iter += 1
+                self.compute_J_x(Jv, self.ps.v)
+                add(self.r_jacobi, Jv, 1.0, self.c)
+                err = self.measure_error2(self.r_jacobi)
+                if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
+                    print(f"DF iter: {iter}, err: {err}")
+                    break
+
+                coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+                add(self.p, self.p, self.omega, self.dp)
+                max(self.p)
+
+                iter += 1
+
+            # add(self.ps.x, self.ps.x_old, self.dt, self.ps.v)
+        # else:
+        error = self.measure_divergence(self.ps.v, self.dt)
+        # print(f"Divergence-free is disabled. Last error: {error}")
+
         self.dt = dt_original  # Reset dt to original value after substep

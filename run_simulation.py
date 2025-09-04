@@ -381,11 +381,11 @@ if __name__ == "__main__":
                     rgba_array = cmap(norm_v(v_norm))
                 elif heatmap_type == 2:
                     # Divergence heatmap
-                    cmap = LinearSegmentedColormap.from_list("heatmap", ["white","red"])
+                    cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white", "red"])
                     rgba_array = cmap(norm_div(div_np))
                 elif heatmap_type == 3:
                     # Density heatmap
-                    cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white","red"])
+                    cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white", "red"])
                     rgba_array = cmap(norm_density(density))
             else:
                 rgba_array = cmap(norm_density(density))  # Default for non-heatmap mode
