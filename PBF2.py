@@ -26,6 +26,7 @@ class PBF2Solver(SPHBase):
         self.gauss_newton_pcg = True
         self.divergence_free_solve = False
         self.pressure_boundary = False
+        self.active_set = False
         self.print_info = True
         self.volume_constraint = False
         self.tol = 2
@@ -770,12 +771,10 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            if self.c[p_i] <= 0.0:
+            if self.c[p_i] >= 0.0:
                 self.Wii[p_i] = 1.0
             else:
                 self.Wii[p_i] = 0.0
-                self.compute_J_tr_x_active(self.tmp, self.p, False)
-                coef_wise_op(self.dx, self.tmp, self.ps.m, 1)
 
 
     @ti.kernel
@@ -805,31 +804,37 @@ class PBF2Solver(SPHBase):
     def ProjectedJacobian(self):
 
         self.p.fill(0.0)
+        self.dx.copy_from(self.s)
         iter = 0
         for _ in range(self.max_iteration_opt):
+            # self.p.fill(0.0)
+            if self.gauss_newton_pcg:
+                self.p.fill(0.0)
 
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
             add(self.r_jacobi, self.Jx, 1.0, self.c)
-            err = self.measure_error2(self.r_jacobi)
-            if (err < tol and iter > 2)  or iter == self.max_iteration_opt:
-                print(f" CD converged iter: {iter}, err: {err}")
-                break
+            # err = self.measure_error2(self.r_jacobi)
+            # if (err < tol and iter > 2)  or iter == self.max_iteration_opt:
+            #     print(f" CD converged iter: {iter}, err: {err}")
+            #     break
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
-            # max(self.dp)
-
             add(self.p, self.p, self.omega, self.dp)
             max(self.p)
 
+            # if self.gauss_newton_pcg:
+            #
+            #     self.PCG()
+            #
+            # else:
+            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
+            self.compute_inv_M_x(self.tmp, self.tmp)
+
             if self.gauss_newton_pcg:
-
-                self.PCG()
-
+                add(self.dx, self.dx, -1.0, self.tmp)
             else:
-                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-                self.compute_inv_M_x(self.tmp, self.tmp)
+                add(self.dx, self.s, -1.0, self.tmp)
 
-            add(self.dx, self.s, -1.0, self.tmp)
             iter += 1
 
 
@@ -952,11 +957,15 @@ class PBF2Solver(SPHBase):
             # use density constraint
             # v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
 
-            # self.ps.initialize_particle_system()
-            # self.ps.search_neighbours(self.ps.x)
+            self.enforce_boundary_3D(self.ps.material_fluid)
+            self.ps.initialize_particle_system()
+            self.ps.search_neighbours(self.ps.x)
             #
-            # self.compute_density()
-            # self.compute_Aii(False)
+            self.compute_density(self.pressure_boundary)
+            self.compute_constraint(self.pressure_boundary, False)
+            self.compute_Aii(self.pressure_boundary,False)
+
+            self.update_active_set()
 
             tol = pow(10, -self.tol)
             self.v_tmp.copy_from(self.ps.v)
@@ -964,25 +973,28 @@ class PBF2Solver(SPHBase):
             Jv = self.Jx
             iter = 0
 
-            self.c.fill(0.0)
+            # self.c.fill(0.0)
             self.p.fill(0.0)
             for _ in range(self.max_iteration_opt):
 
-                self.compute_J_tr_x(dv, self.p)
-                coef_wise_op(dv, dv, self.ps.m, 1)
-                add(self.ps.v, self.v_tmp, -1.0, dv)
-                iter += 1
-                self.compute_J_x(Jv, self.ps.v)
-                add(self.r_jacobi, Jv, 1.0, self.c)
-                err = self.measure_error2(self.r_jacobi)
-                if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
-                    print(f"DF iter: {iter}, err: {err}")
-                    break
+                self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
 
-                coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
-                add(self.p, self.p, self.omega, self.dp)
+                if self.active_set:
+                    coef_wise_mul(Jv, Jv, self.Wii)
+
+                # add(self.r_jacobi, Jv, 1.0, self.c)
+                # err = self.measure_error2(self.r_jacobi)
+                # if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
+                #     print(f"DF iter: {iter}, err: {err}")
+                #     break
+
+                coef_wise_op(self.dp, Jv, self.Aii, 1)
+                add(self.p, self.p, 0.5, self.dp)
                 max(self.p)
 
+                self.compute_J_tr_x(self.pressure_boundary, dv, self.p)
+                coef_wise_op(dv, dv, self.ps.m, 1)
+                add(self.ps.v, self.ps.v, -1.0, dv)
                 iter += 1
 
             # add(self.ps.x, self.ps.x_old, self.dt, self.ps.v)

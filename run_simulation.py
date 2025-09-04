@@ -164,7 +164,8 @@ if __name__ == "__main__":
                     # if solver.test == 1:
                     #     gui.text("Augmented Lagrangian")
 
-                    # solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
+                solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
+                solver.active_set = w.checkbox("active set",  solver.active_set)
                     # if solver.gauss_newton_pcg:
                     #     solver.max_iteration_pcg = w.slider_int("max pcg iter", solver.max_iteration_pcg, 1, 1000)
                     #     solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
