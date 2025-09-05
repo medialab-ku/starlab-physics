@@ -145,40 +145,20 @@ if __name__ == "__main__":
                 # solver.method = w.slider_int("method type", solver.method, 0, 2)
                 solver.print_info = w.checkbox("print", solver.print_info)
 
-                solver.divergence_free_solve = w.checkbox("divergence-free solve", solver.divergence_free_solve)
+                solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)
                 solver.pressure_boundary = w.checkbox("pressure boundary", solver.pressure_boundary)
-                # if solver.method == 0:
-                #     gui.text("IISPH")
-                #     solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
-                #     solver.iisph_vanilla = w.checkbox("vanilla",  solver.iisph_vanilla)
 
-                # elif solver.method == 1:
-
-                    # gui.text("PBF")
                 solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
                 # solver.test = w.slider_int("opt type", solver.test, 0, 2)
                 solver.volume_constraint = w.checkbox("volume constraint",   solver.volume_constraint)
 
-                    # if solver.test == 0:
-                    #     gui.text("Projected Jacobi")
-                    # if solver.test == 1:
-                    #     gui.text("Augmented Lagrangian")
 
                 solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
-                solver.active_set = w.checkbox("active set",  solver.active_set)
-                    # if solver.gauss_newton_pcg:
-                    #     solver.max_iteration_pcg = w.slider_int("max pcg iter", solver.max_iteration_pcg, 1, 1000)
-                    #     solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
-                    # solver.adaptive_step_size = w.checkbox("adaptive step size",  solver.adaptive_step_size)
+                solver.smooth_max = w.checkbox("smooth max", solver.smooth_max)
 
-                # elif solver.method == 2:
-                #     gui.text("PBF-volume")
-                #     # solver.gauss_newton_pcg = w.checkbox("GN-PCG", solver.gauss_newton_pcg)
-                #     #
-                #     # if solver.gauss_newton_pcg:
-                #     #     solver.max_iteration_pcg = w.slider_int("max pcg iter", solver.max_iteration_pcg, 1, 1000)
-                #     #     solver.pcg_tol = w.slider_float("pcg tol", solver.pcg_tol, 1e-5, 1e-1)
-                #     # solver.adaptive_step_size = w.checkbox("adaptive step size", solver.adaptive_step_size)
+                if solver.smooth_max:
+                    solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
+
 
             export_ply = w.checkbox("export", export_ply)
             if export_ply:

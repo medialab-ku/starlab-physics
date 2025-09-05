@@ -12,7 +12,7 @@ class PBF2Solver(SPHBase):
         super().__init__(particle_system)
 
 
-        self.surface_tension = 0.01
+        self.surface_tension = 0.005
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
         self.nablaWij = self.cubic_kernel_derivative
@@ -24,13 +24,14 @@ class PBF2Solver(SPHBase):
 
         self.adaptive_step_size = False
         self.gauss_newton_pcg = True
-        self.divergence_free_solve = False
+        self.enable_DF = False
         self.pressure_boundary = False
-        self.active_set = False
+        self.smooth_max = False
         self.print_info = True
         self.volume_constraint = False
         self.tol = 2
-        self.omega = 0.5 
+        self.omega = 0.5
+        self.eps = 0.01
         self.cfl = False
         self.max_iteration_opt = 1000
         self.max_iteration_pcg = 1000
@@ -50,7 +51,8 @@ class PBF2Solver(SPHBase):
         self.k = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.Dii = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.Wii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.W = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.f = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.y   = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -213,11 +215,11 @@ class PBF2Solver(SPHBase):
             self.c[p_i] = self.ps.density[p_i] - self.ps.density0[p_i]
 
             if self.c[p_i] <= 0.0:
-                self.Wii[p_i] = 0.0
+                self.W[p_i] = 0.0
             else:
-                self.Wii[p_i] = 1.0
+                self.W[p_i] = 1.0
 
-            self.p[p_i] = (self.Wii[p_i] / self.Aii[p_i]) * ti.max(self.c[p_i], 0.0)
+            self.p[p_i] = (self.W[p_i] / self.Aii[p_i]) * ti.max(self.c[p_i], 0.0)
 
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
@@ -492,7 +494,7 @@ class PBF2Solver(SPHBase):
 
 
     @ti.kernel
-    def measure_divergence(self, v: ti.template(), dt: float) -> float:
+    def measure_divergence(self, v: ti.template()) -> float:
         avg_error = 0.0
         for p_i in ti.grouped(v):
             div_i = 0.0
@@ -512,7 +514,7 @@ class PBF2Solver(SPHBase):
 
         avg_error /= float(self.ps.fluid_particle_num)
 
-        return dt*avg_error
+        return avg_error
 
 
     def pressure_solve(self):
@@ -665,7 +667,7 @@ class PBF2Solver(SPHBase):
                 else:
                     Jx[p_i] += x[p_i].dot(val_ij)
 
-            Jx[p_i] *= self.Wii[p_i] / self.Aii[p_i]
+            Jx[p_i] *= self.W[p_i] / self.Aii[p_i]
 
         for p_i in ti.grouped(x):
             if self.ps.material[p_i] != self.ps.material_fluid:
@@ -725,7 +727,7 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            self.k[p_i] = self.Wii[p_i] * ((self.c[p_i] / self.Aii[p_i]) + self.p[p_i])
+            self.k[p_i] = self.W[p_i] * ((self.c[p_i] / self.Aii[p_i]) + self.p[p_i])
 
 
     def PCG(self):
@@ -792,11 +794,11 @@ class PBF2Solver(SPHBase):
                 continue
 
             if value[p_i] >= eps:
-                self.Wii[p_i] = 1.0
+                self.W[p_i] = 1.0
             # elif 0.0 < value[p_i] < eps:
             #     self.Wii[p_i] = (1.0 / eps) * value[p_i]
             else:
-                self.Wii[p_i] = 0.0
+                self.W[p_i] = 0.0
 
 
     @ti.kernel
@@ -822,46 +824,57 @@ class PBF2Solver(SPHBase):
             else:
                 ret[p_i] = ti.math.vec3(0.0)
 
+    @ti.kernel
+    def compute_f(self, ret: ti.template(), x: ti.template(), eps: float):
+
+        for p_i in ti.grouped(x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            ret[p_i] = 0.0
+            if x[p_i] >= 0.0:
+                ret[p_i] = x[p_i]
+
+
+
+
+    @ti.kernel
+    def compute_f_derivative(self, ret: ti.template(), x: ti.template(), eps: float):
+
+        for p_i in ti.grouped(self.ps.x):
+            ret[p_i] = 0.0
+
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+            #
+            if x[p_i] >= 0.0:
+                ret[p_i] = 1.0
+
 
     def ProjectedJacobian(self):
 
         self.p.fill(0.0)
         self.dx.copy_from(self.s)
+
+
         iter = 0
 
-        if self.active_set:
-            max(self.c)
-
+        # self.compute_f(self.f, self.c, self.eps)
+        max(self.c)
+        self.compute_f_derivative(self.W, self.c, self.eps)
         for _ in range(self.max_iteration_opt):
 
-            self.p.fill(0.0)
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
+            coef_wise_op(self.Jx, self.Jx, self.W, 0)
 
-            # if self.active_set:
-            #     coef_wise_mul(self.Jx, self.Jx, self.Wii)
-
-            # self.Jx.fill(0.0)
             add(self.r_jacobi, self.Jx, 1.0, self.c)
-            # err = self.measure_error2(self.r_jacobi)
-            # if (err < tol and iter > 2)  or iter == self.max_iteration_opt:
-            #     print(f" CD converged iter: {iter}, err: {err}")
-            #     break
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
 
-            # if not self.active_set:
-            max(self.p)
-            # else:
-            #     coef_wise_mul(self.p, self.p, self.Wii)
-
-            # if self.gauss_newton_pcg:
-            #     self.PCG()
-            # #
-            # else:
+            coef_wise_op(self.p, self.p, self.W, 0)
             self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
             self.compute_inv_M_x(self.tmp, self.tmp)
-            add(self.dx, self.dx, -1.0, self.tmp)
+            add(self.dx, self.s, -1.0, self.tmp)
 
             iter += 1
 
@@ -877,24 +890,20 @@ class PBF2Solver(SPHBase):
             else:
                 self.c[p_i] =  self.ps.density0[p_i] *  (self.ps.density[p_i] / self.ps.density0[p_i] - 1.0)
 
-    def constant_density_solve_PBF(self):
+    def constant_density_solve(self):
 
         self.ps.x_old.copy_from(self.ps.x)
         add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
 
         self.ps.x.copy_from(self.ps.y)
 
-        # for _ in range(self.max_iteration_opt):
         self.compute_density(self.pressure_boundary)
         self.compute_constraint(self.pressure_boundary, self.volume_constraint)
         self.compute_Aii(self.pressure_boundary, self.volume_constraint)
 
-        if self.active_set:
-            self.update_active_set(self.c, 0.0)
-
         # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
-        #mark
+
         self.ProjectedJacobian()
 
         #x_n+1
@@ -903,69 +912,9 @@ class PBF2Solver(SPHBase):
         #v_n+1_tmp
         self.update_velocities(self.dt)
 
-    # PBF2Solver 클래스 내부에 새로운 함수로 추가
-    @ti.kernel
-    def compare_dx_ratio(self):
-        eps = 1e-9
-
-        for p_i in ti.grouped(self.ps.x):
-            if not (self.ps.material[p_i] == self.ps.material_fluid and self.ps.density[p_i] > self.ps.density0[p_i]):
-                continue
-
-            aii_geo = eps
-            J_ii = ti.math.vec3(0.0)
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                grad_ij = self.ps.fluid_neighbors_values[p_i, j]
-                J_ij = self.ps.m[p_j] * grad_ij
-                if self.ps.material[p_j] == self.ps.material_fluid:
-                    aii_geo += J_ij.dot(J_ij) / self.ps.m[p_j]
-                J_ii -= J_ij
-            aii_geo += J_ii.dot(J_ii) / self.ps.m[p_i]
-
-            c_dens = self.ps.density[p_i] - self.ps.density0[p_i]
-            lambda_dens = c_dens / aii_geo
-            m_i = self.ps.m[p_i]
-            rho_i = self.ps.density[p_i]
-            rho_0 = self.ps.density0[p_i]
-            c_vol = m_i * (1.0 / rho_i - 1.0 / rho_0)
-            Dii = -m_i / (rho_0**2)
-            denominator_vol = Dii**2 * aii_geo
-            lambda_vol = 0.0
-            if denominator_vol > eps:
-                lambda_vol = -c_vol / denominator_vol
-            term_to_compare = -Dii * lambda_vol
-
-            # --- 비율 계산 및 누적 ---
-            ratio = 0.0
-            # lambda_dens가 0에 가까우면 비율 계산이 무의미하므로 건너뛰기
-            if abs(lambda_dens) > eps:
-                ratio = term_to_compare / lambda_dens
-
-            # atomic 연산을 사용하여 여러 스레드가 안전하게 값을 더하도록 함
-            ti.atomic_add(self.total_ratio[None], ratio)
-            ti.atomic_add(self.active_particle_count[None], 1.0)
 
 
-    def run_comparison_test(self):
-        self.total_ratio[None] = 0.0
-        self.active_particle_count[None] = 0.0
-
-        self.compute_density()
-        self.compare_dx_ratio()
-
-        # 4. 최종 평균 비율 계산
-        count = self.active_particle_count[None]
-        if count > 0:
-            average_ratio = self.total_ratio[None] / count
-            print("======================================================")
-            print(f"DX Ratio Test Result (based on {int(count)} active particles):")
-            print(f"Average ratio of (-Dii*lambda_vol) / (lambda_dens) = {average_ratio:.6f}")
-            print("======================================================")
-        else:
-            print("DX Ratio Test: No active particles found.")
-
-    def divergence_solve(self):
+    def divergence_free_solve(self):
         self.enforce_boundary_3D(self.ps.material_fluid)
         self.ps.initialize_particle_system()
         self.ps.search_neighbours(self.ps.x)
@@ -987,7 +936,7 @@ class PBF2Solver(SPHBase):
             self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
 
             # if self.active_set:
-            coef_wise_mul(Jv, Jv, self.Wii)
+            coef_wise_mul(Jv, Jv, self.W)
 
             # err = self.measure_error2(self.r_jacobi)
             # if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
@@ -1018,11 +967,12 @@ class PBF2Solver(SPHBase):
             print(f"use smaller time step: {self.dt}")
 
         self.compute_non_pressure_forces()
-        self.advect_velocity(self.dt)
-        self.constant_density_solve_PBF()
 
-        if self.divergence_free_solve:
-            self.divergence_solve()
-        # else:
-        error = self.measure_divergence(self.ps.v, self.dt)
+        self.advect_velocity(self.dt)
+        self.constant_density_solve()
+
+        if self.enable_DF:
+            self.divergence_free_solve()
+
+        error = self.measure_divergence(self.ps.v)
         self.dt = dt_original  # Reset dt to original value after substep
