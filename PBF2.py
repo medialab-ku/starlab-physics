@@ -12,7 +12,7 @@ class PBF2Solver(SPHBase):
         super().__init__(particle_system)
 
 
-        self.surface_tension = 0.001
+        self.surface_tension = 0.01
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
         self.nablaWij = self.cubic_kernel_derivative
@@ -58,6 +58,7 @@ class PBF2Solver(SPHBase):
 
         self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.r_jacobi = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.test = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Hii     = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.Ap      = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -79,7 +80,7 @@ class PBF2Solver(SPHBase):
         self.total_ratio = ti.field(dtype=float, shape=())
         self.active_particle_count = ti.field(dtype=float, shape=())
 
-        self.test = 0
+
 
 
     # @ti.kernel
@@ -743,7 +744,8 @@ class PBF2Solver(SPHBase):
         # self.p.copy_from(self.c)
         # max(self.p)
 
-        self.update_active_set(self.r_jacobi)
+        coef_wise_div(self.test, self.r_jacobi, self.ps.density0)
+        self.update_active_set(self.test, 0.1)
         self.update_coeff()
         self.compute_J_tr_x(self.pressure_boundary, self.grad, self.k)
         self.compute_gradient(self.grad)
@@ -783,14 +785,16 @@ class PBF2Solver(SPHBase):
                 rz_old = rz_new
 
     @ti.kernel
-    def update_active_set(self, value: ti.template()):
+    def update_active_set(self, value: ti.template(), eps: float):
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            if value[p_i] >= 0.0:
+            if value[p_i] >= eps:
                 self.Wii[p_i] = 1.0
+            # elif 0.0 < value[p_i] < eps:
+            #     self.Wii[p_i] = (1.0 / eps) * value[p_i]
             else:
                 self.Wii[p_i] = 0.0
 
@@ -822,11 +826,21 @@ class PBF2Solver(SPHBase):
     def ProjectedJacobian(self):
 
         self.p.fill(0.0)
-        self.dx.fill(0.0)
+        self.dx.copy_from(self.s)
         iter = 0
+
+        if self.active_set:
+            max(self.c)
+
         for _ in range(self.max_iteration_opt):
 
+            self.p.fill(0.0)
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
+
+            # if self.active_set:
+            #     coef_wise_mul(self.Jx, self.Jx, self.Wii)
+
+            # self.Jx.fill(0.0)
             add(self.r_jacobi, self.Jx, 1.0, self.c)
             # err = self.measure_error2(self.r_jacobi)
             # if (err < tol and iter > 2)  or iter == self.max_iteration_opt:
@@ -835,15 +849,19 @@ class PBF2Solver(SPHBase):
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
-            max(self.p)
 
-            if self.gauss_newton_pcg:
-                self.PCG()
-            #
-            else:
-                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-                self.compute_inv_M_x(self.tmp, self.tmp)
-                add(self.dx, self.s, -1.0, self.tmp)
+            # if not self.active_set:
+            max(self.p)
+            # else:
+            #     coef_wise_mul(self.p, self.p, self.Wii)
+
+            # if self.gauss_newton_pcg:
+            #     self.PCG()
+            # #
+            # else:
+            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
+            self.compute_inv_M_x(self.tmp, self.tmp)
+            add(self.dx, self.dx, -1.0, self.tmp)
 
             iter += 1
 
@@ -870,7 +888,9 @@ class PBF2Solver(SPHBase):
         self.compute_density(self.pressure_boundary)
         self.compute_constraint(self.pressure_boundary, self.volume_constraint)
         self.compute_Aii(self.pressure_boundary, self.volume_constraint)
-        # self.update_active_set()
+
+        if self.active_set:
+            self.update_active_set(self.c, 0.0)
 
         # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
@@ -945,6 +965,44 @@ class PBF2Solver(SPHBase):
         else:
             print("DX Ratio Test: No active particles found.")
 
+    def divergence_solve(self):
+        self.enforce_boundary_3D(self.ps.material_fluid)
+        self.ps.initialize_particle_system()
+        self.ps.search_neighbours(self.ps.x)
+        self.compute_density(self.pressure_boundary)
+        self.compute_constraint(self.pressure_boundary, False)
+        self.compute_Aii(self.pressure_boundary, False)
+
+        self.update_active_set(self.c, 0.001)
+
+        tol = pow(10, -self.tol)
+        self.v_tmp.copy_from(self.ps.v)
+        dv = self.dx
+        Jv = self.Jx
+        iter = 0
+
+        self.p.fill(0.0)
+        for _ in range(self.max_iteration_opt):
+
+            self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
+
+            # if self.active_set:
+            coef_wise_mul(Jv, Jv, self.Wii)
+
+            # err = self.measure_error2(self.r_jacobi)
+            # if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
+            #     print(f"DF iter: {iter}, err: {err}")
+            #     break
+
+            coef_wise_op(self.dp, Jv, self.Aii, 1)
+            add(self.p, self.p, 1.0, self.dp)
+            max(self.p)
+
+            self.compute_J_tr_x(self.pressure_boundary, dv, self.p)
+            coef_wise_op(dv, dv, self.ps.m, 1)
+            add(self.ps.v, self.ps.v, -1.0, dv)
+            iter += 1
+
     def substep(self):
 
         self.ps.initialize_particle_system()
@@ -964,47 +1022,7 @@ class PBF2Solver(SPHBase):
         self.constant_density_solve_PBF()
 
         if self.divergence_free_solve:
-            # use density constraint
-            # v_n+1 = argmin_v 1/2||v - v_tmp||^2_M s.t. Jv <= 0
-
-            self.enforce_boundary_3D(self.ps.material_fluid)
-            self.ps.initialize_particle_system()
-            self.ps.search_neighbours(self.ps.x)
-            self.compute_density(self.pressure_boundary)
-            self.compute_constraint(self.pressure_boundary, False)
-            self.compute_Aii(self.pressure_boundary,False)
-
-            self.update_active_set(self.c)
-
-            tol = pow(10, -self.tol)
-            self.v_tmp.copy_from(self.ps.v)
-            dv = self.dx
-            Jv = self.Jx
-            iter = 0
-
-            self.p.fill(0.0)
-            for _ in range(self.max_iteration_opt):
-
-                self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
-
-                if self.active_set:
-                    coef_wise_mul(Jv, Jv, self.Wii)
-
-                # err = self.measure_error2(self.r_jacobi)
-                # if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
-                #     print(f"DF iter: {iter}, err: {err}")
-                #     break
-
-                coef_wise_op(self.dp, Jv, self.Aii, 1)
-                add(self.p, self.p, 1.0, self.dp)
-                max(self.p)
-
-                self.compute_J_tr_x(self.pressure_boundary, dv, self.p)
-                coef_wise_op(dv, dv, self.ps.m, 1)
-                add(self.ps.v, self.ps.v, -1.0, dv)
-                iter += 1
-
-            # add(self.ps.x, self.ps.x_old, self.dt, self.ps.v)
+            self.divergence_solve()
         # else:
-        # error = self.measure_divergence(self.ps.v, self.dt)
+        error = self.measure_divergence(self.ps.v, self.dt)
         self.dt = dt_original  # Reset dt to original value after substep
