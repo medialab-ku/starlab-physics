@@ -920,8 +920,6 @@ class PBF2Solver(SPHBase):
         #v_n+1_tmp
         self.update_velocities(self.dt)
 
-
-
     def divergence_free_solve(self):
         self.enforce_boundary_3D(self.ps.material_fluid)
         self.ps.initialize_particle_system()
@@ -930,37 +928,27 @@ class PBF2Solver(SPHBase):
         self.compute_constraint(self.pressure_boundary, False)
         self.compute_Aii(self.pressure_boundary, False)
 
-        self.update_active_set(self.c, 0.001)
-
         tol = pow(10, -self.tol)
 
+
         self.v_tmp.copy_from(self.ps.v)
-        dv = self.dx
         Jv = self.Jx
-        self.compute_J_x(self.pressure_boundary, Jv, self.ps.v_tmp)
-        self.compute_f_derivative(self.W, Jv, self.eps)
         iter = 0
 
+        self.compute_J_x(self.pressure_boundary, Jv, self.v_tmp)
+        self.compute_f_derivative(self.W, self.c, self.eps)
         self.p.fill(0.0)
         for _ in range(self.max_iteration_opt):
-
             self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
-
-            # if self.active_set:
-            coef_wise_mul(Jv, Jv, self.W)
-
-            # err = self.measure_error2(self.r_jacobi)
-            # if (err < 1.0 and iter > 2) or iter == self.max_iteration_opt:
-            #     print(f"DF iter: {iter}, err: {err}")
-            #     break
-
+            coef_wise_op(Jv, Jv, self.W, 0)
             coef_wise_op(self.dp, Jv, self.Aii, 1)
-            add(self.p, self.p, 1.0, self.dp)
-            max(self.p)
+            add(self.p, self.p, self.omega, self.dp)
 
-            self.compute_J_tr_x(self.pressure_boundary, dv, self.p)
-            coef_wise_op(dv, dv, self.ps.m, 1)
-            add(self.ps.v, self.ps.v, -1.0, dv)
+            coef_wise_op(self.p, self.p, self.W, 0)
+            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
+            self.compute_inv_M_x(self.tmp, self.tmp)
+            add(self.ps.v, self.v_tmp, -1.0, self.tmp)
+
             iter += 1
 
     def substep(self):
