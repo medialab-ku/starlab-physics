@@ -150,14 +150,12 @@ if __name__ == "__main__":
 
                 solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
                 # solver.test = w.slider_int("opt type", solver.test, 0, 2)
-                solver.volume_constraint = w.checkbox("volume constraint",   solver.volume_constraint)
-
-
-                solver.gauss_newton_pcg = w.checkbox("GN-PCG",  solver.gauss_newton_pcg)
-                solver.smooth_max = w.checkbox("smooth max", solver.smooth_max)
-
-                if solver.smooth_max:
-                    solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
+                # solver.volume_constraint = w.checkbox("volume constraint",   solver.volume_constraint)
+                solver.gauss_newton_pcg = w.checkbox("PCG",  solver.gauss_newton_pcg)
+                # solver.smooth_max = w.checkbox("smooth max", solver.smooth_max)
+                #
+                # if solver.smooth_max:
+                #     solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
 
 
             export_ply = w.checkbox("export", export_ply)

@@ -687,6 +687,38 @@ class PBF2Solver(SPHBase):
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     Ax[p_j] -= Jx[p_i] * val_ij
 
+    @ti.kernel
+    def compute_Ax2(self, Ax: ti.template(), Jx: ti.template(), x: ti.template()):
+
+        for p_i in ti.grouped(x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            Ax[p_i] = 0.0
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Jx[p_i] += (x[p_i] - x[p_j]).dot(val_ij)
+                else:
+                    Jx[p_i] += x[p_i].dot(val_ij)
+
+            Jx[p_i] *= self.W[p_i] / self.Aii[p_i]
+
+
+        for p_i in ti.grouped(x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                Ax[p_i] += Jx[p_i] * val_ij
+
+                if self.ps.material[p_j] == self.ps.material_fluid:
+                    Ax[p_j] -= Jx[p_i] * val_ij
+
 
     @ti.kernel
     def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
@@ -733,7 +765,6 @@ class PBF2Solver(SPHBase):
     def PCG(self):
 
         dx = self.dx
-        # add(dx, self.ps.y, -1.0, self.ps.x)
         dx.fill(0.0)
         z = self.z_pcg
         r = self.r_pcg
@@ -742,9 +773,6 @@ class PBF2Solver(SPHBase):
         b = self.b_pcg
         Jp = self.dp
 
-        # self.grad.fill(0.0)
-        # self.p.copy_from(self.c)
-        # max(self.p)
 
         coef_wise_div(self.test, self.r_jacobi, self.ps.density0)
         self.update_active_set(self.test, 0.1)
@@ -757,10 +785,9 @@ class PBF2Solver(SPHBase):
         self.apply_precondition(z, self.Hii, r)
 
         rz_old = self.dot(r, z)
-        # print(rz_old)
+
         if rz_old > 1e-12:
-            # print(rz_old)
-            # 3. p_0 = z_0  (initial search direction)
+
             p.copy_from(z)
             pcg_iter = 1
             for _ in range(100):
@@ -924,7 +951,53 @@ class PBF2Solver(SPHBase):
         # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
 
-        self.ProjectedJacobian()
+        if self.gauss_newton_pcg:
+
+            dx = self.dx
+            dx.fill(0.0)
+            z = self.z_pcg
+            r = self.r_pcg
+            p = self.p_pcg
+            Ap = self.Ap
+            b = self.b_pcg
+            Jp = self.dp
+
+            b.copy_from(self.grad)
+            r.copy_from(b)
+            self.apply_precondition(z, self.Hii, r)
+
+            rz_old = self.dot(r, z)
+
+            if rz_old > 1e-12:
+
+                p.copy_from(z)
+                pcg_iter = 1
+                for _ in range(100):
+
+                    self.compute_Ax(Ap, Jp, p)
+                    pAp = self.dot(p, Ap)
+                    if pAp < 0.0:
+                        print("Warning: non-positive definite matrix!")
+                    # #     break
+                    alpha = rz_old / pAp
+                    self.add(dx, dx, alpha, p)
+                    # print("test")
+                    self.add(r, r, -alpha, Ap)
+                    err = self.dot(r, r)
+                    self.apply_precondition(z, self.Hii, r)
+
+                    rz_new = dot(r, z)
+                    if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
+                        print(f"PCG iter: , {pcg_iter}: error: {err}")
+                        break
+                    pcg_iter += 1
+                    beta = rz_new / rz_old
+                    self.add(p, z, beta, p)
+                    rz_old = rz_new
+
+
+        else:
+            self.ProjectedJacobian()
 
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
