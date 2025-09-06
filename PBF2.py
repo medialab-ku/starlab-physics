@@ -809,7 +809,7 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            avg_error += ti.max(x[p_i], 0.0) / self.ps.density0[p_i]
+            avg_error += x[p_i] / self.ps.density0[p_i]
 
         return avg_error / self.ps.fluid_particle_num
 
@@ -840,7 +840,7 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_f_derivative(self, ret: ti.template(), x: ti.template(), eps: float):
 
-        a = 0
+        # a = 0
         for p_i in ti.grouped(self.ps.x):
             ret[p_i] = 0.0
 
@@ -849,12 +849,12 @@ class PBF2Solver(SPHBase):
             #
             if x[p_i] >= 0.0:
                 ret[p_i] = 1.0
-                a += 1
+                # a += 1
             # else:
                 # a += 1
 
-        ratio = a / self.ps.fluid_particle_num
-        print(ratio)
+        # ratio = a / self.ps.fluid_particle_num
+        # print(ratio)
 
 
 
@@ -866,15 +866,27 @@ class PBF2Solver(SPHBase):
 
         iter = 0
 
+        tol = pow(10, -self.tol)
         self.compute_f(self.f, self.c, self.eps)
         # max(self.c)
         self.compute_f_derivative(self.W, self.c, self.eps)
+        print("CD start")
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
             coef_wise_op(self.Jx, self.Jx, self.W, 0)
 
             add(self.r_jacobi, self.Jx, 1.0, self.f)
+
+            err = self.measure_error2(self.r_jacobi)
+            print(err)
+            if (err < tol and iter > 2) or iter == self.max_iteration_opt:
+
+                if self.print_info:
+                    print(f"CD iter: {iter}, err: {err}")
+
+                break
+
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
@@ -935,12 +947,24 @@ class PBF2Solver(SPHBase):
         Jv = self.Jx
         iter = 0
 
+        print("-------------")
         self.compute_J_x(self.pressure_boundary, Jv, self.v_tmp)
         self.compute_f_derivative(self.W, self.c, self.eps)
         self.p.fill(0.0)
         for _ in range(self.max_iteration_opt):
             self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
             coef_wise_op(Jv, Jv, self.W, 0)
+
+            err = self.measure_error2(Jv)
+
+            # print(err)
+            if (err < tol and iter > 2) or iter == self.max_iteration_opt:
+
+                if self.print_info:
+                    print(f"DF iter: {iter}, err: {err}")
+
+                break
+
             coef_wise_op(self.dp, Jv, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
 
