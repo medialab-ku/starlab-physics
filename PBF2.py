@@ -840,6 +840,7 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_f_derivative(self, ret: ti.template(), x: ti.template(), eps: float):
 
+        a = 0
         for p_i in ti.grouped(self.ps.x):
             ret[p_i] = 0.0
 
@@ -848,6 +849,14 @@ class PBF2Solver(SPHBase):
             #
             if x[p_i] >= 0.0:
                 ret[p_i] = 1.0
+                a += 1
+            # else:
+                # a += 1
+
+        ratio = a / self.ps.fluid_particle_num
+        print(ratio)
+
+
 
 
     def ProjectedJacobian(self):
@@ -855,18 +864,17 @@ class PBF2Solver(SPHBase):
         self.p.fill(0.0)
         self.dx.copy_from(self.s)
 
-
         iter = 0
 
-        # self.compute_f(self.f, self.c, self.eps)
-        max(self.c)
+        self.compute_f(self.f, self.c, self.eps)
+        # max(self.c)
         self.compute_f_derivative(self.W, self.c, self.eps)
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
             coef_wise_op(self.Jx, self.Jx, self.W, 0)
 
-            add(self.r_jacobi, self.Jx, 1.0, self.c)
+            add(self.r_jacobi, self.Jx, 1.0, self.f)
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
@@ -925,9 +933,12 @@ class PBF2Solver(SPHBase):
         self.update_active_set(self.c, 0.001)
 
         tol = pow(10, -self.tol)
+
         self.v_tmp.copy_from(self.ps.v)
         dv = self.dx
         Jv = self.Jx
+        self.compute_J_x(self.pressure_boundary, Jv, self.ps.v_tmp)
+        self.compute_f_derivative(self.W, Jv, self.eps)
         iter = 0
 
         self.p.fill(0.0)
