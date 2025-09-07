@@ -76,6 +76,9 @@ def coef_wise_mul(ret: ti.template(), x: ti.template(), y: ti.template()):
 def coef_wise_div(ret: ti.template(), x: ti.template(), y: ti.template()):
 
     for i in x:
+
+        if y[i] < 1e-6:
+            y[i] =  1e-6
         ret[i] = x[i] / y[i]
     
 @ti.kernel

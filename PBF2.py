@@ -62,12 +62,12 @@ class PBF2Solver(SPHBase):
         self.r_jacobi = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.test = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
-        self.Hii     = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
-        self.Ap      = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.b_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.z_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.r_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.p_pcg   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.Hii   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
+        self.Ap    = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.b_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.z_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.r_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.p_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         # print("method: PBF2")
@@ -296,7 +296,7 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def compute_Aii(self, pressure_boundary: bool, volume_constraint: bool):
 
-        eps = 1e-6
+        eps = 1e-3
         I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
             self.Dii[p_i] = 0.0
@@ -883,10 +883,7 @@ class PBF2Solver(SPHBase):
         # ratio = a / self.ps.fluid_particle_num
         # print(ratio)
 
-
-
-
-    def ProjectedJacobian(self):
+    def Jacobi(self):
 
         self.p.fill(0.0)
         self.dx.copy_from(self.s)
@@ -950,43 +947,62 @@ class PBF2Solver(SPHBase):
 
         # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
-
+        self.compute_f(self.f, self.c, self.eps)
+        # max(self.c)
+        self.compute_f_derivative(self.W, self.c, self.eps)
         if self.gauss_newton_pcg:
 
-            dx = self.dx
-            dx.fill(0.0)
+            x = self.p
+            x.fill(0.0)
             z = self.z_pcg
             r = self.r_pcg
             p = self.p_pcg
             Ap = self.Ap
             b = self.b_pcg
-            Jp = self.dp
 
-            b.copy_from(self.grad)
+            self.compute_J_x(self.pressure_boundary, self.Jx, self.s)
+            coef_wise_mul(self.Jx, self.Jx, self.W)
+            self.add(self.b, self.f, 1.0, self.Jx)
+
+            # b.copy_from(self.grad)
             r.copy_from(b)
-            self.apply_precondition(z, self.Hii, r)
+            # print(dot2(r, r))
+            # self.Aii.fill(1e-3)
 
-            rz_old = self.dot(r, z)
+            # print(dot2(self.Aii, self.Aii))
+            coef_wise_div(z, r, self.Aii)
 
+            print(dot2(z, z))
+            coef_wise_mul(z, z, self.W)
+
+            rz_old = dot2(r, z)
+            pcg_iter = 0
+            # print(rz_old)
             if rz_old > 1e-12:
-
                 p.copy_from(z)
                 pcg_iter = 1
                 for _ in range(100):
 
-                    self.compute_Ax(Ap, Jp, p)
-                    pAp = self.dot(p, Ap)
+                    # mat-free Ap
+                    coef_wise_mul(p, p, self.W)
+                    self.compute_J_tr_x(self.pressure_boundary, self.tmp, p)
+                    self.compute_inv_M_x(self.tmp, self.tmp)
+                    self.compute_J_x(self.pressure_boundary, Ap, self.tmp)
+                    coef_wise_mul(Ap, Ap, self.W)
+
+                    pAp = dot2(p, Ap)
                     if pAp < 0.0:
                         print("Warning: non-positive definite matrix!")
                     # #     break
                     alpha = rz_old / pAp
-                    self.add(dx, dx, alpha, p)
+                    self.add(x, x, alpha, p)
                     # print("test")
                     self.add(r, r, -alpha, Ap)
-                    err = self.dot(r, r)
-                    self.apply_precondition(z, self.Hii, r)
+                    err = dot2(r, r)
+                    coef_wise_div(z, r,  self.Aii)
+                    coef_wise_mul(z, z, self.W)
 
-                    rz_new = dot(r, z)
+                    rz_new = dot2(r, z)
                     if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
                         print(f"PCG iter: , {pcg_iter}: error: {err}")
                         break
@@ -995,9 +1011,12 @@ class PBF2Solver(SPHBase):
                     self.add(p, z, beta, p)
                     rz_old = rz_new
 
-
+            print(f"PCG iter: {pcg_iter}")
+            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
+            self.compute_inv_M_x(self.tmp, self.tmp)
+            add(self.dx, self.s, -1.0, self.tmp)
         else:
-            self.ProjectedJacobian()
+            self.Jacobi()
 
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
