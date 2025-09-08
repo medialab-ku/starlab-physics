@@ -142,6 +142,7 @@ if __name__ == "__main__":
             if method == 2:
                 solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
                 solver.max_iteration_opt = w.slider_int("max opt. iter", solver.max_iteration_opt, 1, 1000)
+                solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
                 # solver.method = w.slider_int("method type", solver.method, 0, 2)
                 solver.print_info = w.checkbox("print", solver.print_info)
 

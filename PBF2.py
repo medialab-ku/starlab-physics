@@ -39,7 +39,7 @@ class PBF2Solver(SPHBase):
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.dx_prev = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.a = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.error = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_proj = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.s = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -885,43 +885,61 @@ class PBF2Solver(SPHBase):
 
     def Jacobi(self):
 
-        self.p.fill(0.0)
-        self.dx.copy_from(self.s)
+        p = self.p
+        d = self.dx
+        d.copy_from(self.s)
 
-        iter = 0
+        for _ in range(self.max_iteration_pcg):
+            Jd = self.Jx
+            f = self.f
+            c = self.c
+            iter = 0
+            tol = pow(10, -self.tol)
 
-        tol = pow(10, -self.tol)
-        self.compute_f(self.f, self.c, self.eps)
-        # max(self.c)
-        self.compute_f_derivative(self.W, self.c, self.eps)
-        print("CD start")
-        for _ in range(self.max_iteration_opt):
+            # t = c + Jd
+            # f = max(t, 0.0)
+            self.compute_J_x(self.pressure_boundary, Jd, d)
+            self.add(f, Jd, 1.0, c)
+            #
+            # # df/dt
+            self.compute_f_derivative(self.W, self.f, self.eps)
+            max(f)
 
-            self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
-            coef_wise_op(self.Jx, self.Jx, self.W, 0)
+            Ja = self.Jx
+            a  = self.a
+            a.fill(0.0)
+            p.fill(0.0)
+            for _ in range(self.max_iteration_opt):
 
-            add(self.r_jacobi, self.Jx, 1.0, self.f)
+                self.compute_J_x(self.pressure_boundary, Ja, a)
+                coef_wise_mul(Ja, Ja, self.W)
+                add(self.r_jacobi, f, 1.0, Ja)
 
-            err = self.measure_error2(self.r_jacobi)
-            print(err)
-            if (err < tol and iter > 2) or iter == self.max_iteration_opt:
+                # err = self.measure_error2(self.r_jacobi)
+                # print(err)
+                # if (err < tol and iter > 2) or iter == self.max_iteration_opt:
+                #
+                #     if self.print_info:
+                #         print(f"CD iter: {iter}, err: {err}")
+                #
+                #     break
 
-                if self.print_info:
-                    print(f"CD iter: {iter}, err: {err}")
+                coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
+                add(self.p, self.p, self.omega, self.dp)
 
-                break
+                # # a = -M^-1 * J^tr *  df/dt * p
+                coef_wise_op(self.p, self.p, self.W, 0)
+                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
+                self.compute_inv_M_x(self.tmp, self.tmp)
 
+                self.a.fill(0.0)
+                add(a, a, -1.0, self.tmp)
 
-            coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
-            add(self.p, self.p, self.omega, self.dp)
+                # iter += 1
 
-            coef_wise_op(self.p, self.p, self.W, 0)
-            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-            self.compute_inv_M_x(self.tmp, self.tmp)
-            add(self.dx, self.s, -1.0, self.tmp)
+            add(d, d, 1.0, a)
 
-            iter += 1
-
+        # add(self.x, self.x, 1.0, d)
 
     @ti.kernel
     def compute_constraint(self,  pressure_boundary: bool, volume_constraint: bool):
@@ -946,10 +964,10 @@ class PBF2Solver(SPHBase):
         self.compute_Aii(self.pressure_boundary, self.volume_constraint)
 
         # self.compute_pressure_pbf()
-        add(self.s, self.ps.y, -1.0, self.ps.x)
-        self.compute_f(self.f, self.c, self.eps)
-        # max(self.c)
-        self.compute_f_derivative(self.W, self.c, self.eps)
+        # add(self.s, self.ps.y, -1.0, self.ps.x)
+        # self.compute_f(self.f, self.c, self.eps)
+        # # max(self.c)
+        # self.compute_f_derivative(self.W, self.c, self.eps)
         if self.gauss_newton_pcg:
 
             x = self.p
