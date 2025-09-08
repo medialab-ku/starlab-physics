@@ -82,20 +82,8 @@ class PBF2Solver(SPHBase):
         self.total_ratio = ti.field(dtype=float, shape=())
         self.active_particle_count = ti.field(dtype=float, shape=())
 
-
-
-
-    # @ti.kernel
-    # def initialize_boundary_particles(self):
-    #     for p_i in ti.grouped(self.x):
-    #         sum_Wij = 0.0
-    #         for j in range(self.ps.fluid_neighbors_num[p_i]):
-    #             p_j = self.ps.fluid_neighbors[p_i, j]
-    #             if self.ps.material[p_i] == self.ps.material_solid or self.ps.material[p_j] == self.ps.material_solid:
-    #                 continue
-    #             sum_Wij += self.Wij((self.ps.x[p_i] - self.ps.x[p_j]).norm())
-
-    #         self.ps.m[p_i] = self.ps.density0[p_i] / sum_Wij
+        self.use_max = False
+        self.DF_tol = 0.1
 
     @ti.kernel
     def precompute_values(self):
@@ -836,7 +824,7 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            avg_error += x[p_i] / self.ps.density0[p_i]
+            avg_error += ti.max(x[p_i], 0.0) / self.ps.density0[p_i]
 
         return avg_error / self.ps.fluid_particle_num
 
@@ -891,37 +879,47 @@ class PBF2Solver(SPHBase):
         iter = 0
 
         tol = pow(10, -self.tol)
-        self.compute_f(self.f, self.c, self.eps)
-        # max(self.c)
-        self.compute_f_derivative(self.W, self.c, self.eps)
+
+        if not self.use_max:
+            self.compute_f(self.f, self.c, self.eps)
+            self.compute_f_derivative(self.W, self.c, self.eps)
+
         print("CD start")
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
-            coef_wise_op(self.Jx, self.Jx, self.W, 0)
 
-            add(self.r_jacobi, self.Jx, 1.0, self.f)
+            if self.use_max:
+                add(self.r_jacobi, self.Jx, 1.0, self.f)
+
+            else:
+                coef_wise_op(self.Jx, self.Jx, self.W, 0)
+                add(self.r_jacobi, self.Jx, 1.0, self.f)
 
             err = self.measure_error2(self.r_jacobi)
-            print(err)
-            if (err < tol and iter > 2) or iter == self.max_iteration_opt:
-
-                if self.print_info:
-                    print(f"CD iter: {iter}, err: {err}")
-
+            # print(err)
+            if (err < tol and iter > 2) or iter >= self.max_iteration_opt:
+                # if self.print_info:
+                #     print(f"CD iter: {iter}, err: {err}")
                 break
-
 
             coef_wise_op(self.dp, self.r_jacobi, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
 
-            coef_wise_op(self.p, self.p, self.W, 0)
+            if self.use_max:
+                max(self.p)
+            else:
+                coef_wise_op(self.p, self.p, self.W, 0)
+
+
             self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
             self.compute_inv_M_x(self.tmp, self.tmp)
             add(self.dx, self.s, -1.0, self.tmp)
 
             iter += 1
 
+        if self.print_info:
+            print(f"CD iter: {iter}")
 
     @ti.kernel
     def compute_constraint(self,  pressure_boundary: bool, volume_constraint: bool):
@@ -1032,8 +1030,6 @@ class PBF2Solver(SPHBase):
         self.compute_constraint(self.pressure_boundary, False)
         self.compute_Aii(self.pressure_boundary, False)
 
-        tol = pow(10, -self.tol)
-
 
         self.v_tmp.copy_from(self.ps.v)
         Jv = self.Jx
@@ -1044,14 +1040,12 @@ class PBF2Solver(SPHBase):
         self.compute_f_derivative(self.W, self.c, self.eps)
         self.p.fill(0.0)
         for _ in range(self.max_iteration_opt):
+
+            self.p.fill(0.0)
             self.compute_J_x(self.pressure_boundary, Jv, self.ps.v)
             coef_wise_op(Jv, Jv, self.W, 0)
-
             err = self.measure_error2(Jv)
-
-            # print(err)
-            if (err < tol and iter > 2) or iter == self.max_iteration_opt:
-
+            if (err < self.DF_tol and iter > 2) or iter == self.max_iteration_opt:
                 if self.print_info:
                     print(f"DF iter: {iter}, err: {err}")
 
@@ -1059,11 +1053,13 @@ class PBF2Solver(SPHBase):
 
             coef_wise_op(self.dp, Jv, self.Aii, 1)
             add(self.p, self.p, self.omega, self.dp)
-
             coef_wise_op(self.p, self.p, self.W, 0)
+            max(self.p)
+
+
             self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
             self.compute_inv_M_x(self.tmp, self.tmp)
-            add(self.ps.v, self.v_tmp, -1.0, self.tmp)
+            add(self.ps.v, self.ps.v, -1.0, self.tmp)
 
             iter += 1
 

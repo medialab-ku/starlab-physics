@@ -152,7 +152,7 @@ if __name__ == "__main__":
                 # solver.test = w.slider_int("opt type", solver.test, 0, 2)
                 # solver.volume_constraint = w.checkbox("volume constraint",   solver.volume_constraint)
                 solver.gauss_newton_pcg = w.checkbox("PCG",  solver.gauss_newton_pcg)
-                # solver.smooth_max = w.checkbox("smooth max", solver.smooth_max)
+                solver.use_max = w.checkbox("use max", solver.use_max)
                 #
                 # if solver.smooth_max:
                 #     solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
