@@ -106,6 +106,12 @@ class PBF2Solver(SPHBase):
         self.invCr_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.invCr_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
+        self.B_invCr_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.B_invCr_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.invC_Bp_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.invC_Bp_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
     @ti.kernel
     def precompute_values(self):
 
@@ -970,9 +976,6 @@ class PBF2Solver(SPHBase):
             self.d_v[p_i] = self.ps.m[p_i] * self.ps.v_adv[p_i]
             self.d_l[p_i] = self.ps.density0[p_i] - self.ps.density[p_i]
 
-    # @ti.kernel
-    # def compute_B_y(self, ret_v: ti.template(), ret_l: ti.template(), y_v: ti.template(), y_l: ti.template()):
-
 
     def constant_density_solve(self):
 
@@ -990,6 +993,10 @@ class PBF2Solver(SPHBase):
 
         if self.gauss_newton_pcg:
 
+            #[M  J^T] [  v   ]   [M v_adv]
+            #[J    0] [lambda]   [   -c  ]
+            #    B       y     =     d
+
             self.compute_d()
             # r0 = d - By0
             self.r_v.fill(0.0)
@@ -999,13 +1006,18 @@ class PBF2Solver(SPHBase):
             coef_wise_div(self.p_v, self.r_v, self.ps.m)
             coef_wise_div(self.p_l, self.r_l, self.Aii)
 
-
             for _ in range(self.max_iteration_opt):
 
                 # compute Bp_j
                 # compute C^-1r_j
+                coef_wise_mul(self.Bp_v, self.p_v, self.ps.m)
+                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p_l)
+                add(self.Bp_v, self.Bp_v, 1.0, self.tmp)
 
-                alpha = 0.0
+                #
+                numer = dot(self.B_invCr_v, self.invCr_v) + dot(self.B_invCr_v, self.invCr_v)
+                denom = dot(self.invC_Bp_v, self.Bp_v) + dot(self.invC_Bp_l, self.Bp_l)
+                alpha = numer / denom
 
                 # y += alpha * p_j
                 add(self.y_v, self.y_v, alpha, self.p_v)
@@ -1023,10 +1035,17 @@ class PBF2Solver(SPHBase):
                 add(self.r_v, self.r_v, -alpha, self.Bp_v)
                 add(self.r_l, self.r_l, -alpha, self.Bp_l)
 
-                is_changed = True
+                if alpha > 0:
+                    print("TODO")
+
+                is_changed = False
 
                 if is_changed:
-                    beta = 0.0
+
+                    denom = numer
+                    numer = dot(self.B_invCr_v, self.invCr_v) + dot(self.B_invCr_v, self.invCr_v)
+
+                    beta = numer / denom
                     # p = C^-1 r - beta * p
                     coef_wise_div(self.invCr_v, self.r_v, self.ps.m)
                     coef_wise_div(self.invCr_l, self.r_l, self.Aii)
