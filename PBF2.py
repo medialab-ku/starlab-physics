@@ -86,6 +86,26 @@ class PBF2Solver(SPHBase):
         self.use_max = False
         self.DF_tol = 0.1
 
+        self.d_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.d_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.y_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.y_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.p_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.p_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.Bp_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.Bp_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.By_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.By_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.r_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.r_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.invCr_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.invCr_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
     @ti.kernel
     def precompute_values(self):
 
@@ -936,6 +956,24 @@ class PBF2Solver(SPHBase):
             else:
                 self.c[p_i] =  self.ps.density0[p_i] *  (self.ps.density[p_i] / self.ps.density0[p_i] - 1.0)
 
+    @ti.kernel
+    def compute_d(self):
+
+        for p_i in ti.grouped(self.ps.x):
+
+            self.d_v[p_i] = ti.math.vec3(0.0)
+            self.d_l[p_i] = 0.0
+
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                continue
+
+            self.d_v[p_i] = self.ps.m[p_i] * self.ps.v_adv[p_i]
+            self.d_l[p_i] = self.ps.density0[p_i] - self.ps.density[p_i]
+
+    # @ti.kernel
+    # def compute_B_y(self, ret_v: ti.template(), ret_l: ti.template(), y_v: ti.template(), y_l: ti.template()):
+
+
     def constant_density_solve(self):
 
         self.ps.x_old.copy_from(self.ps.x)
@@ -952,81 +990,85 @@ class PBF2Solver(SPHBase):
 
         if self.gauss_newton_pcg:
 
-            # t = c + Jd^0, d^0 = s
-            # compute f(t)
-            self.dx.copy_from(self.s)
+            self.compute_d()
+            # r0 = d - By0
+            self.r_v.fill(0.0)
+            self.compute_J_x(self.pressure_boundary, self.Jx, self.ps.v_adv)
+            add(self.r_l, self.d_l, -1.0, self.Jx)
+            # p0 = C^-1r0
+            coef_wise_div(self.p_v, self.r_v, self.ps.m)
+            coef_wise_div(self.p_l, self.r_l, self.Aii)
+
+
             for _ in range(self.max_iteration_opt):
-                self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
-                add(self.f, self.Jx, 1.0, self.c)
-                self.compute_f_derivative(self.W, self.f, 0.01)
-                max(self.f)
 
-                # compute gradient J^t df/dt diag(A)^-1 f
-                coef_wise_div(self.f, self.f, self.Aii)
-                coef_wise_mul(self.f, self.f, self.W)
-                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.f)
+                # compute Bp_j
+                # compute C^-1r_j
 
-                if self.use_max:
-                    coef_wise_div(self.a, self.tmp, self.ps.m)
+                alpha = 0.0
+
+                # y += alpha * p_j
+                add(self.y_v, self.y_v, alpha, self.p_v)
+                add(self.y_l, self.y_l, alpha, self.p_l)
+
+                #Bp_v = Mp_v + J^t p_l
+                coef_wise_mul(self.Bp_v, self.p_v, self.ps.m)
+                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p_l)
+                add(self.Bp_v, self.Bp_v, 1.0, self.tmp)
+
+                #Bp_l = J p_v
+                self.compute_J_x(self.pressure_boundary, self.Bp_l, self.p_v)
+
+                # r -= alpha * Bp_j
+                add(self.r_v, self.r_v, -alpha, self.Bp_v)
+                add(self.r_l, self.r_l, -alpha, self.Bp_l)
+
+                is_changed = True
+
+                if is_changed:
+                    beta = 0.0
+                    # p = C^-1 r - beta * p
+                    coef_wise_div(self.invCr_v, self.r_v, self.ps.m)
+                    coef_wise_div(self.invCr_l, self.r_l, self.Aii)
+                    add(self.p_v, self.invCr_v, -beta, self.p_v)
+                    add(self.p_l, self.invCr_l, -beta, self.p_l)
+
+                    # Bp = B * p
+                    coef_wise_mul(self.Bp_v, self.p_v, self.ps.m)
+                    self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p_l)
+                    add(self.Bp_v, self.Bp_v, 1.0, self.tmp)
+                    self.compute_J_x(self.pressure_boundary, self.Bp_l, self.p_v)
                 else:
-                    self.apply_precondition(self.a, self.Hii, self.tmp)
+                    # r = d - By
+                    add(self.r_v, self.d_v, -1.0, self.By_v)
+                    add(self.r_l, self.d_l, -1.0, self.By_l)
 
-                add(self.dx, self.dx, -1.0, self.a)
+                    # By_v = My_v + J^t y_l
+                    coef_wise_mul(self.By_v, self.y_v, self.ps.m)
+                    self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.y_l)
+                    add(self.By_v, self.By_v, 1.0, self.tmp)
 
+                    # By_l = J y_v
+                    self.compute_J_x(self.pressure_boundary, self.By_l, self.y_v)
 
-            #
-            # # dx = self.dx
-            # # dx.fill(0.0)
-            # z = self.z_pcg
-            # r = self.r_pcg
-            # p = self.p_pcg
-            # Ap = self.Ap
-            # b = self.b_pcg
-            # Jp = self.dp
-            #
-            # # self.compute_gradient(self.grad)
-            # self.b_pcg.fill(0.0)
-            # add(self.b_pcg, self.b_pcg, -1.0, self.tmp)
-            # r.copy_from(self.b_pcg)
-            # self.apply_precondition(z, self.Hii, r)
+                    add(self.r_v, self.d_v, -1.0, self.By_v)
+                    add(self.r_l, self.d_l, -1.0, self.By_l)
 
-            # add(self.dx, self.dx, 1.0, z)
-            # # self.dx.copy_from(z)
-            #
-            # rz_old = self.dot(r, z)
+                # p = C^-1 r
+                coef_wise_div(self.p_v, self.r_v, self.ps.m)
+                coef_wise_div(self.p_l, self.r_l, self.Aii)
 
-            # if rz_old > 1e-12:
-            #
-            #     p.copy_from(z)
-            #     pcg_iter = 1
-            #     for _ in range(100):
-            #
-            #         self.compute_Ax(Ap, Jp, p)
-            #         pAp = self.dot(p, Ap)
-            #         if pAp < 0.0:
-            #             print("Warning: non-positive definite matrix!")
-            #         # #     break
-            #         alpha = rz_old / pAp
-            #         self.add(dx, dx, alpha, p)
-            #         # print("test")
-            #         self.add(r, r, -alpha, Ap)
-            #         err = self.dot(r, r)
-            #         self.apply_precondition(z, self.Hii, r)
-            #
-            #         rz_new = dot(r, z)
-            #         if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
-            #             print(f"PCG iter: , {pcg_iter}: error: {err}")
-            #             break
-            #         pcg_iter += 1
-            #         beta = rz_new / rz_old
-            #         self.add(p, z, beta, p)
-            #         rz_old = rz_new
+                # Bp = B * p
+                coef_wise_mul(self.Bp_v, self.p_v, self.ps.m)
+                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p_l)
+                add(self.Bp_v, self.Bp_v, 1.0, self.tmp)
+                self.compute_J_x(self.pressure_boundary, self.Bp_l, self.p_v)
 
         else:
             self.Jacobi()
 
         #x_n+1
-        add(self.ps.x, self.ps.x, 1.0, self.dx)
+        add(self.ps.x, self.ps.x, 1.0, self.ps.v)
 
         #v_n+1_tmp
         self.update_velocities(self.dt)
