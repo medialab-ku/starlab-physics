@@ -39,6 +39,7 @@ class PBF2Solver(SPHBase):
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.a = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_prev = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.error = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_proj = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -64,10 +65,10 @@ class PBF2Solver(SPHBase):
 
         self.Hii   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.Ap    = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.b_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.z_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.r_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.p_pcg = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.b_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.z_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.stats_iter = 0
         self.stats_pcg_iter = 0
         # print("method: PBF2")
@@ -308,9 +309,9 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            self.Hii[p_i] = self.ps.m[p_i] * I3x3
+            self.Hii[p_i] = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
-            denom_i = eps + self.Aii[p_i]
+            # denom_i = eps + self.Aii[p_i]
 
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
@@ -320,11 +321,10 @@ class PBF2Solver(SPHBase):
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
                 if self.ps.material[p_j] == self.ps.material_fluid:
-                    self.Hii[p_i] += J_ij.outer_product(J_ij) / denom_i
+                    self.Hii[p_i] += J_ij.outer_product(J_ij)
 
                 J_ii -= J_ij
-            self.Hii[p_i] += J_ii.outer_product(J_ii) / denom_i
-
+            self.Hii[p_i] += J_ii.outer_product(J_ii)
     @ti.kernel
     def update_velocities(self, dt: float):
 
@@ -634,7 +634,6 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            Dii = 1.0 / self.Aii[p_i]
             grad[p_i] = self.ps.m[p_i] * self.s[p_i] - grad[p_i]
 
 
@@ -711,13 +710,15 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
 
-        # I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
+
+            dx[p_i] = ti.math.vec3(0.0)
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            H = Hii[p_i]
-            dx[p_i] = H.inverse() @ grad[p_i]
+            H = self.ps.m[p_i] * I3x3 + (self.W[p_i] / self.Aii[p_i]) * Hii[p_i]
+            dx[p_i] = H.inverse() @ (grad[p_i])
 
     @ti.kernel
     def dot(self, a: ti.template(), b: ti.template()) -> float:
@@ -864,6 +865,9 @@ class PBF2Solver(SPHBase):
             #
             if x[p_i] >= 0.0:
                 ret[p_i] = 1.0
+
+            # elif 0.0 < x[p_i] < eps * self.ps.density0[p_i]:
+            #     ret[p_i] = x[p_i] / eps
                 # a += 1
             # else:
                 # a += 1
@@ -884,7 +888,7 @@ class PBF2Solver(SPHBase):
             self.compute_f(self.f, self.c, self.eps)
             self.compute_f_derivative(self.W, self.c, self.eps)
 
-        print("CD start")
+        # print("CD start")
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
@@ -945,74 +949,79 @@ class PBF2Solver(SPHBase):
 
         # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
-        self.compute_f(self.f, self.c, self.eps)
-        # max(self.c)
-        self.compute_f_derivative(self.W, self.c, self.eps)
+
         if self.gauss_newton_pcg:
 
-            x = self.p
-            x.fill(0.0)
-            z = self.z_pcg
-            r = self.r_pcg
-            p = self.p_pcg
-            Ap = self.Ap
-            b = self.b_pcg
+            # t = c + Jd^0, d^0 = s
+            # compute f(t)
+            self.dx.copy_from(self.s)
+            for _ in range(self.max_iteration_opt):
+                self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
+                add(self.f, self.Jx, 1.0, self.c)
+                self.compute_f_derivative(self.W, self.f, 0.01)
+                max(self.f)
 
-            self.compute_J_x(self.pressure_boundary, self.Jx, self.s)
-            coef_wise_mul(self.Jx, self.Jx, self.W)
-            self.add(self.b, self.f, 1.0, self.Jx)
+                # compute gradient J^t df/dt diag(A)^-1 f
+                coef_wise_div(self.f, self.f, self.Aii)
+                coef_wise_mul(self.f, self.f, self.W)
+                self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.f)
 
-            # b.copy_from(self.grad)
-            r.copy_from(b)
-            # print(dot2(r, r))
-            # self.Aii.fill(1e-3)
+                if self.use_max:
+                    coef_wise_div(self.a, self.tmp, self.ps.m)
+                else:
+                    self.apply_precondition(self.a, self.Hii, self.tmp)
 
-            # print(dot2(self.Aii, self.Aii))
-            coef_wise_div(z, r, self.Aii)
+                add(self.dx, self.dx, -1.0, self.a)
 
-            print(dot2(z, z))
-            coef_wise_mul(z, z, self.W)
 
-            rz_old = dot2(r, z)
-            pcg_iter = 0
-            # print(rz_old)
-            if rz_old > 1e-12:
-                p.copy_from(z)
-                pcg_iter = 1
-                for _ in range(100):
+            #
+            # # dx = self.dx
+            # # dx.fill(0.0)
+            # z = self.z_pcg
+            # r = self.r_pcg
+            # p = self.p_pcg
+            # Ap = self.Ap
+            # b = self.b_pcg
+            # Jp = self.dp
+            #
+            # # self.compute_gradient(self.grad)
+            # self.b_pcg.fill(0.0)
+            # add(self.b_pcg, self.b_pcg, -1.0, self.tmp)
+            # r.copy_from(self.b_pcg)
+            # self.apply_precondition(z, self.Hii, r)
 
-                    # mat-free Ap
-                    coef_wise_mul(p, p, self.W)
-                    self.compute_J_tr_x(self.pressure_boundary, self.tmp, p)
-                    self.compute_inv_M_x(self.tmp, self.tmp)
-                    self.compute_J_x(self.pressure_boundary, Ap, self.tmp)
-                    coef_wise_mul(Ap, Ap, self.W)
+            # add(self.dx, self.dx, 1.0, z)
+            # # self.dx.copy_from(z)
+            #
+            # rz_old = self.dot(r, z)
 
-                    pAp = dot2(p, Ap)
-                    if pAp < 0.0:
-                        print("Warning: non-positive definite matrix!")
-                    # #     break
-                    alpha = rz_old / pAp
-                    self.add(x, x, alpha, p)
-                    # print("test")
-                    self.add(r, r, -alpha, Ap)
-                    err = dot2(r, r)
-                    coef_wise_div(z, r,  self.Aii)
-                    coef_wise_mul(z, z, self.W)
+            # if rz_old > 1e-12:
+            #
+            #     p.copy_from(z)
+            #     pcg_iter = 1
+            #     for _ in range(100):
+            #
+            #         self.compute_Ax(Ap, Jp, p)
+            #         pAp = self.dot(p, Ap)
+            #         if pAp < 0.0:
+            #             print("Warning: non-positive definite matrix!")
+            #         # #     break
+            #         alpha = rz_old / pAp
+            #         self.add(dx, dx, alpha, p)
+            #         # print("test")
+            #         self.add(r, r, -alpha, Ap)
+            #         err = self.dot(r, r)
+            #         self.apply_precondition(z, self.Hii, r)
+            #
+            #         rz_new = dot(r, z)
+            #         if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
+            #             print(f"PCG iter: , {pcg_iter}: error: {err}")
+            #             break
+            #         pcg_iter += 1
+            #         beta = rz_new / rz_old
+            #         self.add(p, z, beta, p)
+            #         rz_old = rz_new
 
-                    rz_new = dot2(r, z)
-                    if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
-                        print(f"PCG iter: , {pcg_iter}: error: {err}")
-                        break
-                    pcg_iter += 1
-                    beta = rz_new / rz_old
-                    self.add(p, z, beta, p)
-                    rz_old = rz_new
-
-            print(f"PCG iter: {pcg_iter}")
-            self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.p)
-            self.compute_inv_M_x(self.tmp, self.tmp)
-            add(self.dx, self.s, -1.0, self.tmp)
         else:
             self.Jacobi()
 
