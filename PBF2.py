@@ -734,9 +734,8 @@ class PBF2Solver(SPHBase):
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     Ax[p_j] -= Jx[p_i] * val_ij
 
-
     @ti.kernel
-    def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template(), k: float):
+    def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
 
         I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
@@ -745,8 +744,8 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            H = self.ps.m[p_i] * I3x3 + k * self.W[p_i] * Hii[p_i]
-            dx[p_i] = H.inverse() @ (k * grad[p_i])
+            H = (self.ps.m[p_i] * I3x3 + (1.0 / self.Aii[p_i]) * Hii[p_i])
+            dx[p_i] = H.inverse() @ (grad[p_i])
 
     @ti.kernel
     def dot(self, a: ti.template(), b: ti.template()) -> float:
@@ -1223,29 +1222,36 @@ class PBF2Solver(SPHBase):
         # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
 
-        if self.gauss_newton_pcg:
+        # k = 1e-8 * self.dt * self.dt
+        t  = self.f
+        Jd = self.Jx
+        d  = self.dx
+        d.copy_from(self.s)
+        c  = self.c
+        Δd = self.a
 
-            self.dx.fill(0.0)
-            k = 1e-8 * self.dt * self.dt
-            for _ in range(self.max_iteration_opt):
+        for _ in range(self.max_iteration_opt):
 
-                # compute f (Jx + c)
-                self.compute_J_x(self.pressure_boundary, self.Jx, self.dx)
-                add(self.p, self.Jx, 1.0, self.c)
+            # compute f (Jx + c)
+            self.compute_J_x(self.pressure_boundary, Jd, d)
+            add(t, Jd, 1.0, c)
+            # #compute gradient M(d - s) - k * J^tr * df/dt * f
+            max(t)
+            coef_wise_div(t, t, self.Aii)
+            # t.fill(0.0)
+            self.compute_J_tr_x(self.pressure_boundary,  self.tmp, t)
+            # self.compute_gradient(self.tmp)
+            # self.b_pcg.copy_from(self.tmp)
+            #
+            # self.PCG()
+            if self.gauss_newton_pcg:
+                self.apply_precondition(Δd, self.Hii, self.tmp)
+            else:
+                coef_wise_div(Δd, self.tmp, self.ps.m)
 
-                self.compute_f(self.f, self.p, 0.1)
-                self.compute_f_derivative(self.W, self.p, 0.1)
-
-                #compute gradient M(d - s) - k * J^tr * df/dt * f
-                self.compute_J_tr_x(self.pressure_boundary,  self.tmp, self.f)
-                self.compute_gradient(self.tmp)
-                self.b_pcg.copy_from(self.tmp)
-
-                self.PCG()
-                self.apply_precondition(self.a, self.Hii, self.b_pcg, k)
-                # add(self.dx, self.dx, -1.0, self.a)
-        else:
-            self.Jacobi()
+            add(d, d, -1.0, Δd)
+        # else:
+        #     self.Jacobi()
 
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
