@@ -23,6 +23,12 @@ def max(x: ti.template()):
      for i in x:
         x[i] = ti.max(x[i], 0.0)
 
+
+@ti.kernel
+def mul_minus(x: ti.template()):
+    for i in x:
+        x[i] *= -1.0
+
 @ti.kernel
 def min(x: ti.template()):
      for i in x:

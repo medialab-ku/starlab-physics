@@ -39,9 +39,11 @@ class PBF2Solver(SPHBase):
 
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.grad_prev = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.a = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_prev = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.a = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.a_prev = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.error = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx_proj = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.s = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -57,7 +59,8 @@ class PBF2Solver(SPHBase):
         self.f = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.x   = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.y   = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.y   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.Py  = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.b   = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -329,14 +332,16 @@ class PBF2Solver(SPHBase):
             Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
             self.Aii[p_i] = Aii + eps
 
+        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
+            # self.Hii[p_i] = self.ps.m[p_i] * I3x3
             self.Hii[p_i] = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
             # denom_i = eps + self.Aii[p_i]
-
+            JtJ = ti.math.mat3(0.0)
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
 
@@ -345,11 +350,11 @@ class PBF2Solver(SPHBase):
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
                 if self.ps.material[p_j] == self.ps.material_fluid:
-                    self.Hii[p_i] += J_ij.outer_product(J_ij)
+                    JtJ += J_ij.outer_product(J_ij)
 
                 J_ii -= J_ij
-            self.Hii[p_i] += J_ii.outer_product(J_ii)
-
+            JtJ += J_ii.outer_product(J_ii)
+            self.Hii[p_i] += JtJ / self.Aii[p_i]
 
     @ti.kernel
     def update_velocities(self, dt: float):
@@ -737,14 +742,14 @@ class PBF2Solver(SPHBase):
     @ti.kernel
     def apply_precondition(self, dx: ti.template(), Hii: ti.template(), grad: ti.template()):
 
-        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         for p_i in ti.grouped(self.ps.x):
 
             dx[p_i] = ti.math.vec3(0.0)
+            I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            H = (self.ps.m[p_i] * I3x3 + (1.0 / self.Aii[p_i]) * Hii[p_i])
+            H = self.ps.m[p_i] * I3x3 + self.W[p_i] * Hii[p_i]
             dx[p_i] = H.inverse() @ (grad[p_i])
 
     @ti.kernel
@@ -884,7 +889,7 @@ class PBF2Solver(SPHBase):
                 continue
             #
             if x[p_i] >= 0.0:
-                ret[p_i] = 2 * x[p_i]
+                ret[p_i] = 1.0
 
             # elif 0.0 < x[p_i] < eps * self.ps.density0[p_i]:
             #     ret[p_i] = 1.0 / (eps * self.ps.density0[p_i])
@@ -1228,31 +1233,56 @@ class PBF2Solver(SPHBase):
         d  = self.dx
         d.copy_from(self.s)
         c  = self.c
-        Δd = self.a
-
+        Δd_p = self.a_prev
+        Py = self.Py
+        y  = self.y
+        g   = self.tmp
+        g_p = self.grad_prev
+        Δd_p.fill(0.0)
+        P = self.Hii
+        p = self.a
+        iter = 0
         for _ in range(self.max_iteration_opt):
 
             # compute f (Jx + c)
             self.compute_J_x(self.pressure_boundary, Jd, d)
             add(t, Jd, 1.0, c)
-            # #compute gradient M(d - s) - k * J^tr * df/dt * f
+
+            self.compute_f_derivative(self.W, t, 0.01)
             max(t)
             coef_wise_div(t, t, self.Aii)
-            # t.fill(0.0)
-            self.compute_J_tr_x(self.pressure_boundary,  self.tmp, t)
-            # self.compute_gradient(self.tmp)
-            # self.b_pcg.copy_from(self.tmp)
-            #
-            # self.PCG()
+            self.compute_J_tr_x(self.pressure_boundary,  g, t)
             if self.gauss_newton_pcg:
-                self.apply_precondition(Δd, self.Hii, self.tmp)
+
+                mul_minus(g)
+                self.apply_precondition(p, P, g)
+
+                if dot(p, p) < 1e-3:
+                    break
+
+                beta = 0.0
+                if iter > 0 and self.use_max:
+                    add(y, g, -1.0, g_p)
+                    self.apply_precondition(Py, P, y)
+                    yTp = dot(y, Δd_p)
+                    gTPy = dot(g, Py)
+                    yTPy = dot(y, Py)
+                    pTPg = dot(y, Δd_p)
+
+                    beta = (gTPy - yTPy * pTPg) / yTp
+
+
+                add(p, p, beta, Δd_p)
+                add(d, d, 1.0, p)
+
+                Δd_p.copy_from(p)
+                g_p.copy_from(g)
+
             else:
-                coef_wise_div(Δd, self.tmp, self.ps.m)
+                coef_wise_div(p, self.tmp, self.ps.m)
+                add(d, d, -self.omega, p)
 
-            add(d, d, -1.0, Δd)
-        # else:
-        #     self.Jacobi()
-
+            iter += 1
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
         self.enforce_boundary_3D(self.ps.material_fluid)
