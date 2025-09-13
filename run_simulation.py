@@ -201,6 +201,7 @@ if __name__ == "__main__":
             solver.print_opt_error = w.checkbox("print opt error", solver.print_opt_error)
             solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
             solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
+            solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
 
     cnt = 0
     cnt_ply = 0

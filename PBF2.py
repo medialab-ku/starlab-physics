@@ -15,7 +15,7 @@ class PBF2Solver(SPHBase):
         self.surface_tension = 0.005
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
-        self.nablaWij = self.cubic_kernel_derivative
+        self.nablaWij = self.spiky_kernel_derivative
         self.Wij = self.cubic_kernel
         self.lda = self.ps.pressure
         self.method = 1
@@ -28,10 +28,11 @@ class PBF2Solver(SPHBase):
         self.pressure_boundary = False
         self.smooth_max = False
         self.print_info = True
-        self.print_pcg_iter = True
-        self.print_opt_iter = True
-        self.print_pcg_error = True
-        self.print_opt_error = True
+        self.print_pcg_iter  = False
+        self.print_opt_iter  = False
+        self.print_pcg_error = False
+        self.print_opt_error = False
+        self.print_elapsed_time = True
         self.volume_constraint = False
         self.tol_opt = 2
         self.omega = 0.5
@@ -596,14 +597,14 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            # if self.W[p_i] > 0:
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
-                    Jx[p_i] += (x[p_i] - x[p_j]).dot(val_ij)
-                else:
-                    Jx[p_i] += x[p_i].dot(val_ij)
+            if self.dfdt[p_i] >= 0:
+                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                    if self.ps.material[p_j] == self.ps.material_fluid:
+                        Jx[p_i] += (x[p_i] - x[p_j]).dot(val_ij)
+                    else:
+                        Jx[p_i] += x[p_i].dot(val_ij)
 
             Jx[p_i] *= (self.dfdt[p_i] * self.k[p_i])
 
@@ -617,14 +618,14 @@ class PBF2Solver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
 
-            # if self.W[p_i] > 0:
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                Ax[p_i] += Jx[p_i] * val_ij
+            if self.dfdt[p_i] >= 0:
+                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
+                    Ax[p_i] += Jx[p_i] * val_ij
 
-                if self.ps.material[p_j] == self.ps.material_fluid:
-                    Ax[p_j] -= Jx[p_i] * val_ij
+                    if self.ps.material[p_j] == self.ps.material_fluid:
+                        Ax[p_j] -= Jx[p_i] * val_ij
 
     @ti.kernel
     def compute_Ax2(self, Ax: ti.template(), Jx: ti.template(), x: ti.template()):
@@ -1041,8 +1042,12 @@ class PBF2Solver(SPHBase):
 
             opt_iter += 1
 
+        if self.print_elapsed_time:
+            print("elapsed time: TODO [ms]")
+
         if self.print_opt_iter:
             print(f"opt iter: {opt_iter}")
+
 
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
@@ -1111,7 +1116,6 @@ class PBF2Solver(SPHBase):
         self.advect_velocity(self.dt)
 
         self.constant_density_solve()
-
         #
         # if self.enable_DF:
         #     self.divergence_free_solve()
