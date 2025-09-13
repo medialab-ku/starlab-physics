@@ -91,32 +91,6 @@ class PBF2Solver(SPHBase):
         self.use_max = False
         self.DF_tol = 0.1
 
-        self.d_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.d_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.y_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.y_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.p_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.p_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.Bp_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.Bp_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.By_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.By_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.r_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.r_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.invCr_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.invCr_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.B_invCr_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.B_invCr_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
-        self.invC_Bp_v = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.invC_Bp_l = ti.field(dtype=float, shape=self.ps.particle_max_num)
-
     @ti.kernel
     def precompute_values(self):
 
@@ -1114,115 +1088,6 @@ class PBF2Solver(SPHBase):
 
         return flag
 
-
-    def test(self):
-        # [M  J^T] [  v   ]   [M v_adv]
-        # [J    0] [lambda]   [   -c  ]
-        #    B       y     =     d
-
-        # [M^-1 (I - J^T D^-1 J M^-1)  M^-1 J^T D^-1]
-        # [         D^-1 J M^-1            -D^-1    ]
-        #                        C^-1
-
-        self.compute_f_derivative(self.W, self.c, 0.0)
-        max(self.c)
-        self.compute_d()
-        # compute y0
-        # self.compute_J_x(self.pressure_boundary, self.Jx, self.s)
-        # add(self.p, self.c, 1.0, self.Jx)
-        # max(self.p)
-        # coef_wise_div(self.y_l, self.p, self.Aii)
-        # self.compute_J_tr_x(self.pressure_boundary, self.tmp, self.y_l)
-        # coef_wise_div(self.tmp, self.tmp, self.ps.m)
-        # add(self.y_v, self.s, -1.0, self.tmp)
-
-        self.y_v.fill(0.0)
-        self.y_l.fill(0.0)
-
-        # self.W.fill(0.0)
-        # self.evaluateConstraints(self.y_v, self.y_l)
-
-        # r0 = d0 - By0
-        self.compute_B_x(self.By_v, self.By_l, self.y_v, self.y_l)
-        add(self.r_v, self.d_v, -1.0, self.By_v)
-        add(self.r_l, self.d_l, -1.0, self.By_l)
-
-        # error = dot2(self.r_l, self.r_l)
-        # print(error)
-        # if error > 1e-3:
-        # p0 = C^-1r0
-        self.compute_invC_x(self.p_v, self.p_l, self.r_v, self.r_l)
-        error = dot(self.p_v, self.p_v) + dot2(self.p_l, self.p_l)
-        print("________________________")
-        if error > 1e-6:
-            # print(error)
-            for _ in range(self.max_iteration_opt):
-                # 1. compute C^-1 r
-                self.compute_invC_x(self.invCr_v, self.invCr_l, self.r_v, self.r_l)
-                # 2. compute B C^-1 r
-                self.compute_B_x(self.B_invCr_v, self.B_invCr_l, self.invCr_v, self.invCr_l)
-                # 3. compute Bp
-                self.compute_B_x(self.Bp_v, self.Bp_l, self.p_v, self.p_l)
-                # 4. compute C^-1 Bp
-                self.compute_invC_x(self.invC_Bp_v, self.invC_Bp_l, self.Bp_v, self.Bp_l)
-                #     #
-                numer = dot(self.invCr_v, self.B_invCr_v) + dot2(self.invCr_l, self.B_invCr_l)
-                denom = dot(self.Bp_v, self.invC_Bp_v) + dot2(self.Bp_l, self.invC_Bp_l)
-
-                alpha = numer / denom
-
-                # y += alpha * p_j
-                add(self.y_v, self.y_v, alpha, self.p_v)
-
-                coef_wise_mul(self.p_l, self.p_l, self.W)
-                add(self.y_l, self.y_l, alpha, self.p_l)
-
-                # r -= alpha * Bp_j
-                add(self.r_v, self.r_v, -alpha, self.Bp_v)
-
-                coef_wise_mul(self.Bp_l, self.Bp_l, self.W)
-                add(self.r_l, self.r_l, -alpha, self.Bp_l)
-
-                # error = dot(self.r_v, self.r_v) + dot2(self.r_l, self.r_l)
-                print(dot2(self.r_l, self.r_l))
-
-                is_changed = 0.0
-                # if alpha > 0:
-                #    is_changed = self.evaluateConstraints(self.y_v, self.y_l)
-                #
-                # if is_changed > 0.0:
-                #
-                #     # compute By
-                #     self.compute_B_x(self.By_v, self.By_l, self.y_v, self.y_l)
-                #
-                #     # r = d - By
-                #     add(self.r_v, self.d_v, -1.0, self.By_v)
-                #     add(self.r_l, self.d_l, -1.0, self.By_l)
-                #
-                #     # p = C^-1 r
-                #     self.compute_invC_x(self.p_v, self.p_l, self.r_v, self.r_l)
-                #     # compute Bp
-                #     self.compute_B_x(self.Bp_v, self.Bp_l, self.p_v, self.p_l)
-                # else:
-                # print("continue")
-                denom = numer
-
-                self.compute_invC_x(self.invCr_v, self.invCr_l, self.r_v, self.r_l)
-                self.compute_B_x(self.B_invCr_v, self.B_invCr_l, self.invCr_v, self.invCr_l)
-
-                numer = dot(self.B_invCr_v, self.invCr_v) + dot(self.B_invCr_v, self.invCr_v)
-
-                beta = -numer / denom
-                # # p = C^-1 r - beta * p
-                self.compute_invC_x(self.invCr_v, self.invCr_l, self.r_v, self.r_l)
-                add(self.p_v, self.invCr_v, -beta, self.p_v)
-                add(self.p_l, self.invCr_l, -beta, self.p_l)
-
-                # Bp = B * p
-                self.compute_B_x(self.Bp_v, self.Bp_l, self.p_v, self.p_l)
-
-        self.dx.copy_from(self.y_v)
-
     def constant_density_solve(self):
 
         self.ps.x_old.copy_from(self.ps.x)
@@ -1235,12 +1100,12 @@ class PBF2Solver(SPHBase):
         self.compute_Aii()
 
         add(self.s, self.ps.y, -1.0, self.ps.x)
-        f  = self.f
-        t  = self.t
+        f = self.f
+        t = self.t
         Jd = self.Jx
-        d  = self.dx
+        d = self.dx
         d.copy_from(self.s)
-        c  = self.c
+        c = self.c
         Δd_p = self.a_prev
         g   = self.tmp
         Δd_p.fill(0.0)
@@ -1248,23 +1113,20 @@ class PBF2Solver(SPHBase):
         p = self.a
         iter = 0
         for _ in range(self.max_iteration_opt):
+
             self.compute_J_x(self.pressure_boundary, Jd, d)
             add(t, Jd, 1.0, c)
             self.compute_f(f, t, self.eps)
             self.compute_f_derivative(self.W, t, self.eps)
             self.compute_JtJ()
-
             coef_wise_mul(f, f, self.k)
             self.compute_J_tr_x(self.pressure_boundary,  g, f)
             mul_minus(g)
 
             if self.smooth_max:
-
                 if self.use_pcg:
-
                     self.PCG()
                 else:
-
                     self.apply_precondition(p, P, g)
 
                 # if dot(p, p) < 1e-3:
@@ -1284,13 +1146,23 @@ class PBF2Solver(SPHBase):
                 #
                 # add(p, p, beta, Δd_p)
                 add(d, d, 1.0, p)
+
+                # if inf_norm(p) < pow(10, -self.tol):
+                #     print(f"converged iter: {iter}")
+                #     break
                 # #
                 # Δd_p.copy_from(p)
                 # g_p.copy_from(g)
 
+
             else:
-                coef_wise_div(g, self.tmp, self.ps.m)
-                add(d, d, -self.omega, g)
+                coef_wise_div(p, self.tmp, self.ps.m)
+                add(d, d, self.omega, p)
+
+
+            if (inf_norm(p) < pow(10, -self.tol)) and iter > 2:
+                print(f"{iter}")
+                break
 
             iter += 1
 

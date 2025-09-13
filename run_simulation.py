@@ -147,13 +147,15 @@ if __name__ == "__main__":
                 solver.print_info = w.checkbox("print", solver.print_info)
 
                 solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)
-                solver.pressure_boundary = w.checkbox("pressure boundary", solver.pressure_boundary)
+                # solver.pressure_boundary = w.checkbox("pressure boundary", solver.pressure_boundary)
 
-                solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
+
                 solver.smooth_max = w.checkbox("smooth max", solver.smooth_max)
                 if solver.smooth_max:
                     solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
                     solver.use_pcg = w.checkbox("PCG", solver.use_pcg)
+                else:
+                    solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
 
             export_ply = w.checkbox("export", export_ply)
             if export_ply:
@@ -210,6 +212,8 @@ if __name__ == "__main__":
 
 
             if window.event.key == 'r':
+
+                print("rest simulation...")
                 frame_cnt = 0
                 # Restore all particle states to initial
                 ps.x.copy_from(ps.x_0)

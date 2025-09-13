@@ -12,7 +12,7 @@ class SPHBase:
             self.g = ti.Vector([0.0, -9.81])
         # self.g = np.array(self.ps.cfg.get_cfg("gravitation"))
 
-        self.viscosity = 0.005  # viscosity
+        self.viscosity = 0.01  # viscosity
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")
