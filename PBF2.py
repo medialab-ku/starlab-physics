@@ -757,7 +757,7 @@ class PBF2Solver(SPHBase):
                 continue
 
             H = self.ps.m[p_i] * I3x3 + Hii[p_i]
-            dx[p_i] = H.inverse() @ (grad[p_i])
+            dx[p_i] = H.inverse() @ grad[p_i]
 
     @ti.kernel
     def dot(self, a: ti.template(), b: ti.template()) -> float:
@@ -826,7 +826,7 @@ class PBF2Solver(SPHBase):
 
                 rz_new = dot(r, z)
                 if err < self.pcg_tol or pcg_iter >= self.max_iteration_pcg:
-                    print(f"PCG iter: , {pcg_iter}: error: {err}")
+                    # print(f"PCG iter: , {pcg_iter}: error: {err}")
                     break
                 pcg_iter += 1
                 beta = rz_new / rz_old
@@ -1234,10 +1234,7 @@ class PBF2Solver(SPHBase):
         self.compute_constraint()
         self.compute_Aii()
 
-        # self.compute_pressure_pbf()
         add(self.s, self.ps.y, -1.0, self.ps.x)
-
-        # k = 1e-8 * self.dt * self.dt
         f  = self.f
         t  = self.t
         Jd = self.Jx
@@ -1245,37 +1242,29 @@ class PBF2Solver(SPHBase):
         d.copy_from(self.s)
         c  = self.c
         Δd_p = self.a_prev
-        Py = self.Py
-        y  = self.y
         g   = self.tmp
-        g_p = self.grad_prev
         Δd_p.fill(0.0)
         P = self.Hii
         p = self.a
         iter = 0
         for _ in range(self.max_iteration_opt):
-
-            # compute f (Jx + c)
             self.compute_J_x(self.pressure_boundary, Jd, d)
             add(t, Jd, 1.0, c)
-
             self.compute_f(f, t, self.eps)
             self.compute_f_derivative(self.W, t, self.eps)
+            self.compute_JtJ()
+
             coef_wise_mul(f, f, self.k)
             self.compute_J_tr_x(self.pressure_boundary,  g, f)
-
-            self.compute_JtJ()
+            mul_minus(g)
 
             if self.smooth_max:
 
-                mul_minus(g)
-
                 if self.use_pcg:
 
-                    # print("test 1")
                     self.PCG()
                 else:
-                    # print("test 2")
+
                     self.apply_precondition(p, P, g)
 
                 # if dot(p, p) < 1e-3:
@@ -1304,9 +1293,11 @@ class PBF2Solver(SPHBase):
                 add(d, d, -self.omega, g)
 
             iter += 1
+
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
         self.enforce_boundary_3D(self.ps.material_fluid)
+
         #v_n+1_tmp
         self.update_velocities(self.dt)
 
