@@ -113,11 +113,38 @@ if __name__ == "__main__":
     export_ply = output_ply
     end_frame = 1000
 
-    def show_options():
-        global ps
-        # global frame_cnt
-        # global solver
-        global method
+    def show_options_solver():
+
+        with gui.sub_window("Solver settings", 0., 0., 0.4, 0.3) as w:
+
+            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
+            solver.cfl = w.checkbox("CFL", solver.cfl)
+            solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
+
+            if method == 2:
+                solver.tol_opt = w.slider_int("opt tol magnitude", solver.tol_opt, 1, 5)
+                solver.max_iteration_opt = w.slider_int("max opt. iter", solver.max_iteration_opt, 1, 1000)
+
+                # solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)
+                solver.smooth_max = w.checkbox("smooth max(Ours)", solver.smooth_max)
+                if solver.smooth_max:
+                    solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
+                    solver.use_pcg = w.checkbox("PCG", solver.use_pcg)
+
+                    if solver.use_pcg:
+                        solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
+                        solver.tol_pcg = w.slider_int("pcg tol magnitude", solver.tol_pcg, 1, 5)
+
+                else:
+                    solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
+
+            gui.text(f"# fluid particle: {ps.fluid_particle_num}")
+            gui.text(f"# boundary particle: {ps.solid_particle_num}")
+            gui.text(f"Current frame: {frame_cnt}")
+
+
+    def show_options_visual():
+
         global end_frame
         global heatmap
         global color_alpha
@@ -125,37 +152,9 @@ if __name__ == "__main__":
         global viz_mode
         global heatmap_type
         global export_rigid_objects
-        # global stop_frame
-        # global output_obj
-        # global output_ply
-        # global output_vtk
-        # global is_plot_option
-        # global animate
         global export_ply
 
-        with gui.sub_window("Settings", 0., 0., 0.4, 1.0) as w:
-
-            solver.dt = w.slider_float("dt", solver.dt, 0.001, 0.04)
-            solver.cfl = w.checkbox("CFL", solver.cfl)
-            solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
-
-            if method == 2:
-                solver.tol = w.slider_int("tol magnitude", solver.tol, 1, 5)
-                solver.max_iteration_opt = w.slider_int("max opt. iter", solver.max_iteration_opt, 1, 1000)
-                solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
-                # solver.method = w.slider_int("method type", solver.method, 0, 2)
-                solver.print_info = w.checkbox("print", solver.print_info)
-
-                solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)
-                # solver.pressure_boundary = w.checkbox("pressure boundary", solver.pressure_boundary)
-
-
-                solver.smooth_max = w.checkbox("smooth max", solver.smooth_max)
-                if solver.smooth_max:
-                    solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
-                    solver.use_pcg = w.checkbox("PCG", solver.use_pcg)
-                else:
-                    solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
+        with gui.sub_window("Visualization settings", 0.0, 0.4, 0.4, 0.3) as w:
 
             export_ply = w.checkbox("export", export_ply)
             if export_ply:
@@ -192,11 +191,16 @@ if __name__ == "__main__":
                 gui.text(f"Current alpha: {color_alpha:.2f}")
             else:
                 gui.text("No transparent objects configured")
-            #
-            gui.text(f"# fluid particle: {ps.fluid_particle_num}")
-            gui.text(f"# boundary particle: {ps.solid_particle_num}")
-            # gui.text(f"# face: {ps.faces_dy.shape[0] // 3}")
-            gui.text(f"Current frame: {frame_cnt}")
+
+
+    def show_options_stats():
+
+        with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.2) as w:
+
+            solver.print_opt_iter  = w.checkbox("print opt iter", solver.print_opt_iter)
+            solver.print_opt_error = w.checkbox("print opt error", solver.print_opt_error)
+            solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
+            solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
 
     cnt = 0
     cnt_ply = 0
@@ -204,7 +208,9 @@ if __name__ == "__main__":
 
     while window.running:
 
-        show_options()
+        show_options_solver()
+        show_options_visual()
+        show_options_stats()
 
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
