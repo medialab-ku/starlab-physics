@@ -16,30 +16,29 @@
 		"exportPly": false,
 		"exportObj": false,
 		"transparentObjects": [1],
-		"alpha": 0.3,
-
-		"EmitterCapacity": 30000,
-		"EnableEmitterReuse": false,
-		"EmitterReuseBoxMin": [-0.2, -0.2, -0.2],
-		"EmitterReuseBoxMax": [1.2, 1.0, 1.2]
+		"alpha": 0.3
 	},
-	"Emitter": [
-		{
-		"width": 5,
-		"height": 5,
-		"pos": [0.1, 3.0, 1.25],
-		"emitDirection": [1, -1, 0],
-		"velocity": 7.0,
-		"type": 1,
-		"jitter": 0.5,
-		"spread": 3,
-		"start_time": 0.0,
-		"end_time": 10.0,
-		"object_id": 3,
-		"density": 1000.0,
-		"color": [50, 128, 25]
-		}
-	],
+	"Emitter": {
+		"capacity": 50000,
+		"reuse": false,
+		"emitters": [
+			{
+				"type": "circle",
+				"width": 5,
+				"height": 5,
+				"position": [1.25, 3.0, 1.25],
+				"direction": [0.0, -1.0, 0.0],
+				"velocity": 5.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 0,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			}
+		]
+	},
 
 	"FluidBlocks": [
 		{
@@ -64,7 +63,7 @@
 			"rotationAngle": 0,
 			"scale": [1.2, 1.4, 1.6],
 			"velocity": [0.0, 0.0, 0.0],
-			"density": 100000.0,
+			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
 			"isDynamic": false
 		},

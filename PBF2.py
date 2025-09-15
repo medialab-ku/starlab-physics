@@ -53,9 +53,10 @@ class PBF2Solver(SPHBase):
         self.p   = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.k = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.Zii = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.dfdt = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.f = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.t = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        self.f = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.test = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -67,10 +68,14 @@ class PBF2Solver(SPHBase):
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
-
-        self.I_rb   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.mass_rb.shape)  # per rigid
-        self.t_rb   = ti.Vector.field(n=3, dtype=float, shape=self.ps.mass_rb.shape)       # per rigid
-        self.vsum_rb= ti.Vector.field(n=3, dtype=float, shape=self.ps.mass_rb.shape)       # per rigid
+        if self.ps.num_rigid_bodies > 0:
+            self.I_rb   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.mass_rb.shape)  # per rigid
+            self.t_rb   = ti.Vector.field(n=3, dtype=float, shape=self.ps.mass_rb.shape)       # per rigid
+            self.vsum_rb= ti.Vector.field(n=3, dtype=float, shape=self.ps.mass_rb.shape)       # per rigid
+        else:
+            self.I_rb = None
+            self.t_rb = None
+            self.vsum_rb = None
 
         self.stats_iter = 0
         self.stats_pcg_iter = 0
@@ -117,6 +122,20 @@ class PBF2Solver(SPHBase):
 
             # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
             self.ps.density[p_i] += den
+
+    @ti.kernel
+    def compute_normal(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                self.ps.n[p_i] = ti.Vector.zero(float, self.ps.dim)
+                continue
+            n = ti.Vector.zero(float, self.ps.dim)
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                if self.ps.material[p_j] != self.ps.material_fluid:
+                    continue
+                n += (self.ps.m[p_j] / (self.ps.density[p_j] + 1e-12)) * self.nablaWij(self.ps.x[p_i] - self.ps.x[p_j])
+            self.ps.n[p_i] = 5.0 * self.ps.support_radius * n
 
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
@@ -181,6 +200,8 @@ class PBF2Solver(SPHBase):
 
             if self.ps.material[p_i] == self.ps.material_fluid:
                 self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
+                # Write back the accumulated non-pressure forces into acceleration
+                self.ps.acceleration[p_i] = acc
 
     @ti.kernel
     def advect_velocity(self, dt: float):

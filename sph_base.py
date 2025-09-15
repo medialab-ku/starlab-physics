@@ -23,17 +23,14 @@ class SPHBase:
             pass
 
         self.viscosity = 0.01  # viscosity
-        self.surface_tension = 0.005
-        self.adhesion_coeff = 0.005
+        self.surface_tension = 0.1
+        self.adhesion_coeff = 0.1
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")
         self.time = 0.0
-        self.dt = ti.field(float, shape=())
-        self.dt[None] = 1e-4
+        self.dt = self.ps.cfg.get_cfg("timeStepSize")
         self.nablaWij = self.spiky_kernel_derivative
-        self.rigid_radius_constraint_alpha = 0.5
-        self.contact_radius = self.ps.particle_diameter
 
 
 
@@ -147,20 +144,11 @@ class SPHBase:
 
         return res
 
-    @ti.kernel
-    def precompute_values(self):
-
-        for p_i in ti.grouped(self.ps.x):
-            x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                x_j = self.ps.x[p_j]
-                self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
-
 
     def initialize(self):
         self.ps.initialize_particle_system()
         self.ps.initialize_object_particle_num()
+
         if self.ps.num_rigid_bodies > 0:        
             for r_obj_id in self.ps.object_id_rigid_body:
                 self.compute_rigid_rest_cm(r_obj_id)
@@ -171,8 +159,10 @@ class SPHBase:
 
         if self.ps.num_rigid_bodies > 0:
             self.ps.initialize_rigid_mass()
+
         if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
             self.ps.emitter_system.reset()
+
 
 
     @ti.kernel
@@ -405,7 +395,7 @@ class SPHBase:
     def step(self):
 
         if hasattr(self.ps, 'emitter_system') and self.ps.emitter_system is not None:
-            dt = float(self.dt[None]) if isinstance(self.dt, ti.lang.matrix.Matrix) else float(self.dt)
+            dt = self.dt
             self.ps.emitter_system.step(self.time, dt)
             self.time += dt
 
