@@ -38,19 +38,19 @@ if __name__ == "__main__":
     solver = ps.build_solver()
     solver.initialize()
 
-    # Add a kernel for moving the boundary object
-    @ti.kernel
-    def move_boundary_object(dt: float):
-        amplitude = -0.3
-        frequency = 4.0
+    # # Add a kernel for moving the boundary object
+    # @ti.kernel
+    # def move_boundary_object(dt: float):
+    #     amplitude = -0.3
+    #     frequency = 4.0
     
-        for p_i in ti.grouped(ps.x):
-            if ps.object_id[p_i] == 2:
-                # Update position based on the initial position x_0
-                new_y = ti.cos(dt) * ps.x[p_i][1] + ti.sin(dt) * ps.v[p_i][1]
-                new_v = -ti.sin(dt) * ps.x[p_i][1] + ti.cos(dt) * ps.v[p_i][1]
-                ps.x[p_i][1] = new_y
-                ps.v[p_i][1] = new_v
+    #     for p_i in ti.grouped(ps.x):
+    #         if ps.object_id[p_i] == 2:
+    #             # Update position based on the initial position x_0
+    #             new_y = ti.cos(dt) * ps.x[p_i][1] + ti.sin(dt) * ps.v[p_i][1]
+    #             new_v = -ti.sin(dt) * ps.x[p_i][1] + ti.cos(dt) * ps.v[p_i][1]
+    #             ps.x[p_i][1] = new_y
+    #             ps.v[p_i][1] = new_v
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window = True, vsync=False)
     gui = window.get_gui()
@@ -207,6 +207,13 @@ if __name__ == "__main__":
     cnt_ply = 0
     runSim = False
 
+    @ti.kernel
+    def reset_R_identity(R: ti.template()):
+        for i in ti.grouped(R):
+            R[i] = ti.math.mat3([[1.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0],
+                                [0.0, 0.0, 1.0]])
+
     while window.running:
 
         show_options_solver()
@@ -218,26 +225,44 @@ if __name__ == "__main__":
                 runSim = not runSim
 
 
-            if window.event.key == 'r':
 
                 print("rest simulation...")
-                frame_cnt = 0
-                # Restore all particle states to initial
-                ps.x.copy_from(ps.x_0)
-                ps.x_old.copy_from(ps.x_0)
-                ps.y.copy_from(ps.x_0)
-                ps.v.fill(0.0)
-                ps.v_adv.fill(0.0)
-                ps.acceleration.fill(0.0)
-                ps.pressure.fill(0.0)
-                ps.density.copy_from(ps.density0)
-                ps.divergence.fill(0.0)
-                # Reinitialize solver-side precomputations and boundary volumes
+                # Preserve solver settings that can be tuned via GUI
+                preserve_names = [
+                    'dt', 'num_substep', 'cfl',
+                    'tol', 'max_iteration_opt', 'method', 'print_info', 'divergence_free_solve',
+                    'omega', 'iisph_vanilla',
+                    'gauss_newton_pcg', 'max_iteration_pcg', 'pcg_tol', 'adaptive_step_size',
+                ]
+                preserved = {}
+                for name in preserve_names:
+                    if hasattr(solver, name):
+                        try:
+                            preserved[name] = getattr(solver, name)
+                        except Exception:
+                            pass
+
+                # Rebuild particle system and solver to fully drop emitted particles/state
+                ps = ParticleSystem(config, GGUI=True)
+                solver = ps.build_solver()
                 solver.initialize()
-                ps.initialize_particle_system()
+
+                # Restore preserved settings
+                for name, value in preserved.items():
+                    try:
+                        if hasattr(solver, name):
+                            setattr(solver, name, value)
+                    except Exception:
+                        pass
+                try:
+                    solver.t = 0.0
+                except Exception:
+                    pass
+
+                # Reset counters and pause sim
+                frame_cnt = 0
+                cnt_ply = 0
                 runSim = False
-                # Reset logging and save current data
-                # solver.reset_logging()
 
         if export_ply and frame_cnt > end_frame:
             runSim = False
@@ -247,9 +272,9 @@ if __name__ == "__main__":
             # Move boundary object if the scene is moving_boundary
 
             dt = solver.dt
-            if scene_name == "moving_boundary":
-                dt = config.get_cfg("timeStepSize")
-                move_boundary_object(dt)
+            # if scene_name == "moving_boundary":
+            #     dt = config.get_cfg("timeStepSize")
+            #     move_boundary_object(dt)
                 
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
@@ -341,6 +366,7 @@ if __name__ == "__main__":
             density0_np = ps.density0.to_numpy()
             div_np = ps.divergence.to_numpy()
             material_np = ps.material.to_numpy()
+            dynamic_mask = ps.is_dynamic.to_numpy()
 
             # v_np = solver.div.to_numpy
 
