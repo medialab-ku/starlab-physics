@@ -36,6 +36,12 @@ class SimConfig:
         else:
             return []
 
+    def get_fluid_bodies(self):
+        if "FluidBodies" in self.config:
+            return self.config["FluidBodies"]
+        else:
+            return []
+
     def get_emitter(self):
         if "Emitter" in self.config:
             return self.config["Emitter"]

@@ -10,9 +10,21 @@ class SPHBase:
         self.g = ti.Vector([0.0, -9.81, 0.0])  # Gravity
         if self.ps.dim == 2:
             self.g = ti.Vector([0.0, -9.81])
-        # self.g = np.array(self.ps.cfg.get_cfg("gravitation"))
+        elif self.ps.dim == 3:
+            self.g = ti.Vector([0.0, -9.81, 0.0])
+        try:
+            g_cfg = self.ps.cfg.get_cfg("gravitation")
+            if isinstance(g_cfg, (list, tuple, np.ndarray)):
+                if self.ps.dim == 2 and len(g_cfg) >= 2:
+                    self.g = ti.Vector([float(g_cfg[0]), float(g_cfg[1])])
+                elif self.ps.dim == 3 and len(g_cfg) >= 3:
+                    self.g = ti.Vector([float(g_cfg[0]), float(g_cfg[1]), float(g_cfg[2])])
+        except Exception:
+            pass
 
         self.viscosity = 0.01  # viscosity
+        self.surface_tension = 0.005
+        self.adhesion_coeff = 0.005
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")
@@ -104,6 +116,36 @@ class SPHBase:
                 r)
         return res
 
+    @ti.func
+    def cohesion_term(self, r):
+        h = self.ps.support_radius
+        rn = r.norm()
+        res = 0.0
+        k = 32.0 / (np.pi * h**9)
+        if rn <= 0.0 or rn > h:
+            res = 0.0
+            
+        elif rn > 0.5 * h:
+            t = (h - rn) * rn
+            res = k * (t * t * t)
+        else:
+            t = 2.0 * (h - rn) * rn
+            res = k * ((t * t * t) - (h**6) / 64.0)
+
+        return res
+
+    @ti.func
+    def adhesion_term(self, r):
+        h = self.ps.support_radius
+        rn = r.norm()
+        k = 0.007 / (h**3.25)
+        arg = -4.0 * rn * rn / h + 6.0 * rn - 2.0 * h
+        arg = ti.max(arg, 0.0)
+        res = 0.0
+        if rn <= h and rn > 0.5 * h:
+            res = k * ti.sqrt(ti.sqrt(arg))
+
+        return res
 
     @ti.kernel
     def precompute_values(self):
@@ -119,16 +161,18 @@ class SPHBase:
     def initialize(self):
         self.ps.initialize_particle_system()
         self.ps.initialize_object_particle_num()
-        for r_obj_id in self.ps.object_id_rigid_body:
-            self.compute_rigid_rest_cm(r_obj_id)
-
+        if self.ps.num_rigid_bodies > 0:        
+            for r_obj_id in self.ps.object_id_rigid_body:
+                self.compute_rigid_rest_cm(r_obj_id)
 
         self.compute_static_boundary_volume()
         self.ps.initialize_boundary_neighbors()
         self.compute_moving_boundary_volume()
 
-        self.ps.initialize_rigid_mass()
-        print(f"body mass: {self.ps.body_mass.to_numpy()}")
+        if self.ps.num_rigid_bodies > 0:
+            self.ps.initialize_rigid_mass()
+        if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
+            self.ps.emitter_system.reset()
 
 
     @ti.kernel
@@ -357,24 +401,6 @@ class SPHBase:
                 obj = self.ps.object_id[p_i]
                 r = self.ps.x[p_i] - self.ps.cm[obj]
                 self.ps.v[p_i] = self.ps.v_cm_rb[obj] + ti.math.cross(self.ps.omega_rb[obj], r)
-
-
-    # def solve_rigid_body(self):
-
-    #     # self.solve_constraints()
-    #     # self.enforce_rigid_static_contact()
-    #     # for i in range(1):
-    #     #     # print(self.ps.object_id_rigid_body)
-    #     #     for r_obj_id in self.ps.object_id_rigid_body:
-    #     #         if self.ps.object_collection[r_obj_id]["isDynamic"]:
-    #     #             R = self.solve_constraints(r_obj_id)
-    #     #             # if self.ps.cfg.get_cfg("exportObj"):
-    #     #             #     # For output obj only: update the mesh
-    #     #             #     cm = self.compute_com_kernel(r_obj_id)
-    #     #             #     ret = R.to_numpy() @ (self.ps.object_collection[r_obj_id]["restPosition"] - self.ps.object_collection[r_obj_id]["restCenterOfMass"]).T
-    #     #             #     self.ps.object_collection[r_obj_id]["mesh"].vertices = cm.to_numpy() + ret.T
-    #     # self.compute_rigid_collision()
-    #     self.enforce_boundary_3D(self.ps.material_solid)
 
     def step(self):
 
