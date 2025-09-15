@@ -23,8 +23,8 @@ class SPHBase:
             pass
 
         self.viscosity = 0.01  # viscosity
-        self.surface_tension = 0.1
-        self.adhesion_coeff = 0.1
+        self.surface_tension = 0.001
+        self.adhesion_coeff = 0.001
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")

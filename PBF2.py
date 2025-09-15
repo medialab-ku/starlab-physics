@@ -135,58 +135,113 @@ class PBF2Solver(SPHBase):
                 if self.ps.material[p_j] != self.ps.material_fluid:
                     continue
                 n += (self.ps.m[p_j] / (self.ps.density[p_j] + 1e-12)) * self.nablaWij(self.ps.x[p_i] - self.ps.x[p_j])
-            self.ps.n[p_i] = 5.0 * self.ps.support_radius * n
+            self.ps.n[p_i] = self.ps.support_radius * n
+
 
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
         x_i = self.ps.x[p_i]
-        x_j = self.ps.x[p_j]
-        r   = x_i - x_j
-        h   = self.ps.support_radius
 
-        rn = r.norm()
-        inv_rn = 1.0 / ti.max(rn, 1e-6 * h)
-        r_hat  = r * inv_rn
-
-        gradW = self.spiky_kernel_derivative(r)
-        vxy   = (self.ps.v[p_i] - self.ps.v[p_j]).dot(r)
-        eps2  = (0.01 * h) * (0.01 * h)
-
-        # ---------- Cohesion & Viscosity ----------
-        # Akinci2012
-        # Akinci2013
+        ############## Surface Tension ###############
         if self.ps.material[p_j] == self.ps.material_fluid:
-            # Cohesion
-            f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
-            # Curvature
-            f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
-            # Neighborhood deficiency correction K_ij
-            K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
-            # K_ij = ti.min(K_ij, 1.0)
-            ret += K_ij * (f_coh + f_curv)
+            # Fluid neighbors
+            diameter2 = self.ps.particle_diameter * self.ps.particle_diameter
+            x_j = self.ps.x[p_j]
+            r = x_i - x_j
+            r2 = r.dot(r)
+            if r2 > diameter2:
+                ret -= self.surface_tension / self.ps.m[p_i] * self.ps.m[p_j] * r * self.cubic_kernel(r.norm())
+            else:
+                ret -= self.surface_tension / self.ps.m[p_i] * self.ps.m[p_j] * r * self.cubic_kernel(
+                    ti.Vector([self.ps.particle_diameter, 0.0, 0.0]).norm())
 
-            # Viscosity (fluid-fluid)
-            k_visc = 2.0 * (self.ps.dim + 2.0)
-            f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (vxy / (rn * rn + eps2)) * gradW
-            ret += K_ij * f_v
+        ############### Viscosoty Force ###############
+        d = 2 * (self.ps.dim + 2)
+        x_j = self.ps.x[p_j]
+        # Compute the viscosity force contribution
+        r = x_i - x_j
+        v_xy = (self.ps.v[p_i] -
+                self.ps.v[p_j]).dot(r)
 
-        # ---------- Adhesion ----------
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            f_v = d * self.viscosity * (self.ps.m[p_j] / (self.ps.density[p_j])) * v_xy / (
+                    r.norm() ** 2 + 0.01 * self.ps.support_radius ** 2) * self.cubic_kernel_derivative(r)
+            ret += f_v
         elif self.ps.material[p_j] == self.ps.material_solid:
-            f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
-            ret += f_adh
-
-            # (Optional) Boundary Viscosity
             boundary_viscosity = 0.0
-            if boundary_viscosity > 0.0:
-                k_visc = 2.0 * (self.ps.dim + 2.0)
-                f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
-                ret += f_vb
-                if self.ps.is_dynamic_rigid_body(p_j):
-                    # Two-way coupling
-                    self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
-
+            # Boundary neighbors
+            ## Akinci2012
+            f_v = d * boundary_viscosity * (self.ps.m[p_j] / (self.ps.density[p_i])) * v_xy / (
+                    r.norm() ** 2 + 0.01 * self.ps.support_radius ** 2) * self.cubic_kernel_derivative(r)
+            ret += f_v
             if self.ps.is_dynamic_rigid_body(p_j):
-                self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
+                self.ps.acceleration[p_j] += -f_v * self.density_0 / self.ps.density[p_j]
+
+    @ti.kernel
+    def compute_non_pressure_forces(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_static_rigid_body(p_i):
+                self.ps.acceleration[p_i].fill(0.0)
+                continue
+            ############## Body force ###############
+            # Add body force
+            d_v = ti.Vector(self.g)
+            # d_v = ti.Vector([0.0, 0.0, 0.0])
+            self.ps.acceleration[p_i] = d_v
+            if self.ps.material[p_i] == self.ps.material_fluid:
+                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
+                self.ps.acceleration[p_i] = d_v
+
+    # @ti.func
+    # def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
+    #     x_i = self.ps.x[p_i]
+    #     x_j = self.ps.x[p_j]
+    #     r   = x_i - x_j
+    #     h   = self.ps.support_radius
+
+    #     rn = r.norm()
+    #     inv_rn = 1.0 / ti.max(rn, 1e-6 * h)
+    #     r_hat  = r * inv_rn
+
+    #     gradW = self.spiky_kernel_derivative(r)
+    #     vxy   = (self.ps.v[p_i] - self.ps.v[p_j]).dot(r)
+    #     eps2  = (0.01 * h) * (0.01 * h)
+
+    #     # ---------- Cohesion & Viscosity ----------
+    #     # Akinci2012
+    #     # Akinci2013
+    #     if self.ps.material[p_j] == self.ps.material_fluid:
+    #         # Cohesion
+    #         f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
+    #         # Curvature
+    #         f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
+    #         # Neighborhood deficiency correction K_ij
+    #         K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
+    #         # K_ij = ti.min(K_ij, 1.0)
+    #         ret += K_ij * (f_coh + f_curv)
+
+    #         # Viscosity (fluid-fluid)
+    #         k_visc = 2.0 * (self.ps.dim + 2.0)
+    #         f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (vxy / (rn * rn + eps2)) * gradW
+    #         ret += K_ij * f_v
+
+    #     # ---------- Adhesion ----------
+    #     elif self.ps.material[p_j] == self.ps.material_solid:
+    #         f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
+    #         ret += f_adh
+
+    #         # (Optional) Boundary Viscosity
+    #         boundary_viscosity = 0.0
+    #         if boundary_viscosity > 0.0:
+    #             k_visc = 2.0 * (self.ps.dim + 2.0)
+    #             f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
+    #             ret += f_vb
+    #             if self.ps.is_dynamic_rigid_body(p_j):
+    #                 # Two-way coupling
+    #                 self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
+
+    #         if self.ps.is_dynamic_rigid_body(p_j):
+    #             self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
 
     @ti.kernel
     def compute_non_pressure_forces(self):

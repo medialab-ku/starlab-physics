@@ -254,7 +254,7 @@ if __name__ == "__main__":
                     except Exception:
                         pass
                 try:
-                    solver.t = 0.0
+                    solver.time = 0.0
                 except Exception:
                     pass
 
