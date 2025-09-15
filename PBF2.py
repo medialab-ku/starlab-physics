@@ -3,6 +3,7 @@ import math
 import os
 import json
 import time
+import numpy as np
 from sph_base import SPHBase
 from math_utils import *
 
@@ -41,6 +42,15 @@ class PBF2Solver(SPHBase):
         self.max_iteration_pcg = 1000
         self.tol_pcg = 3
 
+        # Stats containers
+        # These are plain Python lists to minimize Taichi interaction overhead.
+        self.stats_elapsed_ms = []
+        self.stats_opt_iter = []
+        self.stats_opt_error = []
+        self.stats_pcg_iter = []
+        self.stats_pcg_error = []
+
+        # Taichi fields and buffers
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.dx = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -78,11 +88,7 @@ class PBF2Solver(SPHBase):
             self.t_rb = None
             self.vsum_rb = None
 
-        self.stats_iter = 0
-        self.stats_pcg_iter = 0
-
         self.matrix_type = 0
-        
         # Iteration logging system
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
@@ -93,6 +99,32 @@ class PBF2Solver(SPHBase):
 
         self.use_max = False
         self.DF_tol = 0.1
+
+    # -----------------------------
+    # Stats helpers
+    # -----------------------------
+    def clear_stats(self):
+        self.stats_elapsed_ms.clear()
+        self.stats_opt_iter.clear()
+        self.stats_opt_error.clear()
+        self.stats_pcg_iter.clear()
+        self.stats_pcg_error.clear()
+
+    def get_stats_numpy(self):
+        """Return stats as numpy arrays. Keys:
+        - elapsed_time_ms
+        - opt_iter
+        - opt_error
+        - pcg_iter
+        - pcg_error
+        """
+        return {
+            "elapsed_time_ms": np.asarray(self.stats_elapsed_ms, dtype=np.float64),
+            "opt_iter": np.asarray(self.stats_opt_iter, dtype=np.int32),
+            "opt_error": np.asarray(self.stats_opt_error, dtype=np.float64),
+            "pcg_iter": np.asarray(self.stats_pcg_iter, dtype=np.int32),
+            "pcg_error": np.asarray(self.stats_pcg_error, dtype=np.float64),
+        }
 
     @ti.kernel
     def precompute_values(self):
@@ -695,6 +727,8 @@ class PBF2Solver(SPHBase):
 
                 err = self.dot(r, r)
 
+                # Collect PCG residual error per iteration
+                self.stats_pcg_error.append(float(err))
                 if self.print_pcg_error:
                     print(f"PCG error: {err}")
 
@@ -710,6 +744,8 @@ class PBF2Solver(SPHBase):
                 rz_old = rz_new
 
 
+        # Collect PCG iteration count per PCG solve
+        self.stats_pcg_iter.append(int(pcg_iter))
         if self.print_pcg_iter:
             print(f"PCG iter: {pcg_iter}")
 
@@ -995,6 +1031,8 @@ class PBF2Solver(SPHBase):
 
 
             err = inf_norm(p)
+            # Collect optimizer error per iteration
+            self.stats_opt_error.append(float(err))
             if self.print_opt_error:
                 print(f"opt iter: {err}")
 
@@ -1003,10 +1041,14 @@ class PBF2Solver(SPHBase):
 
             opt_iter += 1
 
+        elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+        # Collect elapsed time per outer solve
+        self.stats_elapsed_ms.append(float(elapsed_ms))
         if self.print_elapsed_time:
-            elapsed_ms = (time.perf_counter() - t_start) * 1000.0
             print(f"elapsed time: {elapsed_ms:.3f} ms")
 
+        # Collect optimizer iteration count per outer solve
+        self.stats_opt_iter.append(int(opt_iter))
         if self.print_opt_iter:
             print(f"opt iter: {opt_iter}")
 

@@ -676,8 +676,8 @@ class ParticleSystem:
 
         a = 1.0 
         voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
-        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
-        # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
+        # voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
+        voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
         # voxelized_mesh.show()
         voxelized_points_np = voxelized_mesh.points
         # print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")

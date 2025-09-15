@@ -2,6 +2,7 @@ import os
 import argparse
 import taichi as ti
 import numpy as np
+import time
 from config_builder import SimConfig
 from particle_system import ParticleSystem
 from animation import AnimationSystem
@@ -91,6 +92,7 @@ if __name__ == "__main__":
 
     # Export options
     export_rigid_objects = False
+    export_stats = False
 
     # Draw the lines for domain
     x_max, y_max, z_max = config.get_cfg("domainEnd")
@@ -202,13 +204,46 @@ if __name__ == "__main__":
 
     def show_options_stats():
 
-        with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.2) as w:
+        with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.25) as w:
+            global export_stats
 
             solver.print_opt_iter  = w.checkbox("print opt iter", solver.print_opt_iter)
             solver.print_opt_error = w.checkbox("print opt error", solver.print_opt_error)
             solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
             solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
             solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
+            export_stats = w.checkbox("export stats", export_stats)
+
+    # -----------------------------
+    # Stats export helpers
+    # -----------------------------
+    def _clear_solver_stats_if_any():
+        try:
+            if hasattr(solver, "clear_stats"):
+                solver.clear_stats()
+        except Exception:
+            pass
+
+    def _export_solver_stats_if_any():
+        try:
+            if not export_stats:
+                return
+            if not hasattr(solver, "get_stats_numpy"):
+                return
+            stats = solver.get_stats_numpy()
+            if not isinstance(stats, dict) or len(stats) == 0:
+                return
+            os.makedirs(os.path.join("data", "stats"), exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            for name, arr in stats.items():
+                try:
+                    out_path = os.path.join("data", "stats", f"{ts}-{name}.npy")
+                    np.save(out_path, arr)
+                except Exception:
+                    pass
+        except Exception:
+            # Do not crash UI due to stats export errors
+            pass
 
     cnt = 0
     cnt_ply = 0
@@ -229,10 +264,19 @@ if __name__ == "__main__":
 
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
+                # Toggle run state
                 runSim = not runSim
+                if runSim:
+                    # Fresh session: reset per-session stats if supported
+                    _clear_solver_stats_if_any()
+                else:
+                    # Stopped: export stats if requested
+                    _export_solver_stats_if_any()
 
             if window.event.key == 'r':
                 print("rest simulation...")
+                # Before resetting, export current stats if requested
+                _export_solver_stats_if_any()
                 # Preserve solver settings that can be tuned via GUI
                 preserve_names = [
                     'dt', 'num_substep', 'cfl',
@@ -274,6 +318,7 @@ if __name__ == "__main__":
 
         if export_ply and frame_cnt > end_frame:
             runSim = False
+            _export_solver_stats_if_any()
 
         if runSim:
 
