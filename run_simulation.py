@@ -224,8 +224,7 @@ if __name__ == "__main__":
             if window.event.key == ' ':
                 runSim = not runSim
 
-
-
+            if window.event.key == 'r':
                 print("rest simulation...")
                 # Preserve solver settings that can be tuned via GUI
                 preserve_names = [

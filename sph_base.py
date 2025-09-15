@@ -16,7 +16,7 @@ class SPHBase:
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")
-        self.t = 0.0
+        self.time = 0.0
         self.dt = ti.field(float, shape=())
         self.dt[None] = 1e-4
         self.nablaWij = self.spiky_kernel_derivative
@@ -121,6 +121,8 @@ class SPHBase:
         self.ps.initialize_object_particle_num()
         for r_obj_id in self.ps.object_id_rigid_body:
             self.compute_rigid_rest_cm(r_obj_id)
+
+
         self.compute_static_boundary_volume()
         self.ps.initialize_boundary_neighbors()
         self.compute_moving_boundary_volume()
@@ -378,8 +380,8 @@ class SPHBase:
 
         if hasattr(self.ps, 'emitter_system') and self.ps.emitter_system is not None:
             dt = float(self.dt[None]) if isinstance(self.dt, ti.lang.matrix.Matrix) else float(self.dt)
-            self.ps.emitter_system.step(self.t, dt)
-            self.t += dt
+            self.ps.emitter_system.step(self.time, dt)
+            self.time += dt
 
         self.ps.initialize_particle_system()
         self.compute_moving_boundary_volume()

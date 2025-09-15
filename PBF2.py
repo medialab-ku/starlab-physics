@@ -126,41 +126,6 @@ class PBF2Solver(SPHBase):
 
 
 
-        avg_static_neighbors = 0.0
-        if num_dynamic_rigid > 0:
-            avg_static_neighbors = total_static_neighbors / num_dynamic_rigid
-        # print(f"num high density rigid body: {cnt}, avg static neighbors per dynamic rigid: {avg_static_neighbors}")
-
-
-
-
-                J_ij = Dii * self.ps.m[p_j] * grad_ij
-                    self.Hii[p_i] += J_ij.outer_product(J_ij) / denom_i
-            self.Hii[p_i] += J_ii.outer_product(J_ii) / denom_i
-        ret /= self.ps.fluid_particle_num
-
-    @ti.kernel
-    def update_variables_pbf(self):
-
-        ret = 0.0
-        eps = 1e-3
-        I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-        for p_i in ti.grouped(self.ps.x):
-
-            self.c[p_i] = 0.0
-            self.p[p_i] = 0.0
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            self.c[p_i] = self.ps.density[p_i] - self.ps.density0[p_i]
-
-            if self.c[p_i] <= 0.0:
-                self.dfdt[p_i] = 0.0
-            else:
-                self.dfdt[p_i] = 1.0
-
-            self.p[p_i] = (self.dfdt[p_i] / self.Aii[p_i]) * ti.max(self.c[p_i], 0.0)
-
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
         x_i = self.ps.x[p_i]
@@ -1099,7 +1064,7 @@ class PBF2Solver(SPHBase):
         self.ps.initialize_particle_system()
         self.ps.search_neighbours(self.ps.x)
         # self.ps.initialize_boundary_neighbors()
-        self.ps.initialize_boundary_particles()
+        # self.ps.initialize_boundary_particles()
 
         dt_original = self.dt
 
