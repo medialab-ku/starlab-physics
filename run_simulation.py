@@ -4,6 +4,7 @@ import taichi as ti
 import numpy as np
 from config_builder import SimConfig
 from particle_system import ParticleSystem
+from animation import AnimationSystem
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from matplotlib.colors import LinearSegmentedColormap
@@ -78,7 +79,7 @@ if __name__ == "__main__":
     if not transparent_objects:
         transparent_objects = []
     color_alpha = config.get_cfg("alpha")
-    if not color_alpha:
+    if color_alpha is None:
         color_alpha = 1.0
 
     # Invisible flag for transparent objects
@@ -112,6 +113,12 @@ if __name__ == "__main__":
     frame_cnt = 0
     export_ply = output_ply
     end_frame = 1000
+
+    # Initialize animation system
+    animator = AnimationSystem(ps, config)
+    anim_time = 0.0
+
+    # Animation handled by AnimationSystem
 
     def show_options_solver():
 
@@ -229,9 +236,9 @@ if __name__ == "__main__":
                 # Preserve solver settings that can be tuned via GUI
                 preserve_names = [
                     'dt', 'num_substep', 'cfl',
-                    'tol', 'max_iteration_opt', 'method', 'print_info', 'divergence_free_solve',
-                    'omega', 'iisph_vanilla',
-                    'gauss_newton_pcg', 'max_iteration_pcg', 'pcg_tol', 'adaptive_step_size',
+                    'tol_opt', 'max_iteration_opt', 'method', 'print_info', 'print_opt_iter', 'print_opt_error', 'print_pcg_iter', 'print_pcg_error', 'print_elapsed_time',
+                    'omega', 'iisph_vanilla', 'smooth_max', 'eps', 'use_pcg',
+                    'max_iteration_pcg', 'tol_pcg', 'adaptive_step_size',
                 ]
                 preserved = {}
                 for name in preserve_names:
@@ -245,6 +252,7 @@ if __name__ == "__main__":
                 ps = ParticleSystem(config, GGUI=True)
                 solver = ps.build_solver()
                 solver.initialize()
+                animator = AnimationSystem(ps, config)
 
                 # Restore preserved settings
                 for name, value in preserved.items():
@@ -262,6 +270,7 @@ if __name__ == "__main__":
                 frame_cnt = 0
                 cnt_ply = 0
                 runSim = False
+                anim_time = 0.0
 
         if export_ply and frame_cnt > end_frame:
             runSim = False
@@ -269,16 +278,18 @@ if __name__ == "__main__":
         if runSim:
 
             # Move boundary object if the scene is moving_boundary
-
             dt = solver.dt
-            # if scene_name == "moving_boundary":
-            #     dt = config.get_cfg("timeStepSize")
-            #     move_boundary_object(dt)
-                
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
+                # advance animation within substeps for smoother motion
+                if animator.has_animations():
+                    t_now = anim_time + i * solver.dt
+                    animator.apply(t_now)
                 solver.step()
 
+            # advance animation time by full frame dt
+            if animator.has_animations():
+                anim_time += dt
             solver.dt = dt
             frame_cnt += 1
 
@@ -474,7 +485,6 @@ if __name__ == "__main__":
                     for obj_id in transparent_objects:
                         obj_mask = (object_id_np == obj_id)
                         # Scale alpha for shadow casting - lower alpha means less shadow
-                        shadow_alpha = color_alpha * 0.5  # Reduce shadow intensity
                         original_colors[obj_mask, 3] = shadow_alpha
 
                 ps.color_heat_map.from_numpy(original_colors)

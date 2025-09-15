@@ -110,7 +110,8 @@ class ParticleSystem:
         self.dynamic_particle_num = fluid_particle_num + rigid_dynamic_particle_num
         self.particle_max_num = fluid_particle_num + rigid_particle_num
         self.num_rigid_bodies = len(rigid_blocks)+len(rigid_bodies)
-        self.object_particle_num = ti.field(dtype=int, shape=self.num_rigid_bodies + len(fluid_blocks))
+        # Use max object id + 1 to avoid out-of-bounds when indexing by object_id
+        self.object_particle_num = ti.field(dtype=int, shape=self.num_objects)
 
         #========== Particle Emitter ==========#
         emitter_cfg_raw = self.cfg.get_emitter()

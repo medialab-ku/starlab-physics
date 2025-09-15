@@ -2,6 +2,7 @@ import taichi as ti
 import math
 import os
 import json
+import time
 from sph_base import SPHBase
 from math_utils import *
 
@@ -141,107 +142,53 @@ class PBF2Solver(SPHBase):
     @ti.func
     def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
         x_i = self.ps.x[p_i]
-
-        ############## Surface Tension ###############
-        if self.ps.material[p_j] == self.ps.material_fluid:
-            # Fluid neighbors
-            diameter2 = self.ps.particle_diameter * self.ps.particle_diameter
-            x_j = self.ps.x[p_j]
-            r = x_i - x_j
-            r2 = r.dot(r)
-            if r2 > diameter2:
-                ret -= self.surface_tension / self.ps.m[p_i] * self.ps.m[p_j] * r * self.cubic_kernel(r.norm())
-            else:
-                ret -= self.surface_tension / self.ps.m[p_i] * self.ps.m[p_j] * r * self.cubic_kernel(
-                    ti.Vector([self.ps.particle_diameter, 0.0, 0.0]).norm())
-
-        ############### Viscosoty Force ###############
-        d = 2 * (self.ps.dim + 2)
         x_j = self.ps.x[p_j]
-        # Compute the viscosity force contribution
-        r = x_i - x_j
-        v_xy = (self.ps.v[p_i] -
-                self.ps.v[p_j]).dot(r)
+        r   = x_i - x_j
+        h   = self.ps.support_radius
 
+        rn = r.norm()
+        inv_rn = 1.0 / ti.max(rn, 1e-6 * h)
+        r_hat  = r * inv_rn
+
+        gradW = self.spiky_kernel_derivative(r)
+        vxy   = (self.ps.v[p_i] - self.ps.v[p_j]).dot(r)
+        eps2  = (0.01 * h) * (0.01 * h)
+
+        # ---------- Cohesion & Viscosity ----------
+        # Akinci2012
+        # Akinci2013
         if self.ps.material[p_j] == self.ps.material_fluid:
-            f_v = d * self.viscosity * (self.ps.m[p_j] / (self.ps.density[p_j])) * v_xy / (
-                    r.norm() ** 2 + 0.01 * self.ps.support_radius ** 2) * self.cubic_kernel_derivative(r)
-            ret += f_v
+            # Cohesion
+            f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
+            # Curvature
+            f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
+            # Neighborhood deficiency correction K_ij
+            K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
+            # K_ij = ti.min(K_ij, 1.0)
+            ret += K_ij * (f_coh + f_curv)
+
+            # Viscosity (fluid-fluid)
+            k_visc = 2.0 * (self.ps.dim + 2.0)
+            f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (vxy / (rn * rn + eps2)) * gradW
+            ret += K_ij * f_v
+
+        # ---------- Adhesion ----------
         elif self.ps.material[p_j] == self.ps.material_solid:
+            f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
+            ret += f_adh
+
+            # (Optional) Boundary Viscosity
             boundary_viscosity = 0.0
-            # Boundary neighbors
-            ## Akinci2012
-            f_v = d * boundary_viscosity * (self.ps.m[p_j] / (self.ps.density[p_i])) * v_xy / (
-                    r.norm() ** 2 + 0.01 * self.ps.support_radius ** 2) * self.cubic_kernel_derivative(r)
-            ret += f_v
+            if boundary_viscosity > 0.0:
+                k_visc = 2.0 * (self.ps.dim + 2.0)
+                f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
+                ret += f_vb
+                if self.ps.is_dynamic_rigid_body(p_j):
+                    # Two-way coupling
+                    self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
+
             if self.ps.is_dynamic_rigid_body(p_j):
-                self.ps.acceleration[p_j] += -f_v * self.density_0 / self.ps.density[p_j]
-
-    @ti.kernel
-    def compute_non_pressure_forces(self):
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.is_static_rigid_body(p_i):
-                self.ps.acceleration[p_i].fill(0.0)
-                continue
-            ############## Body force ###############
-            # Add body force
-            d_v = ti.Vector(self.g)
-            # d_v = ti.Vector([0.0, 0.0, 0.0])
-            self.ps.acceleration[p_i] = d_v
-            if self.ps.material[p_i] == self.ps.material_fluid:
-                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, d_v)
-                self.ps.acceleration[p_i] = d_v
-
-    # @ti.func
-    # def compute_non_pressure_forces_task(self, p_i, p_j, ret: ti.template()):
-    #     x_i = self.ps.x[p_i]
-    #     x_j = self.ps.x[p_j]
-    #     r   = x_i - x_j
-    #     h   = self.ps.support_radius
-
-    #     rn = r.norm()
-    #     inv_rn = 1.0 / ti.max(rn, 1e-6 * h)
-    #     r_hat  = r * inv_rn
-
-    #     gradW = self.spiky_kernel_derivative(r)
-    #     vxy   = (self.ps.v[p_i] - self.ps.v[p_j]).dot(r)
-    #     eps2  = (0.01 * h) * (0.01 * h)
-
-    #     # ---------- Cohesion & Viscosity ----------
-    #     # Akinci2012
-    #     # Akinci2013
-    #     if self.ps.material[p_j] == self.ps.material_fluid:
-    #         # Cohesion
-    #         f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
-    #         # Curvature
-    #         f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
-    #         # Neighborhood deficiency correction K_ij
-    #         K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
-    #         # K_ij = ti.min(K_ij, 1.0)
-    #         ret += K_ij * (f_coh + f_curv)
-
-    #         # Viscosity (fluid-fluid)
-    #         k_visc = 2.0 * (self.ps.dim + 2.0)
-    #         f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (vxy / (rn * rn + eps2)) * gradW
-    #         ret += K_ij * f_v
-
-    #     # ---------- Adhesion ----------
-    #     elif self.ps.material[p_j] == self.ps.material_solid:
-    #         f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
-    #         ret += f_adh
-
-    #         # (Optional) Boundary Viscosity
-    #         boundary_viscosity = 0.0
-    #         if boundary_viscosity > 0.0:
-    #             k_visc = 2.0 * (self.ps.dim + 2.0)
-    #             f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
-    #             ret += f_vb
-    #             if self.ps.is_dynamic_rigid_body(p_j):
-    #                 # Two-way coupling
-    #                 self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
-
-    #         if self.ps.is_dynamic_rigid_body(p_j):
-    #             self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
+                self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
 
     @ti.kernel
     def compute_non_pressure_forces(self):
@@ -299,6 +246,7 @@ class PBF2Solver(SPHBase):
             self.Aii[p_i] = Aii + eps
             self.k[p_i] = 1.0 / (Aii + eps)
 
+
     @ti.kernel
     def compute_Zii(self):
         eps = 1e-8
@@ -338,14 +286,13 @@ class PBF2Solver(SPHBase):
             Zi = denom / (Gii + eps) 
             self.Zii[p_i] = ti.max(Zi, 1.0)
 
+
     @ti.kernel
     def compute_JtJ(self):
 
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
-
-
             self.Hii[p_i] = ti.math.mat3(0.0)
             J_ii = ti.math.vec3(0.0)
             # denom_i = eps + self.Aii[p_i]
@@ -358,12 +305,13 @@ class PBF2Solver(SPHBase):
                 grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 J_ij = self.ps.m[p_j] * grad_ij
 
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     self.Hii[p_j] += self.dfdt[p_j] * self.k[p_j] * J_ij.outer_product(J_ij)
 
                 J_ii -= J_ij
             JtJ += J_ii.outer_product(J_ii)
             self.Hii[p_i] += self.dfdt[p_i] * self.k[p_i] * JtJ
+
 
     @ti.kernel
     def update_velocities(self, dt: float):
@@ -373,6 +321,7 @@ class PBF2Solver(SPHBase):
                 self.ps.v[p_i] = (self.ps.x[p_i] - self.ps.x_old[p_i]) / dt
             else:
                 self.ps.v[p_i] = ti.math.vec3(0.0)
+
 
     @ti.kernel
     def compute_J_x(self, ret: ti.template(), x: ti.template()):
@@ -394,23 +343,6 @@ class PBF2Solver(SPHBase):
             ret[p_i] = ret_i
 
     @ti.kernel
-    def compute_J_x_active(self, ret: ti.template(), x: ti.template()):
-
-        for p_i in ti.grouped(x):
-            ret[p_i] = 0.0
-
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
-                    ret[p_i] += self.ps.m[p_j] * (x[p_i] - x[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
-                else:
-                    ret[p_i] += self.ps.m[p_j] * (x[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
-
-
-    @ti.kernel
     def num_negative_p(self, p: ti.template()) -> int:
         cnt = 0
         for i in p:
@@ -421,7 +353,6 @@ class PBF2Solver(SPHBase):
 
     @ti.kernel
     def compute_J_tr_x(self, ret: ti.template(), x: ti.template()):
-
 
         for p_i in ti.grouped(x):
             ret[p_i] = ti.math.vec3(0.0)
@@ -437,6 +368,7 @@ class PBF2Solver(SPHBase):
                     ret[p_i] += (self.ps.m[p_j] * x[p_i] + self.ps.m[p_i] * x[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
                 else:
                     ret[p_i] += (self.ps.m[p_j] * x[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
+
 
     @ti.kernel
     def compute_b(self, b: ti.template(), v: ti.template(), dt: float):
@@ -465,13 +397,13 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(b):
             div_i = 0.0
             b[p_i] = 0.0
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
 
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     div_i += self.ps.m[p_j] * (v[p_i] - v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
                     div_i += self.ps.m[p_j] * (v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -521,41 +453,6 @@ class PBF2Solver(SPHBase):
         avg_error /= self.ps.fluid_particle_num
 
         return avg_error
-
-
-    def pressure_solve(self):
-        
-        if self.method == 0:
-            self.constant_density_solve_IISPH()
-
-
-
-    @ti.kernel
-    def clamp_velocity(self, v: ti.template(), vmax: float):
-        for p_i in ti.grouped(v):
-            vi = v[p_i]
-            n = vi.norm()
-            if n > vmax:
-                v[p_i] = (vmax / (n + 1e-12)) * vi
-
-
-
-    @ti.kernel
-    def compute_invM_J_tr_D_x(self, ret: ti.template(), x: ti.template()):
-
-        for p_i in ti.grouped(x):
-            ret_i = ti.math.vec3(0.0)
-
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            inv_density_2 = 1.0 / (self.ps.density[p_i] ** 2)
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
-                ret_i += self.ps.m[p_j] * (x[p_i] * inv_density_2 + x[p_j] / (self.ps.density[p_j] ** 2)) * self.ps.fluid_neighbors_values[p_i, j]
-
-            ret[p_i] = ret_i
-
 
     def divergence_free_sovle_IISPH(self):
 
@@ -655,7 +552,7 @@ class PBF2Solver(SPHBase):
     def compute_gradient(self, grad: ti.template()):
 
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             grad[p_i] = (self.dfdt[p_i] / self.Aii[p_i]) * grad[p_i]
@@ -667,14 +564,14 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(x):
 
             Jx[p_i] = 0.0
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             if self.dfdt[p_i] >= 0:
                 for j in range(self.ps.fluid_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                    if self.ps.material[p_j] == self.ps.material_fluid:
+                    if self.ps.is_dynamic[p_j]:
                         Jx[p_i] += (x[p_i] - x[p_j]).dot(val_ij)
                     else:
                         Jx[p_i] += x[p_i].dot(val_ij)
@@ -682,13 +579,13 @@ class PBF2Solver(SPHBase):
             Jx[p_i] *= (self.dfdt[p_i] * self.k[p_i])
 
         for p_i in ti.grouped(x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             Ax[p_i] = self.ps.m[p_i] * x[p_i]
 
         for p_i in ti.grouped(x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             if self.dfdt[p_i] >= 0:
@@ -697,14 +594,14 @@ class PBF2Solver(SPHBase):
                     val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                     Ax[p_i] += Jx[p_i] * val_ij
 
-                    if self.ps.material[p_j] == self.ps.material_fluid:
+                    if self.ps.is_dynamic[p_j]:
                         Ax[p_j] -= Jx[p_i] * val_ij
 
     @ti.kernel
     def compute_Ax2(self, Ax: ti.template(), Jx: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             Ax[p_i] = 0.0
@@ -712,7 +609,7 @@ class PBF2Solver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     Jx[p_i] += (x[p_i] - x[p_j]).dot(val_ij)
                 else:
                     Jx[p_i] += x[p_i].dot(val_ij)
@@ -721,7 +618,7 @@ class PBF2Solver(SPHBase):
 
 
         for p_i in ti.grouped(x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
@@ -729,7 +626,7 @@ class PBF2Solver(SPHBase):
                 val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 Ax[p_i] += Jx[p_i] * val_ij
 
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     Ax[p_j] -= Jx[p_i] * val_ij
 
     @ti.kernel
@@ -739,7 +636,7 @@ class PBF2Solver(SPHBase):
 
             dx[p_i] = ti.math.vec3(0.0)
             I3x3 = ti.math.mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             H = self.ps.m[p_i] * I3x3 + Hii[p_i]
@@ -765,16 +662,6 @@ class PBF2Solver(SPHBase):
                 continue
 
             ret[i] = v0[i] + scale * v1[i]
-
-
-    @ti.kernel
-    def update_coeff(self):
-
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
-                continue
-
-            self.k[p_i] = self.dfdt[p_i] * ((self.c[p_i] / self.Aii[p_i]) + self.p[p_i])
 
 
     def PCG(self):
@@ -803,7 +690,7 @@ class PBF2Solver(SPHBase):
 
                 alpha = rz_old / pAp
 
-                self.add(x, x, alpha, p)
+                self.add(x, x, alpha, p) 
                 self.add(r, r, -alpha, Ap)
 
                 err = self.dot(r, r)
@@ -832,7 +719,7 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(x):
 
             ret[p_i] = 0.0
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             if x[p_i] >= 0.0:
@@ -848,7 +735,7 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(self.ps.x):
             ret[p_i] = 0.0
 
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             if x[p_i] >= 0.0:
@@ -909,7 +796,7 @@ class PBF2Solver(SPHBase):
     def compute_constraint(self):
 
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             self.c[p_i] = (self.ps.density[p_i] - self.ps.density0[p_i])
@@ -922,7 +809,7 @@ class PBF2Solver(SPHBase):
             self.d_v[p_i] = ti.math.vec3(0.0)
             self.d_l[p_i] = 0.0
 
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             self.d_v[p_i] = self.ps.m[p_i] * self.s[p_i]
@@ -940,7 +827,7 @@ class PBF2Solver(SPHBase):
             ret_l[p_i] = 0.0
             self.tmp[p_i] = ti.math.vec3(0.0)
 
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             ret_v[p_i] = x_v[p_i]
@@ -948,7 +835,7 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(self.ps.x):
 
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             ret_l[p_i] = x_l[p_i]
@@ -957,8 +844,8 @@ class PBF2Solver(SPHBase):
                 for j in range(self.ps.fluid_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     # val = ti.cast(self.ps.material[p_i], float)
-                    if self.ps.material[p_i] == self.ps.material_fluid:
-                        if self.ps.material[p_j] == self.ps.material_fluid:
+                    if self.ps.is_dynamic[p_i]:
+                        if self.ps.is_dynamic[p_j]:
                             ret_l[p_i] -=self.ps.m[p_j] * (self.tmp[p_i] - self.tmp[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                         else:
                             ret_l[p_i] -= (self.ps.m[p_j] * self.tmp[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -969,17 +856,17 @@ class PBF2Solver(SPHBase):
             # ret_v[p_i] = ti.math.vec3(0.0)
             # ret_l[p_i] = 0.0
 
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
-            ret_v[p_i] =     ret_v[p_i] / self.ps.m[p_i]
+            ret_v[p_i] = ret_v[p_i] / self.ps.m[p_i]
             ret_l[p_i] = - 0.5 * (self.dfdt[p_i] / self.Aii[p_i]) * ret_l[p_i]
 
         # step 3
         for p_i in ti.grouped(self.ps.x):
 
             self.tmp[p_i] = ti.math.vec3(0.0)
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             # num_f += 1
@@ -988,8 +875,8 @@ class PBF2Solver(SPHBase):
                 for j in range(self.ps.fluid_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     # val = ti.cast(self.ps.material[p_i], float)
-                    if self.ps.material[p_i] == self.ps.material_fluid:
-                        if self.ps.material[p_j] == self.ps.material_fluid:
+                    if self.ps.is_dynamic[p_i]:
+                        if self.ps.is_dynamic[p_j]:
                             self.tmp[p_i] += (self.ps.m[p_j] * ret_l[p_i] + self.ps.m[p_i] * ret_l[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
                         else:
                             self.tmp[p_i] += (self.ps.m[p_j] * ret_l[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
@@ -1007,7 +894,7 @@ class PBF2Solver(SPHBase):
             ret_v[p_i] = ti.math.vec3(0.0)
             ret_l[p_i] = 0.0
 
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             ret_v[p_i] = self.ps.m[p_i] * x_v[p_i]
@@ -1015,15 +902,15 @@ class PBF2Solver(SPHBase):
             if self.dfdt[p_i] > 0.0:
                 for j in range(self.ps.fluid_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
-                    if self.ps.material[p_i] == self.ps.material_fluid:
-                        if self.ps.material[p_j] == self.ps.material_fluid:
+                    if self.ps.is_dynamic[p_i]:
+                        if self.ps.is_dynamic[p_j]:
                             ret_v[p_i] += (self.ps.m[p_j] * x_l[p_i] + self.ps.m[p_i] * x_l[p_j]) * self.ps.fluid_neighbors_values[p_i, j]
                         else:
                             ret_v[p_i] += (self.ps.m[p_j] * x_l[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
 
                 for j in range(self.ps.fluid_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
-                    if self.ps.material[p_j] == self.ps.material_fluid:
+                    if self.ps.is_dynamic[p_j]:
                         ret_l[p_i] += self.ps.m[p_j] * (x_v[p_i] - x_v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                     else:
                         ret_l[p_i] += self.ps.m[p_j] * (x_v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -1035,12 +922,12 @@ class PBF2Solver(SPHBase):
         for p_i in ti.grouped(self.ps.x):
 
             self.Jx[p_i] = 0.0
-            if self.ps.material[p_i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
-                if self.ps.material[p_j] == self.ps.material_fluid:
+                if self.ps.is_dynamic[p_j]:
                     self.Jx[p_i] += self.ps.m[p_j] * (x_v[p_i] - x_v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
                 else:
                     self.Jx[p_i] += self.ps.m[p_j] * (x_v[p_i]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -1062,7 +949,7 @@ class PBF2Solver(SPHBase):
         return flag
 
     def constant_density_solve(self):
-
+        t_start = time.perf_counter()
         self.ps.x_old.copy_from(self.ps.x)
         add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
 
@@ -1117,7 +1004,8 @@ class PBF2Solver(SPHBase):
             opt_iter += 1
 
         if self.print_elapsed_time:
-            print("elapsed time: TODO [ms]")
+            elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+            print(f"elapsed time: {elapsed_ms:.3f} ms")
 
         if self.print_opt_iter:
             print(f"opt iter: {opt_iter}")
@@ -1125,10 +1013,16 @@ class PBF2Solver(SPHBase):
 
         #x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
-        self.enforce_boundary_3D(self.ps.material_fluid)
+        # self.enforce_boundary_3D(self.ps.material_fluid)
 
         #v_n+1_tmp
         self.update_velocities(self.dt)
+        # if self.ps.num_rigid_bodies > 0:
+        #     self.rigid_compute_cm_and_vcm()
+        #     self.rigid_compute_angular_velocity()
+        #     self.rigid_project_velocities()
+
+
 
 
     def divergence_free_solve(self):

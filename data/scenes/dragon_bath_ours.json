@@ -1,0 +1,58 @@
+{
+	"Configuration": 
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [18.0, 6.0, 5.2],
+		"particleRadius": 0.02,
+		"numSubstepping": 1,
+		"density0": 1000, 
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.005,
+		"stiffness": 50000,
+		"exponent": 7,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+		"transparentObjects": [2]
+	},
+	"RigidBodies": [
+		{
+            "objectId": 1,
+			"geometryFile": "./data/models/Dragon_50k.obj",
+			"translation": [7.0, 0.5, 1.4], 
+			"rotationAxis": [0, 1, 0],
+			"rotationAngle": 20,
+			"scale": [4.0, 4.0, 4.0],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255], 
+			"isDynamic": false
+		},
+		{
+			"objectId": 2,
+			"geometryFile": "./data/models/BoxWide.obj",
+			"translation": [7.0, 0.1, 2.5],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [7.0, 3.0, 3.6],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false
+		}
+	],
+	"FluidBlocks": [
+		{
+            "objectId": 0,
+			"start": [0.7, 0.5, 0.6],
+			"end": [3.0, 3.7, 4.0],
+			"translation": [0.2, 0.0, 0.2],
+			"scale": [1, 1, 1],
+			"velocity": [0.0, -1.0, 0.0],
+			"density": 1000.0,
+			"color": [50, 100, 200]
+		}
+	]
+}
