@@ -271,10 +271,10 @@ class PBF2Solver(SPHBase):
                 if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                     continue
                 if self.ps.is_dynamic[p_j]:
-                    Aii += J_ij.dot(J_ij) / self.ps.m[p_j]
+                    Aii += J_ij.dot(J_ij) * self.ps.m_inv[p_j]
 
                 J_ii -= J_ij
-            Aii += J_ii.dot(J_ii) / self.ps.m[p_i]
+            Aii += J_ii.dot(J_ii) * self.ps.m_inv[p_i]
             self.Aii[p_i] = Aii + eps
             self.k[p_i] = 1.0 / (Aii + eps)
 
@@ -867,7 +867,7 @@ class PBF2Solver(SPHBase):
                 continue
 
             ret_v[p_i] = x_v[p_i]
-            self.tmp[p_i] = x_v[p_i] / self.ps.m[p_i]
+            self.tmp[p_i] = x_v[p_i] * self.ps.m_inv[p_i]
 
         for p_i in ti.grouped(self.ps.x):
 
@@ -895,7 +895,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            ret_v[p_i] = ret_v[p_i] / self.ps.m[p_i]
+            ret_v[p_i] = ret_v[p_i] * self.ps.m_inv[p_i]
             ret_l[p_i] = - 0.5 * (self.dfdt[p_i] / self.Aii[p_i]) * ret_l[p_i]
 
         # step 3
@@ -918,7 +918,7 @@ class PBF2Solver(SPHBase):
                             self.tmp[p_i] += (self.ps.m[p_j] * ret_l[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
 
 
-            ret_v[p_i] = ret_v[p_i] - self.tmp[p_i] / self.ps.m[p_i]
+            ret_v[p_i] = ret_v[p_i] - self.tmp[p_i] * self.ps.m_inv[p_i]
 
     @ti.kernel
     def compute_B_x(self, ret_v: ti.template(), ret_l: ti.template(), x_v: ti.template(), x_l: ti.template()):

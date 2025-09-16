@@ -1,0 +1,218 @@
+import numpy as np
+
+
+class SimulationCache:
+    """Frame-level simulation cache with ring buffer and UI helpers.
+
+    Stores and restores a consistent set of per-particle fields to prevent
+    index misalignment after counting-sort. Also preserves solver time,
+    animator time (provided by caller), emitter states, and numpy RNG state.
+    """
+
+    def __init__(self, particle_system, solver, max_steps=10):
+        self.ps = particle_system
+        self.solver = solver
+        self.enabled = False
+        self.max_steps = int(max_steps)
+        self._cache = []
+        self.last_rewind_steps = 0
+
+    def clear(self):
+        self._cache.clear()
+        self.last_rewind_steps = 0
+
+    def set_enabled(self, value: bool):
+        self.enabled = bool(value)
+        if not self.enabled:
+            self.clear()
+
+    def set_max_steps(self, steps: int):
+        self.max_steps = max(1, int(steps))
+        # Trim immediately if needed
+        while len(self._cache) > self.max_steps:
+            self._cache.pop(0)
+
+    def _snapshot(self, frame_cnt: int, anim_time: float):
+        try:
+            N = int(self.ps.particle_num[None])
+            snap = {
+                "frame": int(frame_cnt),
+                "particle_num": N,
+                "anim_time": float(anim_time),
+            }
+
+            # Per-particle arrays (sorted order)
+            field_names = [
+                "object_id",
+                "x", "x_old", "x_0",
+                "v", "v_adv",
+                "acceleration",
+                "m_V", "m", "m_inv",
+                "density", "density0",
+                "pressure", "divergence",
+                "material", "color", "is_dynamic",
+                "n",
+            ]
+            arr = {}
+            for name in field_names:
+                try:
+                    arr[name] = getattr(self.ps, name).to_numpy()[:N].copy()
+                except Exception:
+                    # optional or missing fields
+                    pass
+            try:
+                if hasattr(self.ps, "dfsph_factor"):
+                    arr["dfsph_factor"] = self.ps.dfsph_factor.to_numpy()[:N].copy()
+                if hasattr(self.ps, "density_adv"):
+                    arr["density_adv"] = self.ps.density_adv.to_numpy()[:N].copy()
+            except Exception:
+                pass
+            snap["arr"] = arr
+
+            # Solver time
+            try:
+                snap["solver_time"] = float(getattr(self.solver, "time", 0.0))
+            except Exception:
+                snap["solver_time"] = 0.0
+
+            # Emitter states
+            if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
+                e_sys = self.ps.emitter_system
+                e_states = []
+                try:
+                    for e in e_sys.emitters:
+                        e_states.append({
+                            "x": e.x.copy(),
+                            "next_emit_time": float(e.next_emit_time),
+                            "emit_counter": int(e.emit_counter),
+                        })
+                except Exception:
+                    e_states = None
+                snap["emitter_states"] = e_states
+                snap["emitter_suppress"] = int(getattr(e_sys, "suppress_steps", 0))
+            else:
+                snap["emitter_states"] = None
+                snap["emitter_suppress"] = 0
+
+            # RNG state
+            snap["np_random_state"] = np.random.get_state()
+            return snap
+        except Exception:
+            return None
+
+    def push(self, frame_cnt: int, anim_time: float):
+        if not self.enabled:
+            return
+        snap = self._snapshot(frame_cnt, anim_time)
+        if snap is None:
+            return
+        self._cache.append(snap)
+        if len(self._cache) > self.max_steps:
+            self._cache.pop(0)
+
+    def _find_snapshot_for_frame(self, target_frame: int):
+        for s in reversed(self._cache):
+            if s.get("frame", -1) == target_frame:
+                return s
+        return None
+
+    def _restore(self, snap):
+        if snap is None:
+            return False, None, None
+        try:
+            N = int(snap["particle_num"])
+            self.ps.particle_num[None] = N
+            # arrays
+            if "arr" in snap and isinstance(snap["arr"], dict):
+                for name, val in snap["arr"].items():
+                    try:
+                        buf = getattr(self.ps, name).to_numpy()
+                        buf[:N] = val
+                        getattr(self.ps, name).from_numpy(buf)
+                    except Exception:
+                        pass
+
+            # solver time
+            try:
+                self.solver.time = float(snap.get("solver_time", 0.0))
+            except Exception:
+                pass
+
+            # emitters
+            if hasattr(self.ps, "emitter_system") and self.ps.emitter_system and snap.get("emitter_states") is not None:
+                e_sys = self.ps.emitter_system
+                try:
+                    for e, st in zip(e_sys.emitters, snap["emitter_states"]):
+                        e.x = st["x"].astype(np.float32)
+                        e.next_emit_time = float(st["next_emit_time"]) 
+                        e.emit_counter = int(st["emit_counter"]) 
+                    e_sys.suppress_steps = int(snap.get("emitter_suppress", 0))
+                except Exception:
+                    pass
+
+            # RNG
+            try:
+                np.random.set_state(snap["np_random_state"]) 
+            except Exception:
+                pass
+
+            # rebuild grid and neighbors
+            try:
+                self.ps.initialize_particle_system()
+            except Exception:
+                pass
+
+            return True, int(snap.get("frame", 0)), float(snap.get("anim_time", 0.0))
+        except Exception:
+            return False, None, None
+
+    def rewind_one(self, current_frame: int):
+        """Rewind to the latest cached snapshot before current_frame.
+
+        Returns dict: {
+            'restored': bool,
+            'frame': int or None,
+            'anim_time': float or None,
+            'rewind_steps': int
+        }
+        """
+        target = int(current_frame) - 1
+        snap = self._find_snapshot_for_frame(target)
+        if snap is None:
+            for s in reversed(self._cache):
+                if s.get("frame", -1) < int(current_frame):
+                    snap = s
+                    break
+        if snap is None:
+            self.last_rewind_steps = 0
+            return {"restored": False, "frame": None, "anim_time": None, "rewind_steps": 0}
+
+        diff = max(0, int(current_frame) - int(snap.get("frame", 0)))
+        ok, frame_restored, anim_time_restored = self._restore(snap)
+        self.last_rewind_steps = diff if ok else 0
+        return {
+            "restored": ok,
+            "frame": frame_restored,
+            "anim_time": anim_time_restored,
+            "rewind_steps": self.last_rewind_steps,
+        }
+
+    def show_ui(self, gui, current_frame: int, pos=(0.4, 0.0), size=(0.3, 0.25)):
+        """Render a small UI panel. Returns rewind result dict when rewound; otherwise {'restored': False}.
+        """
+        with gui.sub_window("Cache settings", pos[0], pos[1], size[0], size[1]) as w:
+            prev_enabled = self.enabled
+            self.enabled = w.checkbox("enable cache", self.enabled)
+            self.max_steps = w.slider_int("cache steps", self.max_steps, 1, 200)
+            if (not self.enabled) and prev_enabled:
+                self.clear()
+            gui.text(f"cached frames: {len(self._cache)}")
+            gui.text(f"last rewind: {self.last_rewind_steps} frames")
+            if self.enabled:
+                if w.button("Rewind 1 frame"):
+                    return self.rewind_one(current_frame)
+                if w.button("Clear cache"):
+                    self.clear()
+        return {"restored": False}
+
+

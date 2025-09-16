@@ -66,19 +66,6 @@
 			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
 			"isDynamic": false
-		},
-		{
-			"objectId": 2,
-			"geometryFile": "./data/models/sphere.obj",
-			"translation": [1.5, 2.0, 1.5],
-			"rotationAxis": [0, 0, 1],
-			"rotationAngle": 0,
-			"scale": [0.2, 0.2, 0.2],
-			"velocity": [0.1, 0.0, 0.0],
-			"density": 500.0,
-			"color": [255, 255, 255, 1.0],
-			"isDynamic": true
 		}
-
 	]
 }

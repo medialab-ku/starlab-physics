@@ -62,7 +62,12 @@ class ParticleSystem:
         fluid_blocks = self.cfg.get_fluid_blocks()
         fluid_particle_num = 0
         for fluid in fluid_blocks:
-            particle_num = self.compute_cube_particle_num(fluid["start"], fluid["end"])
+            t = np.array(fluid.get("translation", [0, 0, 0]), dtype=np.float32)
+            s = np.array(fluid.get("scale", [1, 1, 1]), dtype=np.float32)
+            start = np.array(fluid["start"], dtype=np.float32) + t
+            size  = (np.array(fluid["end"], dtype=np.float32) - np.array(fluid["start"], dtype=np.float32)) * s
+            end   = start + size
+            particle_num = self.compute_cube_particle_num(start, end)
             fluid["particleNum"] = particle_num
             self.object_collection[fluid["objectId"]] = fluid
             fluid_particle_num += particle_num
@@ -84,7 +89,12 @@ class ParticleSystem:
         rigid_particle_num = 0
         rigid_dynamic_particle_num = 0
         for rigid in rigid_blocks:
-            particle_num = self.compute_cube_particle_num(rigid["start"], rigid["end"])
+            t = np.array(fluid.get("translation", [0, 0, 0]), dtype=np.float32)
+            s = np.array(fluid.get("scale", [1, 1, 1]), dtype=np.float32)
+            start = np.array(fluid["start"], dtype=np.float32) + t
+            size  = (np.array(fluid["end"], dtype=np.float32) - np.array(fluid["start"], dtype=np.float32)) * s
+            end   = start + size
+            particle_num = self.compute_cube_particle_num(start, end)
             rigid["particleNum"] = particle_num
             self.object_collection[rigid["objectId"]] = rigid
             rigid_particle_num += particle_num
@@ -189,6 +199,7 @@ class ParticleSystem:
         self.acceleration_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.m_V_buffer = ti.field(dtype=float, shape=self.particle_max_num)
         self.m_buffer = ti.field(dtype=float, shape=self.particle_max_num)
+        self.m_inv_buffer = ti.field(dtype=float, shape=self.particle_max_num)
         self.density_buffer  = ti.field(dtype=float, shape=self.particle_max_num)
         self.density0_buffer = ti.field(dtype=float, shape=self.particle_max_num)
         self.pressure_buffer = ti.field(dtype=float, shape=self.particle_max_num)
@@ -505,6 +516,7 @@ class ParticleSystem:
             self.acceleration_buffer[new_index] = self.acceleration[I]
             self.m_V_buffer[new_index] = self.m_V[I]
             self.m_buffer[new_index] = self.m[I]
+            self.m_inv_buffer[new_index] = self.m_inv[I]
             self.density_buffer[new_index] = self.density[I]
             self.density0_buffer[new_index] = self.density0[I]
             self.pressure_buffer[new_index] = self.pressure[I]
@@ -525,6 +537,7 @@ class ParticleSystem:
             self.acceleration[I] = self.acceleration_buffer[I]
             self.m_V[I] = self.m_V_buffer[I]
             self.m[I] = self.m_buffer[I]
+            self.m_inv[I] = self.m_inv_buffer[I]
             self.density[I] = self.density_buffer[I]
             self.density0[I] = self.density0_buffer[I]
             self.pressure[I] = self.pressure_buffer[I]
@@ -584,6 +597,10 @@ class ParticleSystem:
 
                 if sum_Wij > 1e-12:
                     self.m[p_i] = 0.7 * self.density0[p_i] / sum_Wij
+                    self.m_V[p_i] = self.m[p_i] / self.density0[p_i]
+                    # Keep inverse mass consistent (static solids keep 0 inv mass)
+                    if self.is_dynamic[p_i]:
+                        self.m_inv[p_i] = 1.0 / (self.m[p_i] + 1e-12)
 
     @ti.kernel
     def search_neighbours(self, x: ti.template()):
@@ -594,7 +611,12 @@ class ParticleSystem:
             for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
                 nbr_cell = self.clamp_cell(center_cell + offset)
                 grid_index = self.flatten_grid_index(nbr_cell)
-                for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
+                start = 0
+                if grid_index > 0:
+                    start = self.grid_particles_num[grid_index - 1]
+                end = self.grid_particles_num[grid_index]
+                for p_j in range(start, end):
+                # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
                     if p_i != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
                         if self.fluid_neighbors_num[p_i] < self.cache_size:
                             self.fluid_neighbors[p_i, self.fluid_neighbors_num[p_i]] = p_j 
@@ -676,8 +698,8 @@ class ParticleSystem:
 
         a = 1.0 
         voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
-        # voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
-        voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
+        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
+        # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
         # voxelized_mesh.show()
         voxelized_points_np = voxelized_mesh.points
         # print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")

@@ -21,10 +21,10 @@
 		{
             "objectId": 1,
 			"geometryFile": "./data/models/Dragon_50k.obj",
-			"translation": [7.0, 0.5, 1.4], 
+			"translation": [8.0, 0.5, 2.0], 
 			"rotationAxis": [0, 1, 0],
 			"rotationAngle": 20,
-			"scale": [4.0, 4.0, 4.0],
+			"scale": [3.0, 3.0, 3.0],
 			"velocity": [0.0, 0.0, 0.0],
 			"density": 1000.0,
 			"color": [255, 255, 255], 
@@ -38,7 +38,7 @@
 			"rotationAngle": 0,
 			"scale": [7.0, 3.0, 3.6],
 			"velocity": [0.0, 0.0, 0.0],
-			"density": 1000000.0,
+			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
 			"isDynamic": false
 		}

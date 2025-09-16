@@ -24,7 +24,7 @@ class SPHBase:
 
         self.viscosity = 0.01  # viscosity
         self.surface_tension = 0.001
-        self.adhesion_coeff = 0.001
+        self.adhesion_coeff = self.surface_tension
 
         self.density_0 = 1000.0  # reference density
         self.density_0 = self.ps.cfg.get_cfg("density0")
@@ -154,8 +154,8 @@ class SPHBase:
                 self.compute_rigid_rest_cm(r_obj_id)
 
         self.compute_static_boundary_volume()
-        self.ps.initialize_boundary_neighbors()
         self.compute_moving_boundary_volume()
+        self.ps.initialize_boundary_neighbors()
 
         if self.ps.num_rigid_bodies > 0:
             self.ps.initialize_rigid_mass()
@@ -194,7 +194,6 @@ class SPHBase:
             delta = self.cubic_kernel(0.0)
             self.ps.for_all_neighbors(p_i, self.compute_boundary_volume_task, delta)
             self.ps.m_V[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
-            self.ps.m_V[p_i] = self.ps.m[p_i] / self.ps.density0[p_i]
 
 
     def substep(self):
@@ -274,7 +273,9 @@ class SPHBase:
                 mass = self.ps.m_V[p_i] * self.ps.density0[p_i]
                 cm += mass * self.ps.x[p_i]
                 sum_m += mass
-        cm /= sum_m
+
+        if sum_m > 1e-12:
+            cm /= sum_m
         return cm
     
 

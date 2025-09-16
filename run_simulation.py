@@ -6,6 +6,7 @@ import time
 from config_builder import SimConfig
 from particle_system import ParticleSystem
 from animation import AnimationSystem
+from cache_system import SimulationCache
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from matplotlib.colors import LinearSegmentedColormap
@@ -122,6 +123,9 @@ if __name__ == "__main__":
 
     # Animation handled by AnimationSystem
 
+    # Caching system
+    cache = SimulationCache(ps, solver, max_steps=10)
+
     def show_options_solver():
 
         with gui.sub_window("Solver settings", 0., 0., 0.4, 0.3) as w:
@@ -162,6 +166,7 @@ if __name__ == "__main__":
         global heatmap_type
         global export_rigid_objects
         global export_ply
+        global export_stats
 
         with gui.sub_window("Visualization settings", 0.0, 0.4, 0.4, 0.3) as w:
 
@@ -171,6 +176,7 @@ if __name__ == "__main__":
 
             if export_ply:
                 end_frame = w.slider_int("end frame", end_frame, 0, int(5e3))
+            export_stats = w.checkbox("export stats", export_stats)
 
             gui.text("")  # Spacer
             gui.text("Visualization Controls:")
@@ -205,14 +211,13 @@ if __name__ == "__main__":
     def show_options_stats():
 
         with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.25) as w:
-            global export_stats
 
             solver.print_opt_iter  = w.checkbox("print opt iter", solver.print_opt_iter)
             solver.print_opt_error = w.checkbox("print opt error", solver.print_opt_error)
             solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
             solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
             solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
-            export_stats = w.checkbox("export stats", export_stats)
+            
 
     # -----------------------------
     # Stats export helpers
@@ -261,6 +266,15 @@ if __name__ == "__main__":
         show_options_solver()
         show_options_visual()
         show_options_stats()
+        # Cache UI
+        res_cache = cache.show_ui(gui, current_frame=frame_cnt, pos=(0.4, 0.0), size=(0.3, 0.25))
+        if res_cache.get("restored", False):
+            runSim = False
+            try:
+                anim_time = float(res_cache.get("anim_time", anim_time))
+                frame_cnt = int(res_cache.get("frame", frame_cnt))
+            except Exception:
+                pass
 
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
@@ -273,10 +287,24 @@ if __name__ == "__main__":
                     # Stopped: export stats if requested
                     _export_solver_stats_if_any()
 
+            if window.event.key == 'b':
+                # Rewind one cached frame (if available)
+                runSim = False
+                result = cache.rewind_one(frame_cnt)
+                if result.get("restored", False):
+                    try:
+                        anim_time = float(result.get("anim_time", anim_time))
+                        frame_cnt = int(result.get("frame", frame_cnt))
+                    except Exception:
+                        pass
+                    print(f"rewind: {result.get('rewind_steps', 0)} frames")
+
             if window.event.key == 'r':
                 print("rest simulation...")
                 # Before resetting, export current stats if requested
                 _export_solver_stats_if_any()
+                # Clear cache when resetting the entire simulation
+                cache.clear()
                 # Preserve solver settings that can be tuned via GUI
                 preserve_names = [
                     'dt', 'num_substep', 'cfl',
@@ -337,6 +365,9 @@ if __name__ == "__main__":
                 anim_time += dt
             solver.dt = dt
             frame_cnt += 1
+
+            # After completing a frame, cache the end-of-frame state
+            cache.push(frame_cnt=frame_cnt, anim_time=anim_time)
 
             if frame_cnt > 0 and frame_cnt % output_interval == 0:
                 if export_ply:
@@ -439,8 +470,6 @@ if __name__ == "__main__":
             norm_div = Normalize(vmin=0.0, vmax=5.0)
             norm_density = Normalize(vmin=-50.0, vmax=50.0)
             
-
-
             # Step 5: Map normalized values to RGB (fluid particles only)
             if viz_mode == 1:
                 if heatmap_type == 1:

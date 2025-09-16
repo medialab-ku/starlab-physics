@@ -15,7 +15,7 @@
 		"exportFrame": false,
 		"exportPly": false,
 		"exportObj": false,
-        "transparentObjects": [1],
+        "transparentObjects": [1, 3],
         "alpha": 0.2
 	},
 
@@ -24,8 +24,8 @@
             "objectId": 0,
             "start": [0.3, 1.5, 0.3],
             "end": [0.9, 7.0, 0.9],
-            "translation": [0.0, 0.1, 0.0],
-            "scale": [1, 1, 1],
+            "translation": [0.2, 0.1, 0.2],
+            "scale": [1.2, 1.2, 1.2],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [10, 100, 200]
@@ -39,9 +39,9 @@
             "translation": [0.2, 0.1, 0.2],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [0.75, 2.0, 0.75],
+            "scale": [0.75, 7.0, 0.75],
             "velocity": [0.0, 0.0, 0.0],
-            "density": 1000000.0,
+            "density": 1000.0,
             "color": [255, 255, 255, 1.0],
             "isDynamic": false
         },
@@ -51,7 +51,7 @@
             "translation": [0.2, 0.1, 0.2],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [0.75, 2.0, 0.75],
+            "scale": [0.75, 1.0, 0.75],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
@@ -59,10 +59,22 @@
 			"animation": {
 				"type": "oscillate",
 				"axis": "y",
-				"amplitude": 5.0,
+				"amplitude": 6.0,
 				"period": 3.5,
 				"phase": 0.0
 			}
+        },
+        {
+            "objectId": 3,
+            "geometryFile": "./data/models/movingBoundaryCeli.obj",
+            "translation": [0.2, 2.1, 0.2],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.75, 1.0, 0.75],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
         }        
     ]
 }
