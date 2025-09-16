@@ -15,7 +15,7 @@
 		"exportFrame": false,
 		"exportPly": false,
 		"exportObj": false,
-        "transparentObjects": [1],
+        "transparentObjects": [1, 2],
         "alpha": 0.2
 	},
 
@@ -40,6 +40,18 @@
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
             "scale": [0.75, 2.0, 0.75],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        },
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/movingBoundaryCeli.obj",
+            "translation": [1.9, 4.3, 1.9],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.75, 0.75, 0.75],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],

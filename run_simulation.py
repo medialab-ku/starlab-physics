@@ -244,10 +244,32 @@ if __name__ == "__main__":
             if not isinstance(stats, dict) or len(stats) == 0:
                 return
             os.makedirs(os.path.join("data", "stats"), exist_ok=True)
-            ts = time.strftime("%Y%m%d_%H%M%S")
+            # Build descriptive prefix instead of timestamp
+            # Format: dt<dt>-tol<tol_opt>-<label>-<pcgFlag>
+            try:
+                label = "ours" if bool(getattr(solver, "smooth_max", False)) else "2014Bender"
+            except Exception:
+                label = "unknown"
+            try:
+                dt_val = float(getattr(solver, "dt", 0.0))
+            except Exception:
+                dt_val = 0.0
+            try:
+                tol_opt_val = int(getattr(solver, "tol_opt", 0))
+            except Exception:
+                tol_opt_val = 0
+            try:
+                use_pcg_flag = bool(getattr(solver, "use_pcg", False)) if label == "ours" else False
+            except Exception:
+                use_pcg_flag = False
+            pcg_part = "pcg" if use_pcg_flag else "nopcg"
+            # Base prefix excludes method variant
+            prefix = f"dt{dt_val:.5f}-tol{tol_opt_val}"
+            # Variant encodes method and pcg combination
+            variant = f"{label}-{pcg_part}"
             for name, arr in stats.items():
                 try:
-                    out_path = os.path.join("data", "stats", f"{ts}-{name}.npy")
+                    out_path = os.path.join("data", "stats", f"{prefix}-{variant}-{name}.npy")
                     np.save(out_path, arr)
                 except Exception:
                     pass

@@ -2,8 +2,8 @@
 	"Configuration":
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [5.0, 20.0, 5.0],
-		"particleRadius": 0.02,
+        "domainEnd": [5.0, 30.0, 5.0],
+		"particleRadius": 0.03,
 		"numSubstepping": 1,
 		"density0": 1000,
 		"simulationMethod": 2,
@@ -15,15 +15,15 @@
 		"exportFrame": false,
 		"exportPly": false,
 		"exportObj": false,
-        "transparentObjects": [1],
+        "transparentObjects": [1, 2],
         "alpha": 0.2
 	},
 
 	"FluidBlocks": [
         {
             "objectId": 0,
-            "start": [2.2, 1.3, 2.2],
-            "end": [2.8, 7.5, 2.8],
+            "start": [2.2, 6.5, 2.2],
+            "end": [2.8, 11.5, 2.8],
             "translation": [-0.1, 0.1, -0.1],
             "scale": [1.5, 2.0, 1.5],
             "velocity": [0.0, 0.0, 0.0],
@@ -39,7 +39,19 @@
             "translation": [2.5, 0.1, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.35, 4.0, 1.35],
+            "scale": [1.1, 4.5, 1.1],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        },
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/movingBoundaryCeli.obj",
+            "translation": [1.6, 13.0, 1.6],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.0, 1.0, 1.0],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
