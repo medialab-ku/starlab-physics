@@ -52,13 +52,8 @@ def inf_norm(x: ti.template()) -> float:
     ret = 0.0
     for i in x:
 
-        tmp = x[i]
-        a = ti.abs(tmp[0])
-        for j in range(2):
-            if a < ti.abs(tmp[j]):
-                a = ti.abs(tmp[j])
-        
-        ti.atomic_max(ret, a)
+        tmp = ti.sqrt(ti.math.dot(x[i], x[i]))
+        ti.atomic_max(ret, tmp)
 
     return ret
 

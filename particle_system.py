@@ -186,6 +186,8 @@ class ParticleSystem:
         self.fluid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.solid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_values = ti.Vector.field(n=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
+        self.fluid_neighbors_JtJ    = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
+        self.fluid_neighbors_JtJ_ii = ti.Matrix.field(n=3, m=3, dtype=float, shape= self.particle_max_num)
 
         if self.cfg.get_cfg("simulationMethod") == 4:
             self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)

@@ -144,6 +144,7 @@ if __name__ == "__main__":
                 solver.max_iteration_opt = w.slider_int("max opt. iter", solver.max_iteration_opt, 1, 1000)
 
                 # solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)
+                solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
                 solver.smooth_max = w.checkbox("smooth max(Ours)", solver.smooth_max)
                 if solver.smooth_max:
                     solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
@@ -153,8 +154,8 @@ if __name__ == "__main__":
                         solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
                         solver.tol_pcg = w.slider_int("pcg tol magnitude", solver.tol_pcg, 1, 5)
 
-                else:
-                    solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
+                # else:
+                #     solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
 
             gui.text(f"# fluid particle: {ps.fluid_particle_num}")
             gui.text(f"# boundary particle: {ps.solid_particle_num}")
