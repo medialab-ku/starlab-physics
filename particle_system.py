@@ -666,10 +666,11 @@ class ParticleSystem:
 
 
     def dump(self, obj_id):
-        np_object_id = self.object_id.to_numpy()
-        mask = (np_object_id == obj_id).nonzero()
-        np_x = self.x.to_numpy()[mask]
-        np_v = self.v.to_numpy()[mask]
+        N = int(self.particle_num[None])
+        np_object_id = self.object_id.to_numpy()[:N]
+        mask = (np_object_id == obj_id)
+        np_x = self.x.to_numpy()[:N][mask]
+        np_v = self.v.to_numpy()[:N][mask]
 
         return {
             'position': np_x,

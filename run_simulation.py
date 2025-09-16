@@ -125,6 +125,11 @@ if __name__ == "__main__":
 
     # Caching system
     cache = SimulationCache(ps, solver, max_steps=10)
+    # Capture baseline snapshot for instant soft reset
+    try:
+        cache.snapshot_baseline(anim_time=0.0)
+    except Exception:
+        pass
 
     def show_options_solver():
 
@@ -303,46 +308,41 @@ if __name__ == "__main__":
                 print("rest simulation...")
                 # Before resetting, export current stats if requested
                 _export_solver_stats_if_any()
-                # Clear cache when resetting the entire simulation
-                cache.clear()
-                # Preserve solver settings that can be tuned via GUI
-                preserve_names = [
-                    'dt', 'num_substep', 'cfl',
-                    'tol_opt', 'max_iteration_opt', 'method', 'print_info', 'print_opt_iter', 'print_opt_error', 'print_pcg_iter', 'print_pcg_error', 'print_elapsed_time',
-                    'omega', 'iisph_vanilla', 'smooth_max', 'eps', 'use_pcg',
-                    'max_iteration_pcg', 'tol_pcg', 'adaptive_step_size',
-                ]
-                preserved = {}
-                for name in preserve_names:
-                    if hasattr(solver, name):
-                        try:
-                            preserved[name] = getattr(solver, name)
-                        except Exception:
-                            pass
-
-                # Rebuild particle system and solver to fully drop emitted particles/state
-                ps = ParticleSystem(config, GGUI=True)
-                solver = ps.build_solver()
-                solver.initialize()
-                animator = AnimationSystem(ps, config)
-
-                # Restore preserved settings
-                for name, value in preserved.items():
-                    try:
-                        if hasattr(solver, name):
-                            setattr(solver, name, value)
-                    except Exception:
-                        pass
+                # Clear rolling cache but keep baseline
                 try:
-                    solver.time = 0.0
+                    cache.clear()
                 except Exception:
                     pass
 
-                # Reset counters and pause sim
-                frame_cnt = 0
-                cnt_ply = 0
-                runSim = False
-                anim_time = 0.0
+                # Try baseline restore for soft reset
+                ok, _, _ = (False, None, None)
+                try:
+                    ok, _, _ = cache.restore_baseline()
+                except Exception:
+                    ok = False
+
+                if ok:
+                    # Reset GUI counters and pause
+                    frame_cnt = 0
+                    cnt_ply = 0
+                    runSim = False
+                    anim_time = 0.0
+                    # Clear per-session stats
+                    _clear_solver_stats_if_any()
+                else:
+                    # Fallback: full rebuild if baseline missing
+                    ps = ParticleSystem(config, GGUI=True)
+                    solver = ps.build_solver()
+                    solver.initialize()
+                    animator = AnimationSystem(ps, config)
+                    try:
+                        solver.time = 0.0
+                    except Exception:
+                        pass
+                    frame_cnt = 0
+                    cnt_ply = 0
+                    runSim = False
+                    anim_time = 0.0
 
         if export_ply and frame_cnt > end_frame:
             runSim = False

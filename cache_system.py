@@ -16,6 +16,8 @@ class SimulationCache:
         self.max_steps = int(max_steps)
         self._cache = []
         self.last_rewind_steps = 0
+        # Baseline snapshot (frame 0) for instant soft reset
+        self._baseline = None
 
     def clear(self):
         self._cache.clear()
@@ -100,6 +102,22 @@ class SimulationCache:
         except Exception:
             return None
 
+    # -----------------------------
+    # Baseline helpers
+    # -----------------------------
+    def snapshot_baseline(self, anim_time: float = 0.0):
+        """Capture a baseline snapshot after solver.initialize()."""
+        self._baseline = self._snapshot(frame_cnt=0, anim_time=anim_time)
+
+    def restore_baseline(self):
+        """Restore from the baseline snapshot if available.
+
+        Returns (ok, frame, anim_time)
+        """
+        if self._baseline is None:
+            return False, None, None
+        return self._restore(self._baseline)
+
     def push(self, frame_cnt: int, anim_time: float):
         if not self.enabled:
             return
@@ -131,6 +149,45 @@ class SimulationCache:
                         getattr(self.ps, name).from_numpy(buf)
                     except Exception:
                         pass
+
+            # Deactivate tail (>N) to avoid stray active particles in ti.grouped loops
+            try:
+                M = int(self.ps.particle_max_num)
+                if N < M:
+                    def _fill_tail(field_name, fill_value):
+                        try:
+                            buf = getattr(self.ps, field_name).to_numpy()
+                            buf[N:] = fill_value
+                            getattr(self.ps, field_name).from_numpy(buf)
+                        except Exception:
+                            pass
+
+                    # Scalars
+                    _fill_tail("material", -1)   # mark as non-fluid/solid
+                    _fill_tail("is_dynamic", 0)
+                    _fill_tail("object_id", -1)
+                    _fill_tail("m_V", 0.0)
+                    _fill_tail("m", 0.0)
+                    _fill_tail("m_inv", 0.0)
+                    _fill_tail("density", 0.0)
+                    _fill_tail("density0", 0.0)
+                    _fill_tail("pressure", 0.0)
+                    _fill_tail("divergence", 0.0)
+                    # Optional DFSPH fields
+                    _fill_tail("dfsph_factor", 0.0)
+                    _fill_tail("density_adv", 0.0)
+
+                    # Vectors/Matrices
+                    _fill_tail("x", 1000.0)
+                    _fill_tail("x_old", 1000.0)
+                    _fill_tail("x_0", 1000.0)
+                    _fill_tail("v", 0.0)
+                    _fill_tail("v_adv", 0.0)
+                    _fill_tail("acceleration", 0.0)
+                    _fill_tail("n", 0.0)
+                    _fill_tail("color", 0)
+            except Exception:
+                pass
 
             # solver time
             try:
