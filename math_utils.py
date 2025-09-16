@@ -57,6 +57,7 @@ def inf_norm(x: ti.template()) -> float:
 
     return ret
 
+
 @ti.kernel
 def coef_wise_op(ret: ti.template(), x: ti.template(), y: ti.template(), op: int):
 

@@ -28,19 +28,24 @@ class PBF2Solver(SPHBase):
         self.pressure_boundary = False
         self.smooth_max = False
         self.print_info = True
+        
         self.print_pcg_iter  = False
         self.print_opt_iter  = False
         self.print_pcg_error = False
         self.print_opt_error = False
         self.print_elapsed_time = True
+        self.print_ldv_max = False
+        self.print_ldv_mean = False
+
         self.volume_constraint = False
         self.tol_opt = 2
-        self.omega = 0.5
+        self.omega = 1.0
         self.eps = 0.01
         self.cfl = False
-        self.max_iteration_opt = 1000
+        self.max_iteration_opt = 3
         self.max_iteration_pcg = 1000
         self.tol_pcg = 3
+    
 
         # Stats containers
         # These are plain Python lists to minimize Taichi interaction overhead.
@@ -49,6 +54,8 @@ class PBF2Solver(SPHBase):
         self.stats_opt_error = []
         self.stats_pcg_iter = []
         self.stats_pcg_error = []
+        self.stats_ldv_max = []
+        self.stats_ldv_mean = []
 
         # Taichi fields and buffers
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -71,6 +78,8 @@ class PBF2Solver(SPHBase):
 
         self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.test = ti.field(dtype=float, shape=self.ps.particle_max_num)
+
+        self.var = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Hii   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.Ap    = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -109,6 +118,8 @@ class PBF2Solver(SPHBase):
         self.stats_opt_error.clear()
         self.stats_pcg_iter.clear()
         self.stats_pcg_error.clear()
+        self.stats_ldv_max.clear()
+        self.stats_ldv_mean.clear()
 
     def get_stats_numpy(self):
         """Return stats as numpy arrays. Keys:
@@ -117,6 +128,8 @@ class PBF2Solver(SPHBase):
         - opt_error
         - pcg_iter
         - pcg_error
+        - ldv_mean
+        - ldv_max
         """
         return {
             "elapsed_time_ms": np.asarray(self.stats_elapsed_ms, dtype=np.float64),
@@ -124,6 +137,8 @@ class PBF2Solver(SPHBase):
             "opt_error": np.asarray(self.stats_opt_error, dtype=np.float64),
             "pcg_iter": np.asarray(self.stats_pcg_iter, dtype=np.int32),
             "pcg_error": np.asarray(self.stats_pcg_error, dtype=np.float64),
+            "ldv_mean": np.asarray(self.stats_ldv_mean, dtype=np.float64),
+            "ldv_max": np.asarray(self.stats_ldv_max, dtype=np.float64)
         }
 
     @ti.kernel
@@ -1027,6 +1042,18 @@ class PBF2Solver(SPHBase):
         self.ps.x.copy_from(self.ps.y)
 
         self.compute_density()
+
+        self.compute_variance()
+        ldv_mean = float(self.ldv_mean())
+        ldv_max = float(self.ldv_max())
+        self.stats_ldv_max.append(ldv_max)
+        self.stats_ldv_mean.append(ldv_mean)
+        
+        if self.print_ldv_max:
+            print(f"local density variance max: {ldv_max:.6f}")
+        if self.print_ldv_mean:
+            print(f"local density variance max: {ldv_mean:.6f}")
+
         self.compute_constraint()
         self.compute_Aii()
 
@@ -1146,6 +1173,46 @@ class PBF2Solver(SPHBase):
             add(self.ps.v, self.ps.v, -1.0, self.tmp)
 
             iter += 1
+
+    @ti.kernel
+    def compute_variance(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_fluid:
+                self.var[p_i] = 0.0
+                continue
+            sum_i = 0.0
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                if self.ps.material[p_j] != self.ps.material_fluid:
+                    continue
+                rho_ij = self.ps.density[p_i] - self.ps.density[p_j]
+                # if rho_ij >= 1e-6:
+                #     print('test')
+                xij = (self.ps.x[p_i] - self.ps.x[p_j]).norm()
+                # if xij > 1e-6:
+                #     term = rho_ij / xij
+                term = rho_ij
+                sum_i += term * term
+            self.var[p_i] = ti.sqrt(sum_i)
+
+    @ti.kernel
+    def ldv_mean(self) -> float:
+        acc = 0.0
+        cnt = 0
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] == self.ps.material_fluid:
+                acc += self.var[p_i]
+                cnt += 1
+        return acc / ti.max(1, cnt)
+
+    @ti.kernel
+    def ldv_max(self) -> float:
+        ret = 0.0
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] == self.ps.material_fluid:
+                ti.atomic_max(ret, self.var[p_i])
+        return ret
+
 
     def substep(self):
 

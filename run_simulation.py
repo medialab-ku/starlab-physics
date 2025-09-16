@@ -223,6 +223,8 @@ if __name__ == "__main__":
             solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
             solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
             solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
+            solver.print_ldv_mean = w.checkbox("print LDV mean", solver.print_ldv_mean)
+            solver.print_ldv_max = w.checkbox("print LDV max", solver.print_ldv_max)
             
 
     # -----------------------------
@@ -246,7 +248,7 @@ if __name__ == "__main__":
                 return
             os.makedirs(os.path.join("data", "stats"), exist_ok=True)
             # Build descriptive prefix instead of timestamp
-            # Format: dt<dt>-tol<tol_opt>-<label>-<pcgFlag>
+            # New format: dt<dt>-tol<tol_opt>-opt<maxOptIter>-<pcgFlag>-<label>
             try:
                 label = "ours" if bool(getattr(solver, "smooth_max", False)) else "2014Bender"
             except Exception:
@@ -260,14 +262,18 @@ if __name__ == "__main__":
             except Exception:
                 tol_opt_val = 0
             try:
+                max_iter_opt_val = int(getattr(solver, "max_iteration_opt", 0))
+            except Exception:
+                max_iter_opt_val = 0
+            try:
                 use_pcg_flag = bool(getattr(solver, "use_pcg", False)) if label == "ours" else False
             except Exception:
                 use_pcg_flag = False
             pcg_part = "pcg" if use_pcg_flag else "nopcg"
-            # Base prefix excludes method variant
-            prefix = f"dt{dt_val:.5f}-tol{tol_opt_val}"
-            # Variant encodes method and pcg combination
-            variant = f"{label}-{pcg_part}"
+            # Base prefix includes dt, tol, and max opt iter
+            prefix = f"dt{dt_val:.5f}-tol{tol_opt_val}-opt{max_iter_opt_val}"
+            # Variant encodes pcg then method label
+            variant = f"{pcg_part}-{label}"
             for name, arr in stats.items():
                 try:
                     out_path = os.path.join("data", "stats", f"{prefix}-{variant}-{name}.npy")
