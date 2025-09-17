@@ -22,8 +22,8 @@
 	"FluidBlocks": [
         {
             "objectId": 0,
-            "start": [2.2, 1.5, 2.2],
-            "end": [2.8, 7.0, 2.8],
+            "start": [2.2, 0.5, 2.2],
+            "end": [2.8, 8.0, 2.8],
             "translation": [0.0, 0.1, 0.0],
             "scale": [1, 1, 1],
             "velocity": [0.0, 0.0, 0.0],
@@ -48,7 +48,7 @@
         {
             "objectId": 2,
             "geometryFile": "./data/models/movingBoundaryCeli.obj",
-            "translation": [1.9, 4.3, 1.9],
+            "translation": [1.9, 5.3, 1.9],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
             "scale": [0.75, 0.75, 0.75],

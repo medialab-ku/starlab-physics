@@ -1029,9 +1029,8 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            value += ti.max(a[p_i], 0.0) / self.ps.density0[p_i]
+            value += a[p_i]
 
-        value /= self.ps.fluid_particle_num
         return value
 
     def constant_density_solve(self):
@@ -1071,11 +1070,10 @@ class PBF2Solver(SPHBase):
 
             self.compute_J_x(Jd, d)
             add(self.t, Jd, 1.0, c)
+            self.compute_f(self.f, self.t, self.eps)
+            self.compute_f_derivative(self.dfdt, self.t, self.eps)
 
             if self.smooth_max:
-                self.compute_f(self.f, self.t, self.eps)
-                self.compute_f_derivative(self.dfdt, self.t, self.eps)
-                self.compute_JtJ()
                 coef_wise_mul(self.f, self.f, self.k)
                 self.compute_J_tr_x(g, self.f)
                 if self.use_pcg:
@@ -1083,24 +1081,21 @@ class PBF2Solver(SPHBase):
                 else:
                     self.apply_precondition(p, P, g)
 
-                self.add(d, d, -self.omega, p)
-
             #Bender et al. 2014 (Constant density solver OF DFSPH)
             else:
-                max(self.t)
-                coef_wise_mul(self.t, self.t, self.k)
-                self.compute_J_tr_x(g, self.t)
+                coef_wise_mul(self.f, self.f, self.k)
+                self.compute_J_tr_x(g, self.f)
                 coef_wise_div(p, g, self.ps.m)
-                self.add(d, d, -self.omega, p)
 
+            self.add(d, d, -self.omega, p)
             err = inf_norm(p)
 
             # err = dot(p, p)
-            # err = self.compute_avg_density_error(Jd)
+            err = self.compute_avg_density_error(self.f)
             # Collect optimizer error per iteration
             self.stats_opt_error.append(float(err))
             if self.print_opt_error:
-                print(f"opt iter: {err}")
+                print(f"opt error: {err}")
 
             if (err < pow(10, -self.tol_opt)) and opt_iter > 1:
                 break
