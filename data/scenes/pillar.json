@@ -15,7 +15,7 @@
 		"exportFrame": false,
 		"exportPly": false,
 		"exportObj": false,
-        "transparentObjects": [1, 2],
+        "transparentObjects": [1],
         "alpha": 0.2
 	},
 
@@ -48,7 +48,7 @@
         {
             "objectId": 2,
             "geometryFile": "./data/models/movingBoundaryCeli.obj",
-            "translation": [1.9, 5.3, 1.9],
+            "translation": [1.8, 4.7, 1.8],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
             "scale": [0.75, 0.75, 0.75],

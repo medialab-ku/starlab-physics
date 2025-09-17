@@ -95,6 +95,10 @@ if __name__ == "__main__":
     export_rigid_objects = False
     export_stats = False
 
+    # One-shot density capture UI state
+    capture_density_ui = False
+    capture_velocity_ui = False
+
     # Draw the lines for domain
     x_max, y_max, z_max = config.get_cfg("domainEnd")
     box_anchors = ti.Vector.field(3, dtype=ti.f32, shape = 8)
@@ -119,6 +123,9 @@ if __name__ == "__main__":
 
     # Initialize animation system
     animator = AnimationSystem(ps, config)
+    anim_time = 0.0
+    runAnim = True
+    anim_nudge = 0.1
     anim_time = 0.0
 
     # Animation handled by AnimationSystem
@@ -216,9 +223,13 @@ if __name__ == "__main__":
             else:
                 gui.text("No transparent objects configured")
 
+            gui.text("")
+            gui.text(f"Animation: {'playing' if runAnim else 'paused'} t={anim_time:.3f}")
+            gui.text("Key: p=play/pause, o=reset")
 
     def show_options_stats():
-
+        global capture_density_ui
+        global capture_velocity_ui
         with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.25) as w:
 
             solver.print_opt_iter  = w.checkbox("print opt iter", solver.print_opt_iter)
@@ -228,6 +239,10 @@ if __name__ == "__main__":
             solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
             solver.print_ldv_mean = w.checkbox("print LDV mean", solver.print_ldv_mean)
             solver.print_ldv_max = w.checkbox("print LDV max", solver.print_ldv_max)
+            capture_density_ui = w.checkbox("print density (one shot)", capture_density_ui)
+            capture_velocity_ui = w.checkbox("print speed (one shot)", capture_velocity_ui)
+
+        
             
 
     # -----------------------------
@@ -286,6 +301,51 @@ if __name__ == "__main__":
         except Exception:
             # Do not crash UI due to stats export errors
             pass
+    
+
+    def _plot_density_bars(dens: np.ndarray, frame_cnt: int, scene_name: str):
+
+        idx = np.arange(dens.shape[0])
+        mean_v = float(dens.mean())
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.bar(idx, dens, color='steelblue', width=1.0)
+        ax.axhline(mean_v, color='red', linestyle='--', linewidth=1.5, label=f"mean={mean_v:.2f}")
+        ax.set_xlabel("particle id")
+        ax.set_ylabel("density")
+        ax.set_title(f"Density distribution (frame {frame_cnt})")
+        ax.legend(loc="upper right")
+        ax.grid(True, axis='y', alpha=0.2)
+        ax.set_ybound(500, 5000)
+
+        out_dir = os.path.join("data", "stats")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{scene_name}-frame{frame_cnt:06d}-density.png")
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Saved density plot: {out_path}")
+
+    def _plot_speed_bars(speed: np.ndarray, frame_cnt: int, scene_name: str):
+
+        idx = np.arange(speed.shape[0])
+        mean_v = float(speed.mean())
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.bar(idx, speed, color='mediumseagreen', width=1.0)
+        ax.axhline(mean_v, color='red', linestyle='--', linewidth=1.5, label=f"mean={mean_v:.2f}")
+        ax.set_xlabel("particle id")
+        ax.set_ylabel("|v|")
+        ax.set_title(f"Speed distribution (frame {frame_cnt})")
+        ax.legend(loc="upper right")
+        ax.grid(True, axis='y', alpha=0.2)
+        ax.set_ybound(0, 50)
+
+        out_dir = os.path.join("data", "stats")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{scene_name}-frame{frame_cnt:06d}-speed.png")
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Saved speed plot: {out_path}")
 
     cnt = 0
     cnt_ply = 0
@@ -376,6 +436,26 @@ if __name__ == "__main__":
                     runSim = False
                     anim_time = 0.0
 
+            # ----- Animation keyboard controls -----
+            if window.event.key == 'p':
+                runAnim = not runAnim
+            if window.event.key == 'o':
+                anim_time = 0.0
+                if animator.has_animations():
+                    animator.apply(anim_time)
+
+        if capture_density_ui:
+            if hasattr(solver, "density_distribution"):
+                solver.density_distribution = True
+                print("Armed: capture density once on next OPT iteration.")
+            capture_density_ui = False
+
+        if capture_velocity_ui:
+            if hasattr(solver, "velocity_distribution"):
+                solver.velocity_distribution = True
+                print("Armed: capture speed once after velocity update.")
+            capture_velocity_ui = False
+
         if export_ply and frame_cnt > end_frame:
             runSim = False
             _export_solver_stats_if_any()
@@ -386,20 +466,41 @@ if __name__ == "__main__":
             dt = solver.dt
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
-                # advance animation within substeps for smoother motion
-                if animator.has_animations():
+                # advance animation within substeps for smoother motion (only when playing)
+                if animator.has_animations() and runAnim:
                     t_now = anim_time + i * solver.dt
                     animator.apply(t_now)
                 solver.step()
 
             # advance animation time by full frame dt
-            if animator.has_animations():
+            if animator.has_animations() and runAnim:
                 anim_time += dt
             solver.dt = dt
             frame_cnt += 1
 
             # After completing a frame, cache the end-of-frame state
             cache.push(frame_cnt=frame_cnt, anim_time=anim_time)
+
+            if hasattr(solver, "_density_snapshot_ready") and solver._density_snapshot_ready:
+                try:
+                    dens = solver.captured_density_np
+                    if isinstance(dens, np.ndarray) and dens.size > 0:
+                        _plot_density_bars(dens, frame_cnt, scene_name)
+                except Exception as e:
+                    print(f"[warn] density plot failed: {e}")
+                # clear ready flag
+                solver._density_snapshot_ready = False
+                solver.captured_density_np = None
+
+            if hasattr(solver, "_velocity_snapshot_ready") and solver._velocity_snapshot_ready:
+                try:
+                    spd = solver.captured_velocity_np
+                    if isinstance(spd, np.ndarray) and spd.size > 0:
+                        _plot_speed_bars(spd, frame_cnt, scene_name)
+                except Exception as e:
+                    print(f"[warn] speed plot failed: {e}")
+                solver._velocity_snapshot_ready = False
+                solver.captured_velocity_np = None
 
             if frame_cnt > 0 and frame_cnt % output_interval == 0:
                 if export_ply:
@@ -621,5 +722,5 @@ if __name__ == "__main__":
         cnt += 1
         # if cnt > 6000:
         #     break
-        window.show()
+        window.show() 
 

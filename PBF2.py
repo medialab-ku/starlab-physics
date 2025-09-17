@@ -32,10 +32,15 @@ class PBF2Solver(SPHBase):
         self.print_pcg_iter  = False
         self.print_opt_iter  = False
         self.print_pcg_error = False
-        self.print_opt_error = False
+        self.print_opt_error = False 
         self.print_elapsed_time = True
         self.print_ldv_max = False
         self.print_ldv_mean = False
+
+        self.density_distribution = False
+        self._density_snapshot_ready = False
+        self.captured_density_np = None
+        self._density_plot_cnt = 0
 
         self.volume_constraint = False
         self.tol_opt = 2
@@ -108,6 +113,11 @@ class PBF2Solver(SPHBase):
 
         self.use_max = False
         self.DF_tol = 0.1
+
+        # One-shot velocity capture flags/state (used by run_simulation.py)
+        self.velocity_distribution = False
+        self._velocity_snapshot_ready = False
+        self.captured_velocity_np = None
 
     # -----------------------------
     # Stats helpers
@@ -371,7 +381,7 @@ class PBF2Solver(SPHBase):
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # grad_ij = self.ps.fluid_neighbors_values[p_i, j]
-                JtJ_ij  = self.ps.fluid_neighbors_JtJ[p_i, j]
+                JtJ_ij = self.ps.fluid_neighbors_JtJ[p_i, j]
 
                 if self.ps.is_dynamic[p_j]:
                     self.Hii[p_j] += self.dfdt[p_j] * self.k[p_j] * JtJ_ij
@@ -1096,6 +1106,7 @@ class PBF2Solver(SPHBase):
                 if self.smooth_max:
                     coef_wise_mul(self.f, self.f, self.k)
                     self.compute_J_tr_x(g, self.f)
+                    self.compute_JtJ()
                     if self.use_pcg:
                         self.PCG()
                     else:
@@ -1120,6 +1131,15 @@ class PBF2Solver(SPHBase):
                 if (err < pow(10, -self.tol_opt)) and opt_iter > 1  or opt_iter >= self.max_iteration_opt:
                     break
 
+            if self.density_distribution and opt_iter == 0:
+                cnt = int(self.ps.particle_num[None])
+                density_np = self.ps.density.to_numpy()[:cnt].copy()
+
+                self.captured_density_np = density_np
+                self._density_plot_cnt = cnt
+                self._density_snapshot_ready = True
+                self.density_distribution = False
+
             opt_iter += 1
 
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
@@ -1140,6 +1160,14 @@ class PBF2Solver(SPHBase):
 
         #v_n+1_tmp
         self.update_velocities(self.dt)
+        # One-shot capture of speed (|v|) distribution after velocity update
+        if self.velocity_distribution:
+            count = int(self.ps.particle_num[None])
+            v_np = self.ps.v.to_numpy()[:count]
+            speed_np = np.linalg.norm(v_np, axis=1)
+            self.captured_velocity_np = speed_np.copy()
+            self._velocity_snapshot_ready = True
+            self.velocity_distribution = False  # disarm
         # if self.ps.num_rigid_bodies > 0:
         #     self.rigid_compute_cm_and_vcm()
         #     self.rigid_compute_angular_velocity()
