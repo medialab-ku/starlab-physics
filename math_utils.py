@@ -52,7 +52,7 @@ def inf_norm(x: ti.template()) -> float:
     ret = 0.0
     for i in x:
 
-        tmp = ti.sqrt(ti.math.dot(x[i], x[i]))
+        tmp = ti.math.dot(x[i], x[i])
         ti.atomic_max(ret, tmp)
 
     return ret

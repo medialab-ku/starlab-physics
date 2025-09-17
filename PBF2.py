@@ -15,11 +15,11 @@ class PBF2Solver(SPHBase):
 
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
 
-        self.nablaWij = self.cubic_kernel_derivative
+        self.nablaWij = self.spiky_kernel_derivative
         self.Wij = self.cubic_kernel
         self.lda = self.ps.pressure
         self.method = 1
-        self.iisph_vanilla = False 
+        self.iisph = False
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
 
         self.adaptive_step_size = False
@@ -1029,7 +1029,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            value += a[p_i]
+            value += a[p_i] / self.ps.density0[p_i]
 
         return value
 
@@ -1070,35 +1070,55 @@ class PBF2Solver(SPHBase):
 
             self.compute_J_x(Jd, d)
             add(self.t, Jd, 1.0, c)
-            self.compute_f(self.f, self.t, self.eps)
-            self.compute_f_derivative(self.dfdt, self.t, self.eps)
 
-            if self.smooth_max:
-                coef_wise_mul(self.f, self.f, self.k)
-                self.compute_J_tr_x(g, self.f)
-                if self.use_pcg:
-                    self.PCG()
-                else:
-                    self.apply_precondition(p, P, g)
+            if self.iisph:
 
-            #Bender et al. 2014 (Constant density solver OF DFSPH)
+                err = self.compute_avg_density_error(self.t)
+                if (err < pow(10, -self.tol_opt)) and opt_iter > 1 or opt_iter >= self.max_iteration_opt:
+                    break
+                # print(err)
+                # if (err <  pow(10, -self.tol_opt) and opt_iter > 2) or opt_iter >= self.max_iteration_opt:
+                #     # if self.print_info:
+                #     #     print(f"CD iter: {iter}, err: {err}")
+                #     break
+
+                coef_wise_op(self.dp, self.t, self.Aii, 1)
+                add(self.p, self.p, self.omega, self.dp)
+                max(self.p)
+                self.compute_J_tr_x(g, self.p)
+                coef_wise_div(g, g, self.ps.m)
+                add(d, self.s, -1.0, g)
+
             else:
-                coef_wise_mul(self.f, self.f, self.k)
-                self.compute_J_tr_x(g, self.f)
-                coef_wise_div(p, g, self.ps.m)
+                self.compute_f(self.f, self.t, self.eps)
+                self.compute_f_derivative(self.dfdt, self.t, self.eps)
 
-            self.add(d, d, -self.omega, p)
-            err = inf_norm(p)
+                if self.smooth_max:
+                    coef_wise_mul(self.f, self.f, self.k)
+                    self.compute_J_tr_x(g, self.f)
+                    if self.use_pcg:
+                        self.PCG()
+                    else:
+                        self.apply_precondition(p, P, g)
 
-            # err = dot(p, p)
-            err = self.compute_avg_density_error(self.f)
-            # Collect optimizer error per iteration
-            self.stats_opt_error.append(float(err))
-            if self.print_opt_error:
-                print(f"opt error: {err}")
+                #Bender et al. 2014 (Constant density solver OF DFSPH)
+                else:
+                    coef_wise_mul(self.f, self.f, self.k)
+                    self.compute_J_tr_x(g, self.f)
+                    coef_wise_div(p, g, self.ps.m)
 
-            if (err < pow(10, -self.tol_opt)) and opt_iter > 1:
-                break
+                self.add(d, d, -self.omega, p)
+                # err = inf_norm(p)
+                err = dot(p, p)
+                # err = dot2(Jd, Jd)
+                # err = self.compute_avg_density_error(self.f)
+                # Collect optimizer error per iteration
+                self.stats_opt_error.append(float(err))
+                if self.print_opt_error:
+                    print(f"opt error: {err}")
+
+                if (err < pow(10, -self.tol_opt)) and opt_iter > 1  or opt_iter >= self.max_iteration_opt:
+                    break
 
             opt_iter += 1
 
