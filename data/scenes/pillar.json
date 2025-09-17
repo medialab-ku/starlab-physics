@@ -2,7 +2,7 @@
 	"Configuration":
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [5.0, 11.0, 5.0],
+        "domainEnd": [5.0, 13.0, 5.0],
 		"particleRadius": 0.02,
 		"numSubstepping": 1,
 		"density0": 1000,
@@ -22,8 +22,8 @@
 	"FluidBlocks": [
         {
             "objectId": 0,
-            "start": [2.2, 0.5, 2.2],
-            "end": [2.8, 9.0, 2.8],
+            "start": [2.2, 2.0, 2.2],
+            "end": [2.8, 8.0, 2.8],
             "translation": [0.0, 0.1, 0.0],
             "scale": [1, 1, 1],
             "velocity": [0.0, 0.0, 0.0],
@@ -39,7 +39,7 @@
             "translation": [2.5, 0.1, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [0.75, 2.0, 0.75],
+            "scale": [0.9, 2.0, 0.9],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
@@ -48,7 +48,7 @@
         {
             "objectId": 2,
             "geometryFile": "./data/models/movingBoundaryCeli.obj",
-            "translation": [1.8, 4.7, 1.8],
+            "translation": [1.8, 6.7, 1.8],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
             "scale": [0.75, 0.75, 0.75],

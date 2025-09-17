@@ -147,7 +147,7 @@ if __name__ == "__main__":
             solver.num_substep = w.slider_int("substepping", solver.num_substep, 1, 100)
 
             if method == 2:
-                solver.tol_opt = w.slider_int("opt tol magnitude", solver.tol_opt, 1, 5)
+                solver.tol_opt = w.slider_int("opt tol magnitude", solver.tol_opt, 1, 7)
                 solver.max_iteration_opt = w.slider_int("max opt. iter", solver.max_iteration_opt, 1, 1000)
 
                 # solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)

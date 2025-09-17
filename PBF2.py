@@ -759,6 +759,7 @@ class PBF2Solver(SPHBase):
         rz_old = dot(r, z)
         pcg_iter = 0
         if rz_old > 1e-12:
+            # print("test")
             p.copy_from(z)
             for _ in range(self.max_iteration_pcg):
                 self.compute_Ax(Ap, Jp, p)
@@ -771,6 +772,7 @@ class PBF2Solver(SPHBase):
                 self.add(x, x, alpha, p) 
                 self.add(r, r, -alpha, Ap)
 
+                pcg_iter += 1
                 err = self.dot(r, r)
 
                 # Collect PCG residual error per iteration
@@ -781,8 +783,6 @@ class PBF2Solver(SPHBase):
                 self.apply_precondition(z, self.Hii, r)
                 if err <  pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
                     break
-
-                pcg_iter += 1
 
                 rz_new = self.dot(r, z)
                 beta = rz_new / rz_old
@@ -1114,8 +1114,9 @@ class PBF2Solver(SPHBase):
 
                 #Bender et al. 2014 (Constant density solver OF DFSPH)
                 else:
-                    coef_wise_mul(self.f, self.f, self.k)
-                    self.compute_J_tr_x(g, self.f)
+                    coef_wise_mul(self.t, self.t, self.k)
+                    max(self.t)
+                    self.compute_J_tr_x(g, self.t)
                     coef_wise_div(p, g, self.ps.m)
 
                 self.add(d, d, -self.omega, p)
