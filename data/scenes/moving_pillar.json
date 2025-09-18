@@ -1,0 +1,80 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [2.0, 15.0, 2.0],
+		"particleRadius": 0.02,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.005,
+		"stiffness": 50000,
+		"exponent": 7,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+        "transparentObjects": [1, 3],
+        "alpha": 0.2
+	},
+
+	"FluidBlocks": [
+        {
+            "objectId": 0,
+            "start": [0.3, 1.5, 0.3],
+            "end": [0.9, 7.0, 0.9],
+            "translation": [0.2, 0.1, 0.2],
+            "scale": [1.2, 1.2, 1.2],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [10, 100, 200]
+        }
+    ],
+
+    "RigidBodies" : [
+        {
+            "objectId": 1,
+            "geometryFile": "./data/models/movingBoundaryPillar.obj",
+            "translation": [0.2, 0.1, 0.2],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.75, 7.0, 0.75],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        },
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/movingBoundaryFloor.obj",
+            "translation": [0.2, 0.1, 0.2],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.75, 1.0, 0.75],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false,
+			"animation": {
+				"type": "oscillate",
+				"axis": "y",
+				"amplitude": 6.0,
+				"period": 3.5,
+				"phase": 0.0
+			}
+        },
+        {
+            "objectId": 3,
+            "geometryFile": "./data/models/movingBoundaryCeli.obj",
+            "translation": [0.2, 2.1, 0.2],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [0.75, 1.0, 0.75],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        }        
+    ]
+}

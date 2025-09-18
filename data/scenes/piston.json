@@ -1,0 +1,68 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [3.0, 10.0, 3.0],
+		"particleRadius": 0.03,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.002,
+		"stiffness": 50000,
+		"exponent": 7,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+        "transparentObjects": [1],
+        "alpha": 0.2
+	},
+
+	"FluidBlocks": [
+        {
+            "objectId": 0,
+            "start": [0.2, 1.5, 0.2],
+            "end": [1.2, 6.5, 1.2],
+            "translation": [0.4, 0.3, 0.4],
+            "scale": [1.0, 1.0, 1.0],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [10, 100, 200]
+        }
+    ],
+
+    "RigidBodies" : [
+        {
+            "objectId": 1,
+            "geometryFile": "./data/models/BoxOpened_thick.obj",
+            "translation": [1.1, 0.1, 1.1],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.3, 2.0, 1.3],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        },
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/thickCeli.obj",
+            "translation": [1.1, 8.0, 1.1],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.0, 1.0, 1.0],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false,
+			"animation": {
+				"type": "oscillate",
+				"axis": "y",
+				"amplitude": -5.0,
+				"period": 6.0,
+				"phase": 0.0
+			}
+        }
+    ]
+}
