@@ -21,6 +21,7 @@ class PBF2Solver(SPHBase):
         self.method = 1
         self.iisph = False
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
+        self.pcg_total_iter = 0
 
         self.adaptive_step_size = False
         self.use_pcg = True
@@ -34,13 +35,6 @@ class PBF2Solver(SPHBase):
         self.print_pcg_error = False
         self.print_opt_error = False 
         self.print_elapsed_time = True
-        self.print_ldv_max = False
-        self.print_ldv_mean = False
-
-        self.density_distribution = False
-        self._density_snapshot_ready = False
-        self.captured_density_np = None
-        self._density_plot_cnt = 0
 
         self.volume_constraint = False
         self.tol_opt = 2
@@ -50,17 +44,19 @@ class PBF2Solver(SPHBase):
         self.max_iteration_opt = 3
         self.max_iteration_pcg = 1000
         self.tol_pcg = 3
-    
 
         # Stats containers
         # These are plain Python lists to minimize Taichi interaction overhead.
         self.stats_elapsed_ms = []
+        # detailed elapsed time
+
         self.stats_opt_iter = []
         self.stats_opt_error = []
         self.stats_pcg_iter = []
         self.stats_pcg_error = []
-        self.stats_ldv_max = []
-        self.stats_ldv_mean = []
+        # Per-iteration → timestep mapping (global substep index)
+        self.stats_opt_error_frame = []
+        self.stats_pcg_error_frame = []
 
         # Taichi fields and buffers
         self.tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -103,6 +99,7 @@ class PBF2Solver(SPHBase):
             self.vsum_rb = None
 
         self.matrix_type = 0
+
         # Iteration logging system
         self.enable_logging = False
         self.iteration_log = []  # Store [frame, matrix_type, iterations]
@@ -114,11 +111,6 @@ class PBF2Solver(SPHBase):
         self.use_max = False
         self.DF_tol = 0.1
 
-        # One-shot velocity capture flags/state (used by run_simulation.py)
-        self.velocity_distribution = False
-        self._velocity_snapshot_ready = False
-        self.captured_velocity_np = None
-
     # -----------------------------
     # Stats helpers
     # -----------------------------
@@ -128,27 +120,27 @@ class PBF2Solver(SPHBase):
         self.stats_opt_error.clear()
         self.stats_pcg_iter.clear()
         self.stats_pcg_error.clear()
-        self.stats_ldv_max.clear()
-        self.stats_ldv_mean.clear()
+        self.stats_opt_error_frame.clear()
+        self.stats_pcg_error_frame.clear()
 
     def get_stats_numpy(self):
         """Return stats as numpy arrays. Keys:
         - elapsed_time_ms
         - opt_iter
         - opt_error
+        - opt_error_frame
         - pcg_iter
         - pcg_error
-        - ldv_mean
-        - ldv_max
+        - pcg_error_frame
         """
         return {
             "elapsed_time_ms": np.asarray(self.stats_elapsed_ms, dtype=np.float64),
             "opt_iter": np.asarray(self.stats_opt_iter, dtype=np.int32),
             "opt_error": np.asarray(self.stats_opt_error, dtype=np.float64),
+            "opt_error_frame": np.asarray(self.stats_opt_error_frame, dtype=np.int32),
             "pcg_iter": np.asarray(self.stats_pcg_iter, dtype=np.int32),
             "pcg_error": np.asarray(self.stats_pcg_error, dtype=np.float64),
-            "ldv_mean": np.asarray(self.stats_ldv_mean, dtype=np.float64),
-            "ldv_max": np.asarray(self.stats_ldv_max, dtype=np.float64)
+            "pcg_error_frame": np.asarray(self.stats_pcg_error_frame, dtype=np.int32),
         }
 
     @ti.kernel
@@ -717,8 +709,16 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            H = self.ps.m[p_i] * I3x3 + Hii[p_i]
-            dx[p_i] = H.inverse() @ grad[p_i]
+            if self.precondition == 1:
+                H = self.ps.m[p_i] * I3x3 + Hii[p_i]
+                dx[p_i] = H.inverse() @ grad[p_i]
+
+            elif self.precondition == 2:
+                dx[p_i] = (self.ps.m_inv[p_i]* I3x3) @ grad[p_i]
+
+            elif self.precondition == 3:
+                dx[p_i] = grad[p_i]
+
 
     @ti.kernel
     def dot(self, a: ti.template(), b: ti.template()) -> float:
@@ -752,9 +752,15 @@ class PBF2Solver(SPHBase):
         Ap = self.Ap
         b = self.tmp
         Jp = self.dp
+        
+        pcg_prec_ms = 0.0
+        pcg_matvec_ms = 0.0
+        pcg_t0 = time.perf_counter()
 
         r.copy_from(b)
-        self.apply_precondition(z, self.Hii, r)
+
+        # self.apply_precondition(z, self.Hii, r)
+        z.copy_from(r)
 
         rz_old = dot(r, z)
         pcg_iter = 0
@@ -762,7 +768,9 @@ class PBF2Solver(SPHBase):
             # print("test")
             p.copy_from(z)
             for _ in range(self.max_iteration_pcg):
+                t0 = time.perf_counter()
                 self.compute_Ax(Ap, Jp, p)
+
                 pAp = dot(p, Ap)
                 if pAp < 0.0:
                     print("Warning: non-positive definite matrix!")
@@ -777,10 +785,16 @@ class PBF2Solver(SPHBase):
 
                 # Collect PCG residual error per iteration
                 self.stats_pcg_error.append(float(err))
+                try:
+                    self.stats_pcg_error_frame.append(int(self.current_frame))
+                except Exception:
+                    self.stats_pcg_error_frame.append(0)
                 if self.print_pcg_error:
                     print(f"PCG error: {err}")
 
-                self.apply_precondition(z, self.Hii, r)
+                # self.apply_precondition(z, self.Hii, r)
+                z.copy_from(r)
+
                 if err <  pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
                     break
 
@@ -789,11 +803,9 @@ class PBF2Solver(SPHBase):
                 self.add(p, z, beta, p)
                 rz_old = rz_new
 
-
         # Collect PCG iteration count per PCG solve
-        self.stats_pcg_iter.append(int(pcg_iter))
-        if self.print_pcg_iter:
-            print(f"PCG iter: {pcg_iter}")
+        self.pcg_total_iter += pcg_iter
+
 
     @ti.kernel
     def compute_f(self, ret: ti.template(), x: ti.template(), eps: float):
@@ -1051,18 +1063,6 @@ class PBF2Solver(SPHBase):
         self.ps.x.copy_from(self.ps.y)
 
         self.compute_density()
-
-        self.compute_variance()
-        ldv_mean = float(self.ldv_mean())
-        ldv_max = float(self.ldv_max())
-        self.stats_ldv_max.append(ldv_max)
-        self.stats_ldv_mean.append(ldv_mean)
-        
-        if self.print_ldv_max:
-            print(f"local density variance max: {ldv_max:.6f}")
-        if self.print_ldv_mean:
-            print(f"local density variance max: {ldv_mean:.6f}")
-
         self.compute_constraint()
         self.compute_Aii()
 
@@ -1077,7 +1077,6 @@ class PBF2Solver(SPHBase):
 
         opt_iter = 0
         for _ in range(self.max_iteration_opt):
-
             self.compute_J_x(Jd, d)
             add(self.t, Jd, 1.0, c)
 
@@ -1106,9 +1105,13 @@ class PBF2Solver(SPHBase):
                 if self.smooth_max:
                     coef_wise_mul(self.f, self.f, self.k)
                     self.compute_J_tr_x(g, self.f)
-                    self.compute_JtJ()
+
+                    # if self.precondition == 1:
+                    #     self.compute_JtJ()
+
                     if self.use_pcg:
                         self.PCG()
+
                     else:
                         self.apply_precondition(p, P, g)
 
@@ -1117,6 +1120,7 @@ class PBF2Solver(SPHBase):
                     coef_wise_mul(self.t, self.t, self.k)
                     max(self.t)
                     self.compute_J_tr_x(g, self.t)
+
                     coef_wise_div(p, g, self.ps.m)
 
                 self.add(d, d, -self.omega, p)
@@ -1126,28 +1130,28 @@ class PBF2Solver(SPHBase):
                 # err = self.compute_avg_density_error(self.f)
                 # Collect optimizer error per iteration
                 self.stats_opt_error.append(float(err))
+                try:
+                    self.stats_opt_error_frame.append(int(self.current_frame))
+                except Exception:
+                    self.stats_opt_error_frame.append(0)
                 if self.print_opt_error:
                     print(f"opt error: {err}")
 
                 if (err < pow(10, -self.tol_opt)) and opt_iter > 1  or opt_iter >= self.max_iteration_opt:
                     break
 
-            if self.density_distribution and opt_iter == 0:
-                cnt = int(self.ps.particle_num[None])
-                density_np = self.ps.density.to_numpy()[:cnt].copy()
-
-                self.captured_density_np = density_np
-                self._density_plot_cnt = cnt
-                self._density_snapshot_ready = True
-                self.density_distribution = False
-
             opt_iter += 1
 
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         # Collect elapsed time per outer solve
         self.stats_elapsed_ms.append(float(elapsed_ms))
+
         if self.print_elapsed_time:
             print(f"elapsed time: {elapsed_ms:.3f} ms")
+    
+        self.stats_pcg_iter.append(int(self.pcg_total_iter))
+        if self.print_pcg_iter:
+            print(f"PCG iter: {int(self.pcg_total_iter)}")
 
         # Collect optimizer iteration count per outer solve
         self.stats_opt_iter.append(int(opt_iter))
@@ -1161,21 +1165,11 @@ class PBF2Solver(SPHBase):
 
         #v_n+1_tmp
         self.update_velocities(self.dt)
-        # One-shot capture of speed (|v|) distribution after velocity update
-        if self.velocity_distribution:
-            count = int(self.ps.particle_num[None])
-            v_np = self.ps.v.to_numpy()[:count]
-            speed_np = np.linalg.norm(v_np, axis=1)
-            self.captured_velocity_np = speed_np.copy()
-            self._velocity_snapshot_ready = True
-            self.velocity_distribution = False  # disarm
+
         # if self.ps.num_rigid_bodies > 0:
         #     self.rigid_compute_cm_and_vcm()
         #     self.rigid_compute_angular_velocity()
         #     self.rigid_project_velocities()
-
-
-
 
     def divergence_free_solve(self):
         self.enforce_boundary_3D(self.ps.material_fluid)
@@ -1239,25 +1233,6 @@ class PBF2Solver(SPHBase):
                 sum_i += term * term
             self.var[p_i] = ti.sqrt(sum_i)
 
-    @ti.kernel
-    def ldv_mean(self) -> float:
-        acc = 0.0
-        cnt = 0
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] == self.ps.material_fluid:
-                acc += self.var[p_i]
-                cnt += 1
-        return acc / ti.max(1, cnt)
-
-    @ti.kernel
-    def ldv_max(self) -> float:
-        ret = 0.0
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] == self.ps.material_fluid:
-                ti.atomic_max(ret, self.var[p_i])
-        return ret
-
-
     def substep(self):
 
         self.ps.initialize_particle_system()
@@ -1271,7 +1246,8 @@ class PBF2Solver(SPHBase):
             dt_lower_bound = 0.001
             self.dt = ti.max(dt_lower_bound, ti.min(dt_upper_bound, self.dt))
             print(f"use smaller time step: {self.dt}")
-
+        
+        self.pcg_total_iter = 0
         self.compute_normal()
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)

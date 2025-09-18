@@ -598,7 +598,7 @@ class ParticleSystem:
                     sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
 
                 if sum_Wij > 1e-12:
-                    self.m[p_i] = 0.7 * self.density0[p_i] / sum_Wij
+                    self.m[p_i] = self.density0[p_i] / sum_Wij
                     self.m_V[p_i] = self.m[p_i] / self.density0[p_i]
                     # Keep inverse mass consistent (static solids keep 0 inv mass)
                     if self.is_dynamic[p_i]:
@@ -699,7 +699,7 @@ class ParticleSystem:
         is_success = tm.repair.fill_holes(mesh)
             # print("Is the mesh successfully repaired? ", is_success)
 
-        a = 1.0 
+        a = 0.8
         voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
         voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
         # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()

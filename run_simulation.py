@@ -23,18 +23,21 @@ if __name__ == "__main__":
     scene_path = args.scene_file
     config = SimConfig(scene_file_path=scene_path)
     scene_name = scene_path.split("/")[-1].split(".")[0]
+    # Per-run PLY output directory: output/<scene>/<timestamp>
+    timestamp_str = time.strftime("%Y%m%d-%H%M%S")
+    ply_out_dir = os.path.join("output", scene_name, timestamp_str)
 
     substeps = config.get_cfg("numSubstepping")
     # print(substeps)
     output_frames = config.get_cfg("exportFrame")
-    output_interval = int(0.02 / config.get_cfg("timeStepSize"))
+    output_interval = 20
     output_ply = config.get_cfg("exportPly")
     output_obj = config.get_cfg("exportObj")
-    series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, "{}")
+    series_prefix = os.path.join(ply_out_dir, "particle_object_{}.ply")
     if output_frames:
         os.makedirs(f"{scene_name}_output_img", exist_ok=True)
     if output_ply:
-        os.makedirs(f"{scene_name}_output", exist_ok=True)
+        os.makedirs(ply_out_dir, exist_ok=True)
 
     method = config.get_cfg("simulationMethod")
     ps = ParticleSystem(config, GGUI=True)
@@ -95,9 +98,6 @@ if __name__ == "__main__":
     export_rigid_objects = False
     export_stats = False
 
-    # One-shot density capture UI state
-    capture_density_ui = False
-    capture_velocity_ui = False
 
     # Draw the lines for domain
     x_max, y_max, z_max = config.get_cfg("domainEnd")
@@ -124,9 +124,8 @@ if __name__ == "__main__":
     # Initialize animation system
     animator = AnimationSystem(ps, config)
     anim_time = 0.0
-    runAnim = True
-    anim_nudge = 0.1
-    anim_time = 0.0
+    anim_nudge = 0.1  # translation step
+    rot_nudge = 0.0872664626  # rotation step (radians ~5deg)
 
     # Animation handled by AnimationSystem
 
@@ -162,8 +161,7 @@ if __name__ == "__main__":
 
                         if solver.use_pcg:
                             solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
-                            solver.tol_pcg = w.slider_int("pcg tol magnitude", solver.tol_pcg, 1, 5)
-
+                            solver.tol_pcg = w.slider_int("pcg tol magnitude", solver.tol_pcg, 1, 15)
                 # else:
                 #     solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
 
@@ -191,7 +189,7 @@ if __name__ == "__main__":
                 export_rigid_objects = w.checkbox("Export rigid objects", export_rigid_objects)
 
             if export_ply:
-                end_frame = w.slider_int("end frame", end_frame, 0, int(5e3))
+                end_frame = w.slider_int("end frame", end_frame, 0, int(3e4))
             export_stats = w.checkbox("export stats", export_stats)
 
             gui.text("")  # Spacer
@@ -224,12 +222,10 @@ if __name__ == "__main__":
                 gui.text("No transparent objects configured")
 
             gui.text("")
-            gui.text(f"Animation: {'playing' if runAnim else 'paused'} t={anim_time:.3f}")
-            gui.text("Key: p=play/pause, o=reset")
+            gui.text("수동 애니메이션: ←/→ 이동, ↑/↓ 회전")
+            gui.text("스페이스=시작/정지, r=리셋")
 
     def show_options_stats():
-        global capture_density_ui
-        global capture_velocity_ui
         with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.25) as w:
 
             solver.print_opt_iter  = w.checkbox("print opt iter", solver.print_opt_iter)
@@ -237,10 +233,6 @@ if __name__ == "__main__":
             solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
             solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
             solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
-            solver.print_ldv_mean = w.checkbox("print LDV mean", solver.print_ldv_mean)
-            solver.print_ldv_max = w.checkbox("print LDV max", solver.print_ldv_max)
-            capture_density_ui = w.checkbox("print density (one shot)", capture_density_ui)
-            capture_velocity_ui = w.checkbox("print speed (one shot)", capture_velocity_ui)
 
         
             
@@ -290,62 +282,25 @@ if __name__ == "__main__":
             pcg_part = "pcg" if use_pcg_flag else "nopcg"
             # Base prefix includes dt, tol, and max opt iter
             prefix = f"dt{dt_val:.5f}-tol{tol_opt_val}-opt{max_iter_opt_val}"
-            # Variant encodes pcg then method label
+            # Variant encodes pcg then method label, with precondition tag if present
             variant = f"{pcg_part}-{label}"
+            # Append precondition tag for our method only
+            if label == "ours":
+                try:
+                    precond_val = int(getattr(solver, "precondition", 0))
+                except Exception:
+                    precond_val = 0
+                precond_tag = {1: "Hii", 2: "Mii", 3: "I"}.get(precond_val, f"p{precond_val}") if use_pcg_flag else "noPCG"
+                variant = f"{variant}-{precond_tag}"
             for name, arr in stats.items():
                 try:
-                    out_path = os.path.join("data", "stats", f"{prefix}-{variant}-{name}.npy")
+                    out_path = os.path.join("data", "stats", f"{scene_name}-{prefix}-{variant}-{name}.npy")
                     np.save(out_path, arr)
                 except Exception:
                     pass
         except Exception:
             # Do not crash UI due to stats export errors
             pass
-    
-
-    def _plot_density_bars(dens: np.ndarray, frame_cnt: int, scene_name: str):
-
-        idx = np.arange(dens.shape[0])
-        mean_v = float(dens.mean())
-
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.bar(idx, dens, color='steelblue', width=1.0)
-        ax.axhline(mean_v, color='red', linestyle='--', linewidth=1.5, label=f"mean={mean_v:.2f}")
-        ax.set_xlabel("particle id")
-        ax.set_ylabel("density")
-        ax.set_title(f"Density distribution (frame {frame_cnt})")
-        ax.legend(loc="upper right")
-        ax.grid(True, axis='y', alpha=0.2)
-        ax.set_ybound(500, 5000)
-
-        out_dir = os.path.join("data", "stats")
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"{scene_name}-frame{frame_cnt:06d}-density.png")
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Saved density plot: {out_path}")
-
-    def _plot_speed_bars(speed: np.ndarray, frame_cnt: int, scene_name: str):
-
-        idx = np.arange(speed.shape[0])
-        mean_v = float(speed.mean())
-
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.bar(idx, speed, color='mediumseagreen', width=1.0)
-        ax.axhline(mean_v, color='red', linestyle='--', linewidth=1.5, label=f"mean={mean_v:.2f}")
-        ax.set_xlabel("particle id")
-        ax.set_ylabel("|v|")
-        ax.set_title(f"Speed distribution (frame {frame_cnt})")
-        ax.legend(loc="upper right")
-        ax.grid(True, axis='y', alpha=0.2)
-        ax.set_ybound(0, 50)
-
-        out_dir = os.path.join("data", "stats")
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"{scene_name}-frame{frame_cnt:06d}-speed.png")
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Saved speed plot: {out_path}")
 
     cnt = 0
     cnt_ply = 0
@@ -397,7 +352,7 @@ if __name__ == "__main__":
                     print(f"rewind: {result.get('rewind_steps', 0)} frames")
 
             if window.event.key == 'r':
-                print("rest simulation...")
+                print("reset simulation...")
                 # Before resetting, export current stats if requested
                 _export_solver_stats_if_any()
                 # Clear rolling cache but keep baseline
@@ -421,6 +376,10 @@ if __name__ == "__main__":
                     anim_time = 0.0
                     # Clear per-session stats
                     _clear_solver_stats_if_any()
+                    try:
+                        animator.reset_manual()
+                    except Exception:
+                        pass
                 else:
                     # Fallback: full rebuild if baseline missing
                     ps = ParticleSystem(config, GGUI=True)
@@ -435,30 +394,43 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     anim_time = 0.0
+                    try:
+                        animator.reset_manual()
+                    except Exception:
+                        pass
 
-            # ----- Animation keyboard controls -----
-            if window.event.key == 'p':
-                runAnim = not runAnim
-            if window.event.key == 'o':
-                anim_time = 0.0
-                if animator.has_animations():
-                    animator.apply(anim_time)
-
-        if capture_density_ui:
-            if hasattr(solver, "density_distribution"):
-                solver.density_distribution = True
-                print("Armed: capture density once on next OPT iteration.")
-            capture_density_ui = False
-
-        if capture_velocity_ui:
-            if hasattr(solver, "velocity_distribution"):
-                solver.velocity_distribution = True
-                print("Armed: capture speed once after velocity update.")
-            capture_velocity_ui = False
+            # ----- Manual animation controls (arrow keys) -----
+            if window.event.key == ti.ui.LEFT:
+                try:
+                    animator.nudge_all_translate(-anim_nudge)
+                except Exception:
+                    pass
+            if window.event.key == ti.ui.RIGHT:
+                try:
+                    animator.nudge_all_translate(+anim_nudge)
+                except Exception:
+                    pass
+            if window.event.key == ti.ui.UP:
+                try:
+                    animator.nudge_all_rotate(+rot_nudge)
+                except Exception:
+                    pass
+            if window.event.key == ti.ui.DOWN:
+                try:
+                    animator.nudge_all_rotate(-rot_nudge)
+                except Exception:
+                    pass
 
         if export_ply and frame_cnt > end_frame:
             runSim = False
             _export_solver_stats_if_any()
+
+        # Apply manual transform when paused for immediate feedback
+        if not runSim and animator.has_animations():
+            try:
+                animator.apply_manual()
+            except Exception:
+                pass
 
         if runSim:
 
@@ -466,44 +438,32 @@ if __name__ == "__main__":
             dt = solver.dt
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
-                # advance animation within substeps for smoother motion (only when playing)
-                if animator.has_animations() and runAnim:
-                    t_now = anim_time + i * solver.dt
-                    animator.apply(t_now)
+                # apply manual animation each substep
+                if animator.has_animations():
+                    try:
+                        animator.apply_manual()
+                    except Exception:
+                        pass
+                # provide current global frame index to solver for per-iteration frame tagging
+                try:
+                    solver.current_frame = int(frame_cnt)
+                except Exception:
+                    pass
                 solver.step()
 
-            # advance animation time by full frame dt
-            if animator.has_animations() and runAnim:
-                anim_time += dt
             solver.dt = dt
             frame_cnt += 1
 
             # After completing a frame, cache the end-of-frame state
             cache.push(frame_cnt=frame_cnt, anim_time=anim_time)
 
-            if hasattr(solver, "_density_snapshot_ready") and solver._density_snapshot_ready:
-                try:
-                    dens = solver.captured_density_np
-                    if isinstance(dens, np.ndarray) and dens.size > 0:
-                        _plot_density_bars(dens, frame_cnt, scene_name)
-                except Exception as e:
-                    print(f"[warn] density plot failed: {e}")
-                # clear ready flag
-                solver._density_snapshot_ready = False
-                solver.captured_density_np = None
-
-            if hasattr(solver, "_velocity_snapshot_ready") and solver._velocity_snapshot_ready:
-                try:
-                    spd = solver.captured_velocity_np
-                    if isinstance(spd, np.ndarray) and spd.size > 0:
-                        _plot_speed_bars(spd, frame_cnt, scene_name)
-                except Exception as e:
-                    print(f"[warn] speed plot failed: {e}")
-                solver._velocity_snapshot_ready = False
-                solver.captured_velocity_np = None
-
             if frame_cnt > 0 and frame_cnt % output_interval == 0:
                 if export_ply:
+                    # Ensure per-run output directory exists
+                    try:
+                        os.makedirs(ply_out_dir, exist_ok=True)
+                    except Exception:
+                        pass
                     if export_rigid_objects:
                         # Export each object separately
                         for obj_id in ps.object_collection:
@@ -513,27 +473,38 @@ if __name__ == "__main__":
                             # Only export if object has particles
                             if len(np_pos) > 0:
                                 if obj_id == 0:
-                                    # Fluid particles (object id 0): position + RGB encoding velocity x,y,z
+                                    # Fluid particles (object id 0): position + vertex color encoding
+                                    # R: |v| normalized, G: density (current heatmap scheme), B: 0
                                     np_vel = obj_data["velocity"]
 
-                                    # Normalize velocity components to 0-1 range for RGB encoding
-                                    # Assume velocity range is roughly -5 to 5
-                                    vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
-                                    vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
-                                    vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
+                                    # Speed magnitude normalization (match viz setting)
+                                    speed = np.linalg.norm(np_vel, axis=1)
+                                    norm_speed = Normalize(vmin=0.0, vmax=1.5, clip=True)
+                                    r_chan = norm_speed(speed)
+
+                                    # Density difference normalization (match viz density scheme)
+                                    N_active = int(ps.particle_num[None])
+                                    object_id_np = ps.object_id.to_numpy()[:N_active]
+                                    mask_fluid = (object_id_np == obj_id)
+                                    density_np = ps.density.to_numpy()[:N_active]
+                                    density0_np = ps.density0.to_numpy()[:N_active]
+                                    dens_diff = (density_np - density0_np)[mask_fluid]
+                                    norm_dens = Normalize(vmin=-50.0, vmax=50.0, clip=True)
+                                    g_chan = norm_dens(dens_diff)
+
+                                    b_chan = np.zeros_like(r_chan)
 
                                     # Create separate PLY file for fluid
-                                    obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
+                                    obj_series_prefix = os.path.join(ply_out_dir, f"particle_object_{obj_id}.ply")
                                     writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                                     writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
 
-                                    # Encode velocity x,y,z in RGB channels
-                                    writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
+                                    writer.add_vertex_color(r_chan, g_chan, b_chan)
 
                                     writer.export_frame_ascii(cnt_ply, obj_series_prefix)
                                 else:
                                     # Rigid objects (object id > 0): position only
-                                    obj_series_prefix = "{}_output/particle_object_{}.ply".format(scene_name, obj_id)
+                                    obj_series_prefix = os.path.join(ply_out_dir, f"particle_object_{obj_id}.ply")
                                     writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                                     writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
 
@@ -553,17 +524,26 @@ if __name__ == "__main__":
                         if len(np_pos) > 0:
                             np_vel = obj_data["velocity"]
 
-                            # Normalize velocity components to 0-1 range for RGB encoding
-                            # Assume velocity range is roughly -5 to 5
-                            vel_x_norm = np.clip((np_vel[:, 0] + 5.0) / 10.0, 0.0, 1.0)
-                            vel_y_norm = np.clip((np_vel[:, 1] + 5.0) / 10.0, 0.0, 1.0)
-                            vel_z_norm = np.clip((np_vel[:, 2] + 5.0) / 10.0, 0.0, 1.0)
+                            # R: |v| normalized, G: density (heatmap), B: 0
+                            speed = np.linalg.norm(np_vel, axis=1)
+                            norm_speed = Normalize(vmin=0.0, vmax=1.5, clip=True)
+                            r_chan = norm_speed(speed)
+
+                            N_active = int(ps.particle_num[None])
+                            object_id_np = ps.object_id.to_numpy()[:N_active]
+                            mask_fluid = (object_id_np == obj_id)
+                            density_np = ps.density.to_numpy()[:N_active]
+                            density0_np = ps.density0.to_numpy()[:N_active]
+                            dens_diff = (density_np - density0_np)[mask_fluid]
+                            norm_dens = Normalize(vmin=-50.0, vmax=50.0, clip=True)
+                            g_chan = norm_dens(dens_diff)
+
+                            b_chan = np.zeros_like(r_chan)
 
                             writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                             writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
 
-                            # Encode velocity x,y,z in RGB channels
-                            writer.add_vertex_color(vel_x_norm, vel_y_norm, vel_z_norm)
+                            writer.add_vertex_color(r_chan, g_chan, b_chan)
 
                             writer.export_frame_ascii(cnt_ply, series_prefix.format(0))
                     cnt_ply += 1

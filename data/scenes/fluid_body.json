@@ -18,18 +18,6 @@
 		"transparentObjects": [1],
 		"alpha": 0.3
 	},
-	"FluidBlocks": [
-		{
-            "objectId": 0,
-			"start": [0.1, 0.1, 0.1],
-			"end": [1.8, 0.3, 1.5],
-			"translation": [0.5, 0.1, 0.5],
-			"scale": [1, 1, 1],
-			"velocity": [0.0, 0.0, 0.0],
-			"density": 1000.0,
-			"color": [10, 100, 200]
-		}
-	],
 	"FluidBodies": [
 		{
 			"objectId": 0,
@@ -37,31 +25,9 @@
 			"translation": [1.25, 2.0, 1.25],
 			"rotationAxis": [0, 0, 1],
 			"rotationAngle": 0,
-			"scale": [2.5, 2.5, 2.5],
+			"scale": [3.5, 3.5, 3.5],
 			"velocity": [0.0, -1.0, 0.0],
 			"density": 800.0,
-			"color": [200, 100, 10]
-		},
-		{
-			"objectId": 0,
-			"geometryFile": "./data/models/sphere.obj",
-			"translation": [1.0, 3.0, 1.6],
-			"rotationAxis": [0, 0, 1],
-			"rotationAngle": 0,
-			"scale": [0.1, 0.1, 0.1],
-			"velocity": [0.0, -1.0, 0.0],
-			"density": 1000.0,
-			"color": [200, 100, 10]
-		},
-		{
-			"objectId": 0,
-			"geometryFile": "./data/models/Dragon_50k.obj",
-			"translation": [1.6, 3.0, 1.0],
-			"rotationAxis": [0, 0, 1],
-			"rotationAngle": 0,
-			"scale": [0.3, 0.3, 0.3],
-			"velocity": [0.0, -1.0, 0.0],
-			"density": 1000.0,
 			"color": [200, 100, 10]
 		}
 	],

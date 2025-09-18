@@ -2,8 +2,8 @@
 	"Configuration":
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [5.0, 13.0, 5.0],
-		"particleRadius": 0.02,
+        "domainEnd": [5.0, 19.0, 5.0],
+		"particleRadius": 0.03,
 		"numSubstepping": 1,
 		"density0": 1000,
 		"simulationMethod": 2,
@@ -23,9 +23,9 @@
         {
             "objectId": 0,
             "start": [2.2, 2.0, 2.2],
-            "end": [2.8, 8.0, 2.8],
-            "translation": [0.0, 0.1, 0.0],
-            "scale": [1, 1, 1],
+            "end": [2.8, 10.0, 2.8],
+            "translation": [-0.3, -0.3, -0.3],
+            "scale": [2, 1.5, 2],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [10, 100, 200]
@@ -35,11 +35,11 @@
     "RigidBodies" : [
         {
             "objectId": 1,
-            "geometryFile": "./data/models/BoxOpened2.obj",
+            "geometryFile": "./data/models/BoxOpened_thick.obj",
             "translation": [2.5, 0.1, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [0.9, 2.0, 0.9],
+            "scale": [1.7, 3.8, 1.7],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
@@ -47,11 +47,11 @@
         },
         {
             "objectId": 2,
-            "geometryFile": "./data/models/movingBoundaryCeli.obj",
-            "translation": [1.8, 6.7, 1.8],
+            "geometryFile": "./data/models/thickCeli.obj",
+            "translation": [2.5, 16.5, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [0.75, 0.75, 0.75],
+            "scale": [1.7, 1.7, 1.7],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],

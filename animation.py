@@ -9,6 +9,15 @@ class AnimationSystem:
         self.cfg = config
         self.time = 0.0
         self.anims = self._parse_animations()
+        # Manual control state
+        self._translate_offset = {}
+        self._rotate_angle = {}
+        for a in self.anims:
+            key = (int(a["obj"]), int(a["axis"]))
+            if int(a["type"]) == 0:
+                self._translate_offset[key] = 0.0
+            else:
+                self._rotate_angle[key] = 0.0
 
     def has_animations(self) -> bool:
         return len(self.anims) > 0
@@ -16,6 +25,22 @@ class AnimationSystem:
     def reset(self):
         self.time = 0.0
         self.anims = self._parse_animations()
+        # Rebuild manual state
+        self._translate_offset = {}
+        self._rotate_angle = {}
+        for a in self.anims:
+            key = (int(a["obj"]), int(a["axis"]))
+            if int(a["type"]) == 0:
+                self._translate_offset[key] = 0.0
+            else:
+                self._rotate_angle[key] = 0.0
+
+    def reset_manual(self):
+        # Zero all manual offsets/angles
+        for k in list(self._translate_offset.keys()):
+            self._translate_offset[k] = 0.0
+        for k in list(self._rotate_angle.keys()):
+            self._rotate_angle[k] = 0.0
 
     def _parse_axis(self, ax):
         if isinstance(ax, str):
@@ -70,6 +95,66 @@ class AnimationSystem:
         except Exception:
             pass
         return out
+
+    # -----------------------------
+    # Manual-control kernels
+    # -----------------------------
+    @ti.kernel
+    def _apply_translate_manual(self, obj_id: int, axis: int, offset: float,
+                                x: ti.template(), x0: ti.template(), object_id: ti.template()):
+        for p_i in ti.grouped(x):
+            if object_id[p_i] == obj_id:
+                disp = ti.math.vec3(0.0)
+                disp[axis] = offset
+                x[p_i] = x0[p_i] + disp
+
+    @ti.kernel
+    def _apply_rotate_manual(self, obj_id: int, axis: int, angle: float,
+                             x: ti.template(), x0: ti.template(), object_id: ti.template(), rest_cm: ti.template()):
+        c = ti.cos(angle)
+        s = ti.sin(angle)
+        R = ti.Matrix.zero(float, 3, 3)
+        if axis == 0:
+            R[0, 0] = 1.0; R[0, 1] = 0.0; R[0, 2] = 0.0
+            R[1, 0] = 0.0; R[1, 1] = c;   R[1, 2] = -s
+            R[2, 0] = 0.0; R[2, 1] = s;   R[2, 2] = c
+        elif axis == 1:
+            R[0, 0] = c;   R[0, 1] = 0.0; R[0, 2] = s
+            R[1, 0] = 0.0; R[1, 1] = 1.0; R[1, 2] = 0.0
+            R[2, 0] = -s;  R[2, 1] = 0.0; R[2, 2] = c
+        else:
+            R[0, 0] = c;   R[0, 1] = -s;  R[0, 2] = 0.0
+            R[1, 0] = s;   R[1, 1] = c;   R[1, 2] = 0.0
+            R[2, 0] = 0.0; R[2, 1] = 0.0; R[2, 2] = 1.0
+
+        com0 = rest_cm[obj_id]
+        for p_i in ti.grouped(x):
+            if object_id[p_i] == obj_id:
+                local = x0[p_i] - com0
+                x[p_i] = com0 + R @ local
+
+    # -----------------------------
+    # Manual-control APIs
+    # -----------------------------
+    def nudge_all_translate(self, delta: float):
+        for key in list(self._translate_offset.keys()):
+            self._translate_offset[key] += float(delta)
+
+    def nudge_all_rotate(self, delta_angle: float):
+        for key in list(self._rotate_angle.keys()):
+            self._rotate_angle[key] += float(delta_angle)
+
+    def apply_manual(self):
+        # Apply current manual states to all configured animations
+        for a in self.anims:
+            obj = int(a["obj"])
+            axis = int(a["axis"])
+            if int(a["type"]) == 0:
+                offset = float(self._translate_offset.get((obj, axis), 0.0))
+                self._apply_translate_manual(obj, axis, offset, self.ps.x, self.ps.x_0, self.ps.object_id)
+            else:
+                angle = float(self._rotate_angle.get((obj, axis), 0.0))
+                self._apply_rotate_manual(obj, axis, angle, self.ps.x, self.ps.x_0, self.ps.object_id, self.ps.rigid_rest_cm)
 
     @ti.kernel
     def _animate_translate_axis(self, obj_id: int, axis: int, amplitude: float, omega: float, phase: float, base_offset: float, t: float,
