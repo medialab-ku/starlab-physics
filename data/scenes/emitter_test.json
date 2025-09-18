@@ -1,0 +1,71 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [2.5, 4.0, 2.5],
+		"particleRadius": 0.02,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.005,
+		"stiffness": 50000,
+		"exponent": 7,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+		"transparentObjects": [1],
+		"alpha": 0.3
+	},
+	"Emitter": {
+		"capacity": 50000,
+		"reuse": false,
+		"emitters": [
+			{
+				"type": "circle",
+				"width": 5,
+				"height": 5,
+				"position": [1.25, 3.0, 1.25],
+				"direction": [0.0, -1.0, 0.0],
+				"velocity": 5.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 0,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			}
+		]
+	},
+
+	"FluidBlocks": [
+		{
+            "objectId": 0,
+			"start": [0.5, 0.8, 0.5],
+			"end": [1.2, 1.8, 1.2],
+			"translation": [0.0, 0.1, 0.0],
+			"scale": [1, 1, 1],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [10, 100, 200]
+		}
+	],
+
+
+	"RigidBodies" : [
+		{
+			"objectId": 1,
+			"geometryFile": "./data/models/BoxWide.obj",
+			"translation": [1.25, 0.1, 1.25],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [1.2, 1.4, 1.6],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false
+		}
+	]
+}

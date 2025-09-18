@@ -1,0 +1,42 @@
+{
+	"Configuration": 
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [3.0, 6.0, 3.0],
+		"particleRadius": 0.01,
+		"numberOfStepsPerRenderUpdate": 1,
+		"density0": 1000,
+		"simulationMethod": 3,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.004,
+		"stiffness": 1,
+		"exponent": 1,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false
+	},
+	"FluidBlocks": [
+		{
+            "objectId": 0,
+			"start": [0.0, 2.0, 0.0],
+			"end": [1.2, 5.2, 1.2],
+			"translation": [0.1, 0.1, 0.1],
+			"scale": [1, 1, 1],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [50, 100, 200]
+		},
+
+		{
+            "objectId": 0,
+			"start": [0.0, 2.0, 1.6],
+			"end": [1.2, 5.2, 2.8],
+			"translation": [0.1, 0.1, 0.1],
+			"scale": [1, 1, 1],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [50, 100, 0]
+		}
+	]
+}

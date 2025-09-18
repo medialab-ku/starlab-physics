@@ -1,0 +1,48 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [2.5, 4.0, 2.5],
+		"particleRadius": 0.01,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.005,
+		"stiffness": 50000,
+		"exponent": 7,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+		"transparentObjects": [1],
+		"alpha": 0.3
+	},
+	"FluidBodies": [
+		{
+			"objectId": 0,
+			"geometryFile": "./data/models/bunny_sparse.obj",
+			"translation": [1.25, 2.0, 1.25],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [3.5, 3.5, 3.5],
+			"velocity": [0.0, -1.0, 0.0],
+			"density": 800.0,
+			"color": [200, 100, 10]
+		}
+	],
+	"RigidBodies" : [
+		{
+			"objectId": 1,
+			"geometryFile": "./data/models/BoxWide.obj",
+			"translation": [1.25, 0.1, 1.25],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [1.2, 0.4, 1.6],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false
+		}
+	]
+}

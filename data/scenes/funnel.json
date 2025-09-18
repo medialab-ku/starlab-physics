@@ -1,0 +1,35 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [3.0, 10.0, 3.0],
+		"particleRadius": 0.03,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.002,
+		"stiffness": 50000,
+		"exponent": 7,
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+        "transparentObjects": [1],
+        "alpha": 0.2
+	},
+    "RigidBodies" : [
+        {
+            "objectId": 1,
+            "geometryFile": "./data/models/funnel.obj",
+            "translation": [1.5, 0.5, 1.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.5, 1.5, 1.5],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        }
+    ]
+}
