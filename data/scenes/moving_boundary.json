@@ -58,11 +58,24 @@
 			"isDynamic": false,
 			"animation": {
 				"type": "oscillate",
+				"auto": true,
 				"axis": "z",
-				"amplitude": 5.0,
-				"period": 3.5,
+				"amplitude": 5.13,
+				"period": 10.0,
 				"phase": 0.0
 			}
-		}
+		},
+        {
+            "objectId": 3,
+            "geometryFile": "./data/models/floorThickCenterPivot.obj",
+            "translation": [2.0, 3.0, 3.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.2, 1.2, 2.7],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false
+        }
 	]
 }

@@ -355,7 +355,13 @@ if __name__ == "__main__":
             if window.event.key == ' ':
                 # Toggle run state
                 runSim = not runSim
+                anim_auto_mode = bool(animator.has_auto())
                 if runSim:
+                    if anim_auto_mode:
+                        runAnim = True
+                    ps.x_old.copy_from(ps.x)
+                    ps.v_adv.copy_from(ps.v)
+                    
                     # Fresh session: reset per-session stats if supported
                     _clear_solver_stats_if_any()
                 else:
@@ -403,6 +409,9 @@ if __name__ == "__main__":
                         animator.reset_manual()
                     except Exception:
                         pass
+                    anim_auto_mode = bool(animator.has_auto())
+                    runAnim = False
+
                 else:
                     # Fallback: full rebuild if baseline missing
                     ps = ParticleSystem(config, GGUI=True)
@@ -417,6 +426,8 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     anim_time = 0.0
+                    anim_auto_mode = bool(animator.has_auto())
+                    runAnim = False
                     try:
                         animator.reset_manual()
                     except Exception:
@@ -425,7 +436,8 @@ if __name__ == "__main__":
             # ----- Animation controls -----
             if anim_auto_mode:
                 if window.event.key == 'p':
-                    runAnim = not runAnim
+                    if runSim:
+                        runAnim = not runAnim
                 if window.event.key == 'o':
                     anim_time = 0.0
             else:
@@ -439,10 +451,10 @@ if __name__ == "__main__":
         # Apply animation when paused for immediate feedback
         if not runSim and animator.has_animations():
             try:
-                if anim_auto_mode and runAnim:
-                    animator.apply(anim_time)
-                else:
-                    animator.apply_manual()
+                # if anim_auto_mode and runAnim:
+                #     animator.apply(anim_time)
+                # else:
+                animator.apply_manual()
             except Exception:
                 pass
 

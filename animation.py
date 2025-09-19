@@ -257,15 +257,3 @@ class AnimationSystem:
                 local = x0[p_i] - com0
                 x[p_i] = com0 + R @ local
 
-    def apply(self, t_now: float):
-        if len(self.anims) == 0:
-            return
-        for a in self.anims:
-            if a["type"] == 0:
-                self._animate_translate_axis(int(a["obj"]), int(a["axis"]), float(a["amp"]), float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_now),
-                                             self.ps.x, self.ps.x_0, self.ps.object_id)
-            else:
-                self._animate_rotate_axis(int(a["obj"]), int(a["axis"]), float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_now),
-                                          self.ps.x, self.ps.x_0, self.ps.object_id, self.ps.rigid_rest_cm)
-
-
