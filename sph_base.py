@@ -154,7 +154,7 @@ class SPHBase:
                 self.compute_rigid_rest_cm(r_obj_id)
 
         self.compute_static_boundary_volume()
-        self.compute_moving_boundary_volume()
+        # self.compute_moving_boundary_volume()
         self.ps.initialize_boundary_neighbors()
 
         if self.ps.num_rigid_bodies > 0:
@@ -401,7 +401,8 @@ class SPHBase:
             self.time += dt
 
         self.ps.initialize_particle_system()
-        self.compute_moving_boundary_volume()
+        # self.compute_moving_boundary_volume()
+
         self.substep()
         self.enforce_boundary_3D(self.ps.material_solid)
 

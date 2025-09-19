@@ -699,7 +699,7 @@ class ParticleSystem:
         is_success = tm.repair.fill_holes(mesh)
             # print("Is the mesh successfully repaired? ", is_success)
 
-        a = 0.8
+        a = 1.0
         voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
         voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
         # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()

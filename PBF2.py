@@ -162,7 +162,6 @@ class PBF2Solver(SPHBase):
             self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
             den = 0.0
             x_i = self.ps.x[p_i]
-
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
@@ -632,7 +631,6 @@ class PBF2Solver(SPHBase):
     def compute_Ax(self, Ax: ti.template(), Jx: ti.template(), x: ti.template()):
 
         for p_i in ti.grouped(x):
-
             Jx[p_i] = 0.0
             if not self.ps.is_dynamic[p_i]:
                 continue
@@ -724,22 +722,23 @@ class PBF2Solver(SPHBase):
     def dot(self, a: ti.template(), b: ti.template()) -> float:
 
         ret = 0.0
-        for i in a:
-            if self.ps.material[i] != self.ps.material_fluid:
+        for p_i in ti.grouped(self.ps.x):
+
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
-            ret += ti.math.dot(a[i], b[i])
+            ret += ti.math.dot(a[p_i], b[p_i])
 
         return ret
 
     @ti.kernel
     def add(self, ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
-        for i in ret:
+        for p_i in ti.grouped(self.ps.x):
 
-            if self.ps.material[i] != self.ps.material_fluid:
+            if not self.ps.is_dynamic[p_i]:
                 continue
 
-            ret[i] = v0[i] + scale * v1[i]
+            ret[p_i] = v0[p_i] + scale * v1[p_i]
 
 
     def PCG(self):
@@ -758,20 +757,16 @@ class PBF2Solver(SPHBase):
         pcg_t0 = time.perf_counter()
 
         r.copy_from(b)
-
-        # self.apply_precondition(z, self.Hii, r)
         z.copy_from(r)
-
         rz_old = dot(r, z)
         pcg_iter = 0
         if rz_old > 1e-12:
-            # print("test")
             p.copy_from(z)
             for _ in range(self.max_iteration_pcg):
                 t0 = time.perf_counter()
                 self.compute_Ax(Ap, Jp, p)
 
-                pAp = dot(p, Ap)
+                pAp = self.dot(p, Ap)
                 if pAp < 0.0:
                     print("Warning: non-positive definite matrix!")
 
@@ -792,9 +787,7 @@ class PBF2Solver(SPHBase):
                 if self.print_pcg_error:
                     print(f"PCG error: {err}")
 
-                # self.apply_precondition(z, self.Hii, r)
                 z.copy_from(r)
-
                 if err <  pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
                     break
 
@@ -1078,25 +1071,20 @@ class PBF2Solver(SPHBase):
         opt_iter = 0
         for _ in range(self.max_iteration_opt):
             self.compute_J_x(Jd, d)
-            add(self.t, Jd, 1.0, c)
+            self.add(self.t, Jd, 1.0, c)
 
             if self.iisph:
 
                 err = self.compute_avg_density_error(self.t)
                 if (err < pow(10, -self.tol_opt)) and opt_iter > 1 or opt_iter >= self.max_iteration_opt:
                     break
-                # print(err)
-                # if (err <  pow(10, -self.tol_opt) and opt_iter > 2) or opt_iter >= self.max_iteration_opt:
-                #     # if self.print_info:
-                #     #     print(f"CD iter: {iter}, err: {err}")
-                #     break
 
                 coef_wise_op(self.dp, self.t, self.Aii, 1)
-                add(self.p, self.p, self.omega, self.dp)
+                self.add(self.p, self.p, self.omega, self.dp)
                 max(self.p)
                 self.compute_J_tr_x(g, self.p)
                 coef_wise_div(g, g, self.ps.m)
-                add(d, self.s, -1.0, g)
+                self.add(d, self.s, -1.0, g)
 
             else:
                 self.compute_f(self.f, self.t, self.eps)
@@ -1124,8 +1112,8 @@ class PBF2Solver(SPHBase):
                     coef_wise_div(p, g, self.ps.m)
 
                 self.add(d, d, -self.omega, p)
-                # err = inf_norm(p)
                 err = dot(p, p)
+                # err = inf_norm(p)
                 # err = dot2(Jd, Jd)
                 # err = self.compute_avg_density_error(self.f)
                 # Collect optimizer error per iteration
@@ -1160,11 +1148,12 @@ class PBF2Solver(SPHBase):
 
 
         #x_n+1
-        add(self.ps.x, self.ps.x, 1.0, self.dx)
+        self.add(self.ps.x, self.ps.x, 1.0, self.dx)
         # self.enforce_boundary_3D(self.ps.material_fluid)
 
         #v_n+1_tmp
         self.update_velocities(self.dt)
+        # self.ps.x.copy_from(self.ps.x_old)
 
         # if self.ps.num_rigid_bodies > 0:
         #     self.rigid_compute_cm_and_vcm()
@@ -1251,7 +1240,6 @@ class PBF2Solver(SPHBase):
         self.compute_normal()
         self.compute_non_pressure_forces()
         self.advect_velocity(self.dt)
-
         self.constant_density_solve()
         # if self.enable_DF:
         #     self.divergence_free_solve()
