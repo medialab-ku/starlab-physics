@@ -124,8 +124,15 @@ if __name__ == "__main__":
     # Initialize animation system
     animator = AnimationSystem(ps, config)
     anim_time = 0.0
-    anim_nudge = 0.1  # translation step
-    rot_nudge = 0.0872664626  # rotation step (radians ~5deg)
+    anim_nudge = 0.1  # translation speed (units/sec)
+    rot_nudge = 0.0872664626  # rotation speed (rad/sec ~5deg)
+    runAnim = False  # auto animation play/pause state
+    # Auto mode is true if any animation in config has auto=true
+    anim_auto_mode = False
+    try:
+        anim_auto_mode = bool(animator.has_auto())
+    except Exception:
+        anim_auto_mode = False
 
     # Animation handled by AnimationSystem
 
@@ -222,8 +229,12 @@ if __name__ == "__main__":
                 gui.text("No transparent objects configured")
 
             gui.text("")
-            gui.text("수동 애니메이션: ←/→ 이동, ↑/↓ 회전")
-            gui.text("스페이스=시작/정지, r=리셋")
+            if anim_auto_mode:
+                gui.text(f"Auto animation: {'playing' if runAnim else 'paused'}")
+                gui.text("p=play/pause, o=reset")
+            else:
+                gui.text("Manual animation: key mapping by axis")
+                gui.text("oscillate: y=Up/Down, x/z=Left/Right; rotate: y=Left/Right, x/z=Up/Down")
 
     def show_options_stats():
         with gui.sub_window("Stats. settings", 0.7, 0.0, 0.3, 0.25) as w:
@@ -258,7 +269,7 @@ if __name__ == "__main__":
                 return
             os.makedirs(os.path.join("data", "stats"), exist_ok=True)
             # Build descriptive prefix instead of timestamp
-            # New format: dt<dt>-tol<tol_opt>-opt<maxOptIter>-<pcgFlag>-<label>
+            # Format: dt<dt>-tol<tol_opt>-opt<maxOptIter>(-cfl)
             try:
                 label = "ours" if bool(getattr(solver, "smooth_max", False)) else "2014Bender"
             except Exception:
@@ -279,19 +290,31 @@ if __name__ == "__main__":
                 use_pcg_flag = bool(getattr(solver, "use_pcg", False)) if label == "ours" else False
             except Exception:
                 use_pcg_flag = False
-            pcg_part = "pcg" if use_pcg_flag else "nopcg"
-            # Base prefix includes dt, tol, and max opt iter
-            prefix = f"dt{dt_val:.5f}-tol{tol_opt_val}-opt{max_iter_opt_val}"
-            # Variant encodes pcg then method label, with precondition tag if present
-            variant = f"{pcg_part}-{label}"
-            # Append precondition tag for our method only
-            if label == "ours":
-                try:
-                    precond_val = int(getattr(solver, "precondition", 0))
-                except Exception:
-                    precond_val = 0
-                precond_tag = {1: "Hii", 2: "Mii", 3: "I"}.get(precond_val, f"p{precond_val}") if use_pcg_flag else "noPCG"
-                variant = f"{variant}-{precond_tag}"
+            # CFL flag (bool)
+            try:
+                cfl_flag = bool(getattr(solver, "cfl", False))
+            except Exception:
+                cfl_flag = False
+            # IISPH toggle (bool)
+            try:
+                iisph_flag = bool(getattr(solver, "iisph", False))
+            except Exception:
+                iisph_flag = False
+            # Base prefix includes dt, tol, and max opt iter, and optionally -cfl
+            prefix_parts = [f"dt{dt_val:.5f}", f"tol{tol_opt_val}", f"opt{max_iter_opt_val}"]
+            if cfl_flag:
+                prefix_parts.append("cfl")
+            prefix = "-".join(prefix_parts)
+            # Variant selection
+            if iisph_flag:
+                variant = "iisph"
+            else:
+                if label == "ours":
+                    pcg_part = "pcg" if use_pcg_flag else "nopcg"
+                    variant = f"{pcg_part}-ours"
+                else:
+                    # 2014Bender has no pcg/nopcg option
+                    variant = "2014Bender"
             for name, arr in stats.items():
                 try:
                     out_path = os.path.join("data", "stats", f"{scene_name}-{prefix}-{variant}-{name}.npy")
@@ -399,36 +422,27 @@ if __name__ == "__main__":
                     except Exception:
                         pass
 
-            # ----- Manual animation controls (arrow keys) -----
-            if window.event.key == ti.ui.LEFT:
-                try:
-                    animator.nudge_all_translate(-anim_nudge)
-                except Exception:
-                    pass
-            if window.event.key == ti.ui.RIGHT:
-                try:
-                    animator.nudge_all_translate(+anim_nudge)
-                except Exception:
-                    pass
-            if window.event.key == ti.ui.UP:
-                try:
-                    animator.nudge_all_rotate(+rot_nudge)
-                except Exception:
-                    pass
-            if window.event.key == ti.ui.DOWN:
-                try:
-                    animator.nudge_all_rotate(-rot_nudge)
-                except Exception:
-                    pass
+            # ----- Animation controls -----
+            if anim_auto_mode:
+                if window.event.key == 'p':
+                    runAnim = not runAnim
+                if window.event.key == 'o':
+                    anim_time = 0.0
+            else:
+                # Manual mode: discrete press will be ignored; we handle continuous below
+                pass
 
         if export_ply and frame_cnt > end_frame:
             runSim = False
             _export_solver_stats_if_any()
 
-        # Apply manual transform when paused for immediate feedback
+        # Apply animation when paused for immediate feedback
         if not runSim and animator.has_animations():
             try:
-                animator.apply_manual()
+                if anim_auto_mode and runAnim:
+                    animator.apply(anim_time)
+                else:
+                    animator.apply_manual()
             except Exception:
                 pass
 
@@ -438,10 +452,14 @@ if __name__ == "__main__":
             dt = solver.dt
             solver.dt = dt / solver.num_substep
             for i in range(solver.num_substep):
-                # apply manual animation each substep
+                # apply animation each substep depending on mode
                 if animator.has_animations():
                     try:
-                        animator.apply_manual()
+                        if anim_auto_mode and runAnim:
+                            t_now = anim_time + i * solver.dt
+                            animator.apply(t_now)
+                        else:
+                            animator.apply_manual()
                     except Exception:
                         pass
                 # provide current global frame index to solver for per-iteration frame tagging
@@ -449,8 +467,48 @@ if __name__ == "__main__":
                     solver.current_frame = int(frame_cnt)
                 except Exception:
                     pass
+                # Manual continuous input handling for smooth motion (manual mode)
+                if not anim_auto_mode:
+                    # Determine per-frame delta based on dt
+                    trans_delta = anim_nudge * solver.dt
+                    rot_delta = rot_nudge * solver.dt
+                    # Poll held keys
+                    if window.is_pressed(ti.ui.LEFT):
+                        # oscillate: x/z -> left/right; rotate: y -> left/right
+                        # Apply per-axis according to configured animations
+                        try:
+                            animator.nudge_translate_axis(0, -trans_delta)  # x-
+                            animator.nudge_translate_axis(2, -trans_delta)  # z-
+                            animator.nudge_rotate_axis(1, -rot_delta)       # y-
+                        except Exception:
+                            pass
+                    if window.is_pressed(ti.ui.RIGHT):
+                        try:
+                            animator.nudge_translate_axis(0, +trans_delta)  # x+
+                            animator.nudge_translate_axis(2, +trans_delta)  # z+
+                            animator.nudge_rotate_axis(1, +rot_delta)       # y+
+                        except Exception:
+                            pass
+                    if window.is_pressed(ti.ui.UP):
+                        # oscillate: y -> up/down; rotate: x/z -> up/down
+                        try:
+                            animator.nudge_translate_axis(1, +trans_delta)  # y+
+                            animator.nudge_rotate_axis(0, +rot_delta)       # x+
+                            animator.nudge_rotate_axis(2, +rot_delta)       # z+
+                        except Exception:
+                            pass
+                    if window.is_pressed(ti.ui.DOWN):
+                        try:
+                            animator.nudge_translate_axis(1, -trans_delta)  # y-
+                            animator.nudge_rotate_axis(0, -rot_delta)       # x-
+                            animator.nudge_rotate_axis(2, -rot_delta)       # z-
+                        except Exception:
+                            pass
                 solver.step()
 
+            # advance time only in auto-running mode
+            if anim_auto_mode and runAnim:
+                anim_time += dt
             solver.dt = dt
             frame_cnt += 1
 
@@ -499,7 +557,10 @@ if __name__ == "__main__":
                                     writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                                     writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
 
-                                    writer.add_vertex_color(r_chan, g_chan, b_chan)
+                                    # Map density heatmap colors (blue-white-red) directly to RGB
+                                    cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white", "red"])
+                                    rgba_colors = cmap(g_chan)  # g_chan holds normalized density difference
+                                    writer.add_vertex_color(rgba_colors[:, 0], rgba_colors[:, 1], rgba_colors[:, 2])
 
                                     writer.export_frame_ascii(cnt_ply, obj_series_prefix)
                                 else:
@@ -538,12 +599,14 @@ if __name__ == "__main__":
                             norm_dens = Normalize(vmin=-50.0, vmax=50.0, clip=True)
                             g_chan = norm_dens(dens_diff)
 
-                            b_chan = np.zeros_like(r_chan)
+                            # Use density heatmap RGB for fluid
+                            cmap = LinearSegmentedColormap.from_list("heatmap", ["blue", "white", "red"])
+                            rgba_colors = cmap(g_chan)
 
                             writer = ti.tools.PLYWriter(num_vertices=len(np_pos))
                             writer.add_vertex_pos(np_pos[:, 0], np_pos[:, 1], np_pos[:, 2])
 
-                            writer.add_vertex_color(r_chan, g_chan, b_chan)
+                            writer.add_vertex_color(rgba_colors[:, 0], rgba_colors[:, 1], rgba_colors[:, 2])
 
                             writer.export_frame_ascii(cnt_ply, series_prefix.format(0))
                     cnt_ply += 1
@@ -607,10 +670,10 @@ if __name__ == "__main__":
             if viz_mode == 1:
                 # Heatmap mode
                 heat_map_colors = default_colors.copy()
-
-                # Apply heat map colors only to fluid particles
+                # Apply heat map colors to fluid particles and dynamic rigid bodies
                 fluid_mask = (material_np == ps.material_fluid)
-                heat_map_colors[fluid_mask] = rgba_array[fluid_mask]
+                show_mask = np.logical_or(fluid_mask, dynamic_mask)
+                heat_map_colors[show_mask] = rgba_array[show_mask]
 
                 # Apply transparency to specific objects
                 object_id_np = ps.object_id.to_numpy()

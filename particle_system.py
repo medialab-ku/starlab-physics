@@ -75,10 +75,7 @@ class ParticleSystem:
         #### Process Fluid Bodies ####
         fluid_bodies = self.cfg.get_fluid_bodies()
         for fb in fluid_bodies:
-            if fb.get("meshlab", False):
-                voxelized_points_np = self.load_rigid_body_meshlab(fb)
-            else:
-                voxelized_points_np = self.load_rigid_body(fb)
+            voxelized_points_np = self.load_rigid_body(fb)
             fb["particleNum"] = voxelized_points_np.shape[0]
             fb["voxelizedPoints"] = voxelized_points_np
             self.object_collection[fb["objectId"]] = fb

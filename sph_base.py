@@ -22,7 +22,7 @@ class SPHBase:
         except Exception:
             pass
 
-        self.viscosity = 0.01  # viscosity
+        self.viscosity = 0.05  # viscosity
         self.surface_tension = 0.005
         self.adhesion_coeff = self.surface_tension
 
@@ -155,7 +155,7 @@ class SPHBase:
 
         self.compute_static_boundary_volume()
         # self.compute_moving_boundary_volume()
-        self.ps.initialize_boundary_neighbors()
+        # self.ps.initialize_boundary_neighbors()
 
         if self.ps.num_rigid_bodies > 0:
             self.ps.initialize_rigid_mass()
@@ -402,7 +402,6 @@ class SPHBase:
 
         self.ps.initialize_particle_system()
         # self.compute_moving_boundary_volume()
-
         self.substep()
         self.enforce_boundary_3D(self.ps.material_solid)
 

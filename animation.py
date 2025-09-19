@@ -9,10 +9,12 @@ class AnimationSystem:
         self.cfg = config
         self.time = 0.0
         self.anims = self._parse_animations()
-        # Manual control state
+        # Manual control state (only for non-auto anims)
         self._translate_offset = {}
         self._rotate_angle = {}
         for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
             key = (int(a["obj"]), int(a["axis"]))
             if int(a["type"]) == 0:
                 self._translate_offset[key] = 0.0
@@ -29,6 +31,8 @@ class AnimationSystem:
         self._translate_offset = {}
         self._rotate_angle = {}
         for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
             key = (int(a["obj"]), int(a["axis"]))
             if int(a["type"]) == 0:
                 self._translate_offset[key] = 0.0
@@ -64,13 +68,14 @@ class AnimationSystem:
                 amp = float(anim.get("amplitude", 0.0))
                 period = float(anim.get("period", 1.0))
                 phase = float(anim.get("phase", 0.0))
+                is_auto = bool(anim.get("auto", False))
                 omega = (2.0 * np.pi) / max(1e-6, period)
                 if typ == "oscillate":
                     base = 0.5 * amp * (1.0 - np.cos(phase))
-                    out.append({"obj": obj, "type": 0, "axis": axis, "amp": amp, "omega": omega, "phase": phase, "base": base})
+                    out.append({"obj": obj, "type": 0, "axis": axis, "amp": amp, "omega": omega, "phase": phase, "base": base, "auto": is_auto})
                 else:
                     base = phase
-                    out.append({"obj": obj, "type": 1, "axis": axis, "amp": 0.0, "omega": omega, "phase": phase, "base": base})
+                    out.append({"obj": obj, "type": 1, "axis": axis, "amp": 0.0, "omega": omega, "phase": phase, "base": base, "auto": is_auto})
 
             # Rigid blocks (optional support)
             for rb in (self.cfg.get_rigid_blocks() or []):
@@ -85,13 +90,14 @@ class AnimationSystem:
                 amp = float(anim.get("amplitude", 0.0))
                 period = float(anim.get("period", 1.0))
                 phase = float(anim.get("phase", 0.0))
+                is_auto = bool(anim.get("auto", False))
                 omega = (2.0 * np.pi) / max(1e-6, period)
                 if typ == "oscillate":
                     base = 0.5 * amp * (1.0 - np.cos(phase))
-                    out.append({"obj": obj, "type": 0, "axis": axis, "amp": amp, "omega": omega, "phase": phase, "base": base})
+                    out.append({"obj": obj, "type": 0, "axis": axis, "amp": amp, "omega": omega, "phase": phase, "base": base, "auto": is_auto})
                 else:
                     base = phase
-                    out.append({"obj": obj, "type": 1, "axis": axis, "amp": 0.0, "omega": omega, "phase": phase, "base": base})
+                    out.append({"obj": obj, "type": 1, "axis": axis, "amp": 0.0, "omega": omega, "phase": phase, "base": base, "auto": is_auto})
         except Exception:
             pass
         return out
@@ -137,16 +143,46 @@ class AnimationSystem:
     # Manual-control APIs
     # -----------------------------
     def nudge_all_translate(self, delta: float):
-        for key in list(self._translate_offset.keys()):
-            self._translate_offset[key] += float(delta)
+        for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
+            if int(a["type"]) == 0:
+                key = (int(a["obj"]), int(a["axis"]))
+                self._translate_offset[key] = float(self._translate_offset.get(key, 0.0)) + float(delta)
 
     def nudge_all_rotate(self, delta_angle: float):
-        for key in list(self._rotate_angle.keys()):
-            self._rotate_angle[key] += float(delta_angle)
+        for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
+            if int(a["type"]) != 0:
+                key = (int(a["obj"]), int(a["axis"]))
+                self._rotate_angle[key] = float(self._rotate_angle.get(key, 0.0)) + float(delta_angle)
+
+    def nudge_translate_axis(self, axis: int, delta: float):
+        # Nudge only animations that are translate type and match axis
+        d = float(delta)
+        for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
+            if int(a["type"]) == 0 and int(a["axis"]) == int(axis):
+                key = (int(a["obj"]), int(axis))
+                self._translate_offset[key] = float(self._translate_offset.get(key, 0.0)) + d
+
+    def nudge_rotate_axis(self, axis: int, delta_angle: float):
+        # Nudge only animations that are rotate type and match axis
+        d = float(delta_angle)
+        for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
+            if int(a["type"]) != 0 and int(a["axis"]) == int(axis):
+                key = (int(a["obj"]), int(axis))
+                self._rotate_angle[key] = float(self._rotate_angle.get(key, 0.0)) + d
 
     def apply_manual(self):
-        # Apply current manual states to all configured animations
+        # Apply current manual states to MANUAL animations only
         for a in self.anims:
+            if bool(a.get("auto", False)):
+                continue
             obj = int(a["obj"])
             axis = int(a["axis"])
             if int(a["type"]) == 0:
@@ -155,6 +191,32 @@ class AnimationSystem:
             else:
                 angle = float(self._rotate_angle.get((obj, axis), 0.0))
                 self._apply_rotate_manual(obj, axis, angle, self.ps.x, self.ps.x_0, self.ps.object_id, self.ps.rigid_rest_cm)
+
+    def apply(self, t_now: float):
+        # Apply AUTO animations only
+        if len(self.anims) == 0:
+            return
+        for a in self.anims:
+            if not bool(a.get("auto", False)):
+                continue
+            if int(a["type"]) == 0:
+                self._animate_translate_axis(int(a["obj"]), int(a["axis"]), float(a["amp"]), float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_now),
+                                             self.ps.x, self.ps.x_0, self.ps.object_id)
+            else:
+                self._animate_rotate_axis(int(a["obj"]), int(a["axis"]), float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_now),
+                                          self.ps.x, self.ps.x_0, self.ps.object_id, self.ps.rigid_rest_cm)
+
+    def has_auto(self) -> bool:
+        for a in self.anims:
+            if bool(a.get("auto", False)):
+                return True
+        return False
+
+    def has_manual(self) -> bool:
+        for a in self.anims:
+            if not bool(a.get("auto", False)):
+                return True
+        return False
 
     @ti.kernel
     def _animate_translate_axis(self, obj_id: int, axis: int, amplitude: float, omega: float, phase: float, base_offset: float, t: float,

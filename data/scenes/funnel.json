@@ -18,6 +18,19 @@
         "transparentObjects": [1],
         "alpha": 0.2
 	},
+	"FluidBodies": [
+		{
+			"objectId": 0,
+			"geometryFile": "./data/models/funnelFluid.obj",
+            "translation": [1.5, -0.3, 1.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.5, 1.8, 1.5],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+			"color": [200, 100, 10]
+		}
+	],
     "RigidBodies" : [
         {
             "objectId": 1,
@@ -25,11 +38,31 @@
             "translation": [1.5, 0.5, 1.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.5, 1.5, 1.5],
+            "scale": [1.7, 1.7, 1.7],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
             "isDynamic": false
+        },
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/funnelFluid.obj",
+            "translation": [1.5, 8.0, 1.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [2.0, 0.1, 2.0],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": false,
+			"animation": {
+				"type": "oscillate",
+				"axis": "y",
+                "auto": true,
+				"amplitude": -5.0,
+				"period": 20.0,
+				"phase": 0.0
+			}
         }
     ]
 }
