@@ -1,5 +1,3 @@
-# cli: python plot_stats.py -c "pillar-dto.00200-tol4-opt1000/pcg-hours" "pillar-dto.00200-tol4-opt1000/nopcg-2014Bender" -k elapsed_time_ms opt_iter opt_error
-
 import os
 import re
 import argparse
