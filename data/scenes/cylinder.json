@@ -18,28 +18,27 @@
         "transparentObjects": [1],
         "alpha": 0.2
 	},
-
-	"FluidBlocks": [
-        {
-            "objectId": 0,
-            "start": [0.2, 1.5, 0.2],
-            "end": [1.2, 6.5, 1.2],
-            "translation": [0.4, 0.3, 0.4],
-            "scale": [1.0, 1.0, 1.0],
+	"FluidBodies": [
+		{
+			"objectId": 0,
+			"geometryFile": "./data/models/funnelFluid.obj",
+            "translation": [1.5, -5.0, 1.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.8, 2.6, 1.8],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
-            "color": [10, 100, 200]
-        }
-    ],
-
+			"color": [200, 100, 10]
+		}
+	],
     "RigidBodies" : [
         {
             "objectId": 1,
-            "geometryFile": "./data/models/BoxOpened_thick.obj",
-            "translation": [1.1, 0.1, 1.1],
+            "geometryFile": "./data/models/longCylinder.obj",
+            "translation": [1.5, 0.5, 1.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.3, 2.0, 1.3],
+            "scale": [2.7, 2.9, 2.7],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
@@ -47,11 +46,11 @@
         },
         {
             "objectId": 2,
-            "geometryFile": "./data/models/thickCeli.obj",
-            "translation": [1.1, 8.0, 1.1],
+            "geometryFile": "./data/models/slotted_lid.obj",
+            "translation": [1.5, 8.0, 1.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.0, 1.0, 1.0],
+            "scale": [2.5, 2.3, 2.5],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
@@ -59,8 +58,9 @@
 			"animation": {
 				"type": "oscillate",
 				"axis": "y",
+                "auto": true,
 				"amplitude": -5.0,
-				"period": 6.0,
+				"period": 16.0,
 				"phase": 0.0
 			}
         }

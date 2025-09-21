@@ -22,7 +22,7 @@ class SPHBase:
         except Exception:
             pass
 
-        self.viscosity = 0.05  # viscosity
+        self.viscosity = 0.01  # viscosity
         self.surface_tension = 0.005
         self.adhesion_coeff = self.surface_tension
 
@@ -269,7 +269,7 @@ class SPHBase:
         sum_m = 0.0
         cm = ti.Vector([0.0, 0.0, 0.0])
         for p_i in range(self.ps.particle_num[None]):
-            if self.ps.is_dynamic_rigid_body(p_i) and self.ps.object_id[p_i] == object_id:
+            if self.ps.material[p_i] == self.ps.material_solid and self.ps.object_id[p_i] == object_id:
                 mass = self.ps.m_V[p_i] * self.ps.density0[p_i]
                 cm += mass * self.ps.x[p_i]
                 sum_m += mass
