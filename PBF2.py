@@ -1108,7 +1108,7 @@ class PBF2Solver(SPHBase):
 
                     if not self.use_pcg:
                         p.fill(0.0)
-                        
+
                     self.PCG(x=p, b=g)
 
                 #Bender et al. 2014 (Constant density solver OF DFSPH)
