@@ -164,7 +164,6 @@ class SPHBase:
             self.ps.emitter_system.reset()
 
 
-
     @ti.kernel
     def compute_rigid_rest_cm(self, object_id: int):
         self.ps.rigid_rest_cm[object_id] = self.compute_com(object_id)

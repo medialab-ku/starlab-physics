@@ -18,55 +18,57 @@
         "transparentObjects": [1],
         "alpha": 0.2
     },
-    "RigidBodies" : [
+
+    "FluidBlocks": [
+     
         {
-            "objectId": 1,
-            "geometryFile": "./data/models/floorThickCenterPivot.obj",
-            "translation": [2.5, 0.3, 2.5],
-            "rotationAxis": [0, 0, 1],
-            "rotationAngle": 0,
-            "scale": [1.7, 1.5, 1.7],
+            "objectId": 0,
+            "start": [2.2, 2.8, 2.2],
+            "end": [2.8, 3.8, 2.8],
+            "translation": [-0.3, -0.3, -0.3],
+            "scale": [2, 1.5, 2],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
-            "color": [255, 255, 255, 1.0],
-            "isDynamic": false
+            "color": [200, 100, 10]
         },
 
         {
             "objectId": 2,
-            "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 1.5, 2.5],
-            "rotationAxis": [0, 0, 1],
-            "rotationAngle": 0,
-            "scale": [2.3, 2.3, 2.3],
+            "start": [2.2, 4.8, 2.2],
+            "end": [2.8, 5.8, 2.8],
+            "translation": [-0.3, -0.3, -0.3],
+            "scale": [2, 1.5, 2],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
-            "color": [255, 255, 255, 1.0],
-            "isDynamic": true
+            "color": [200, 100, 10]
         },
+
+
         {
             "objectId": 3,
-            "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 3.0, 2.5],
-            "rotationAxis": [0, 0, 1],
-            "rotationAngle": 0,
-            "scale": [2.3, 2.3, 2.3],
+            "start": [2.2, 6.8, 2.2],
+            "end": [2.8, 7.8, 2.8],
+            "translation": [-0.3, -0.3, -0.3],
+            "scale": [2, 1.5, 2],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
-            "color": [255, 255, 255, 1.0],
-            "isDynamic": true
-        },
+            "color": [200, 100, 10]
+        }
+    ],
+
+   
+    "RigidBodies" : [
         {
-            "objectId": 4,
-            "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 4.5, 2.5],
+            "objectId": 1,
+            "geometryFile": "./data/models/BoxOpened.obj",
+            "translation": [2.5, -4, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [2.3, 2.3, 2.3],
+            "scale": [1.5, 6, 1.5],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
-            "isDynamic": true
+            "isDynamic": false
         }
     ]
 }
