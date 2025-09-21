@@ -752,61 +752,56 @@ class PBF2Solver(SPHBase):
 
     def PCG(self, x, b):
 
-        # x = self.a
-        x.fill(0.0)
-        z = self.z_pcg
         r = self.r_pcg
         p = self.p_pcg
         Ap = self.Ap
-        # b = self.tmp
         Jp = self.dp
         
+        self.compute_Ax(Ap, Jp, x)
+        self.add(r, b, -1.0, Ap)
+
         pcg_prec_ms = 0.0
         pcg_matvec_ms = 0.0
         pcg_t0 = time.perf_counter()
 
-        r.copy_from(b)
-        # z.copy_from(r)
-        rz_old = self.dot(r, r)
+        r_old = self.dot(r, r)
         pcg_iter = 0
-        if rz_old > 1e-12:
+        if r_old > pow(10, -self.tol_pcg):
             p.copy_from(r)
-            # print("test1")
             for _ in range(self.max_iteration_pcg):
                 t0 = time.perf_counter()
-
-                Ap.fill(0.0)
+                # Ap.fill(0.0)
                 self.compute_Ax(Ap, Jp, p)
 
                 pAp = self.dot(p, Ap)
                 if pAp < 0.0:
                     print("Warning: non-positive definite matrix!")
 
-                alpha = rz_old / pAp
+                alpha = r_old / pAp
 
                 self.add(x, x, alpha, p) 
                 self.add(r, r, -alpha, Ap)
-                # print("test2")
+
                 pcg_iter += 1
-                err = self.dot(r, r)
+                r_new = self.dot(r, r)
 
                 # Collect PCG residual error per iteration
-                self.stats_pcg_error.append(float(err))
+                self.stats_pcg_error.append(float(r_new))
                 try:
                     self.stats_pcg_error_frame.append(int(self.current_frame))
                 except Exception:
                     self.stats_pcg_error_frame.append(0)
                 if self.print_pcg_error:
-                    print(f"PCG error: {err}")
+                    print(f"PCG error: {r_new}")
 
                 # z.copy_from(r)
-                if err <  pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
+                if r_new < pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
                     break
 
                 # rz_new = self.dot(r, z)
-                beta = err / rz_old
+                beta = r_new / r_old
                 self.add(p, r, beta, p)
-                rz_old = err
+                r_old = r_new
 
         # Collect PCG iteration count per PCG solve
         self.pcg_total_iter += pcg_iter
@@ -1106,25 +1101,19 @@ class PBF2Solver(SPHBase):
                 self.compute_f(self.f, self.t, self.eps)
                 self.compute_f_derivative(self.dfdt, self.t, self.eps)
                 coef_wise_mul(self.f, self.f, self.k)
+                self.compute_J_tr_x(g, self.f)
+                coef_wise_div(p, g, self.ps.m)
+
                 if self.smooth_max:
-                    self.compute_J_tr_x(g, self.f)
 
-                    # if self.precondition == 1:
-                    # self.compute_JtJ()
-                    # self.compute_gradient(g)
+                    if not self.use_pcg:
+                        p.fill(0.0)
+                        
                     self.PCG(x=p, b=g)
-                    # if self.use_pcg:
-                    #     self.PCG()
-
-                    # else:
-                    #     self.apply_precondition(p, P, g)
 
                 #Bender et al. 2014 (Constant density solver OF DFSPH)
-                else:
-                    # coef_wise_mul(self.f, self.f, self.k)
-                    # max(self.t)
-                    self.compute_J_tr_x(g, self.f)
-                    coef_wise_div(p, g, self.ps.m)
+                # else:
+                #     coef_wise_div(p, g, self.ps.m)
 
                 self.add(d, d, -self.omega, p)
                 err = dot(p, p)
