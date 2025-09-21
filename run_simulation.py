@@ -170,7 +170,13 @@ if __name__ == "__main__":
                         solver.use_pcg = w.checkbox("warm-start", solver.use_pcg)
 
 
-            gui.text(f"# fluid particle: {ps.fluid_particle_num}")
+            try:
+                N_active = int(ps.particle_num[None])
+                mats = ps.material.to_numpy()[:N_active]
+                fluid_cnt = int((mats == ps.material_fluid).sum())
+            except Exception:
+                fluid_cnt = int(ps.fluid_particle_num)
+            gui.text(f"# fluid particle: {fluid_cnt}")
             gui.text(f"# boundary particle: {ps.solid_particle_num}")
             gui.text(f"Current frame: {frame_cnt}")
 

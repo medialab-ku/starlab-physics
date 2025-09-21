@@ -393,6 +393,14 @@ class SPHBase:
                 self.ps.v[p_i] = self.ps.v_cm_rb[obj] + ti.math.cross(self.ps.omega_rb[obj], r)
 
     def step(self):
+        dt_used = self.dt
+        try:
+            if getattr(self, "cfl", False) and hasattr(self, "compute_cfl_dt"):
+                dt_used = float(self.compute_cfl_dt(dt_used))
+                self.dt = dt_used
+        except Exception:
+            dt_used = self.dt
+
 
         if hasattr(self.ps, 'emitter_system') and self.ps.emitter_system is not None:
             dt = self.dt

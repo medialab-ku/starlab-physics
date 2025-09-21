@@ -8,6 +8,11 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
 
+# Use Times New Roman for titles and axis labels (and other text by default)
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["font.serif"] = ["Times New Roman"]
+
+
 # File naming: <prefix>-<variant>-<key>.npy
 #   prefix  := arbitrary string (often dt<dt>-tol<tol>-opt<maxOptIter>)
 #   variant := iisph | 2014Bender | (pcg|nopcg)-ours
@@ -204,6 +209,7 @@ def plot_groups_overlay(
     separate_figs: bool = False,
     start: int = None,
     end: int = None,
+    iter_decay_frame: int = None,
 ):
     if len(groups) == 0:
         print("No groups to plot.")
@@ -221,6 +227,44 @@ def plot_groups_overlay(
         return
 
     pairs = _sorted_pairs(groups, labels)
+
+    # Special mode: per-timestep optimizer error decay overlay
+    if iter_decay_frame is not None:
+        key = "opt_error"
+        use_log = bool(logy_errors)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 3.2), constrained_layout=True)
+        if use_log:
+            ax.set_yscale("log")
+        for group, label in pairs:
+            if (key not in group) or ("opt_iter" not in group):
+                continue
+            opt_err = np.load(group[key])
+            opt_it = np.load(group["opt_iter"])  # per-timestep iteration counts
+            frame = int(iter_decay_frame)
+            if frame < 0 or frame >= len(opt_it):
+                continue
+            start_idx = int(np.sum(opt_it[:frame]))
+            end_idx = start_idx + int(opt_it[frame])
+            if end_idx <= start_idx:
+                continue
+            y = np.clip(opt_err[start_idx:end_idx], 1e-16, None) if use_log else opt_err[start_idx:end_idx]
+            x = np.arange(len(y))
+            color, _, z = _style_for_label(label)
+            ax.plot(x, y, lw=1.4, label=label, color=color, ls="-", zorder=z)
+        ax.set_title(f"opt_error decay in timestep {int(iter_decay_frame)}", fontname="Times New Roman")
+        ax.set_xlabel("iteration", fontname="Times New Roman")
+        ax.set_ylabel("opt_error", fontname="Times New Roman")
+        ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
+        ax.legend(loc="best")
+        if out_path:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            fig.savefig(out_path, dpi=150)
+            print(f"Saved figure to {out_path}")
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+        return
 
     def _plot_one_key(ax, key: str):
         use_log = bool(logy_errors and ("error" in key))
@@ -240,8 +284,8 @@ def plot_groups_overlay(
             line = ax.plot(x_plot, y_plot, lw=1.2, label=label, color=color, ls="-", zorder=z)[0]
             if key in ("elapsed_time_ms", "opt_iter"):
                 _draw_mean_line(ax, key, (x_plot, y_plot), color=line.get_color())
-        ax.set_title(_title_for_key(key, use_log=use_log))
-        ax.set_xlabel(_xlabel_for_key(key))
+        ax.set_title(_title_for_key(key, use_log=use_log), fontname="Times New Roman")
+        ax.set_xlabel(_xlabel_for_key(key), fontname="Times New Roman")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
         ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
         ax.legend(loc="best")
@@ -275,57 +319,8 @@ def plot_groups_overlay(
     if nrows == 1:
         axes = [axes]
 
-    for ax, key in zip(axes, present_keys):
-        arr = np.load(group[key])
-        x = np.arange(len(arr))
-        ax.plot(x, arr, lw=1.2)
-        
-        # Set appropriate labels based on the metric type
-        if key == "elapsed_time_ms":
-            ax.set_title("Elapsed Time per Solve")
-            ax.set_xlabel("Solve Step")
-            ax.set_ylabel("Time (ms)")
-        elif key == "opt_iter":
-            ax.set_title("Optimization Iterations per Solve")
-            ax.set_xlabel("Solve Step")
-            ax.set_ylabel("Iterations")
-        elif key == "opt_error":
-            ax.set_title("Optimization Error per Iteration")
-            ax.set_xlabel("Optimization Iteration")
-            ax.set_ylabel("Error")
-        elif key == "pcg_iter":
-            ax.set_title("PCG Iterations per Solve")
-            ax.set_xlabel("PCG Solve")
-            ax.set_ylabel("Iterations")
-        elif key == "pcg_error":
-            ax.set_title("PCG Residual Error per Iteration")
-            ax.set_xlabel("PCG Iteration")
-            ax.set_ylabel("Residual Error")
-        else:
-            ax.set_title(key)
-            ax.set_xlabel("Index")
-            ax.set_ylabel("Value")
-            
-        ax.grid(True, alpha=0.3)
-        if logy_errors and ("error" in key):
-            # avoid non-positive values breaking log-scale
-            safe = np.clip(arr, 1e-16, None)
-            ax.clear()
-            ax.semilogy(x, safe, lw=1.2)
-            if key == "opt_error":
-                ax.set_title("Optimization Error per Iteration (log10)")
-                ax.set_xlabel("Optimization Iteration")
-                ax.set_ylabel("Error (log10)")
-            elif key == "pcg_error":
-                ax.set_title("PCG Residual Error per Iteration (log10)")
-                ax.set_xlabel("PCG Iteration")
-                ax.set_ylabel("Residual Error (log10)")
-            ax.grid(True, which="both", alpha=0.3)
-
-        if key == "elapsed_time_ms" and len(arr) > 0:
-            mean_ms = float(np.mean(arr))
-            ax.axhline(mean_ms, color="orange", lw=1.0, ls="--", alpha=0.7, label=f"mean {mean_ms:.2f} ms")
-            ax.legend(loc="best")
+    for ax, key in zip(axes, selected_keys):
+        _plot_one_key(ax, key)
 
     if out_path:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -353,6 +348,7 @@ def main():
     parser.add_argument("--no-logy-errors", action="store_true", help="Do not use log scale for *error series")
     parser.add_argument("--start", type=int, default=None, help="Start frame index (inclusive) for timestep-level series and error slicing")
     parser.add_argument("--end", type=int, default=None, help="End frame index (exclusive) for timestep-level series and error slicing; negative or omitted means till end")
+    parser.add_argument("--iter-decay", type=int, default=None, help="Plot opt_error decay for a single timestep index across compared variants")
     args = parser.parse_args()
 
     groups_by_prefix = scan_groups(args.dir)
@@ -396,9 +392,15 @@ def main():
     # Build output path
     out_path = args.save
     if out_path is None:
-        safe = [f"{p.replace('/', '_')}-{v}" for p, v in compare_pairs]
-        base = "compare-" + "__".join(safe)
-        out_path = os.path.join(args.dir, base + ".png")
+        if args.iter_decay is not None:
+            # Default name: <first-prefix>-iter<frame>-iter_decay_overlay.png
+            base_prefix = compare_pairs[0][0] if len(compare_pairs) > 0 else "iter"
+            base = f"{base_prefix}-iter{int(args.iter_decay)}-iter_decay_overlay"
+            out_path = os.path.join(args.dir, base + ".png")
+        else:
+            safe = [f"{p.replace('/', '_')}-{v}" for p, v in compare_pairs]
+            base = "compare-" + "__".join(safe)
+            out_path = os.path.join(args.dir, base + ".png")
 
     # Determine selected keys
     selected_keys = None if (args.keys is None or ("all" in args.keys)) else args.keys
@@ -414,6 +416,7 @@ def main():
         separate_figs=bool(args.separate_figs),
         start=args.start,
         end=args.end,
+        iter_decay_frame=args.iter_decay,
     )
 
 

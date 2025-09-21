@@ -18,33 +18,42 @@
         "transparentObjects": [2],
         "alpha": 0.2
     },
-    "FluidBodies" : [
-        {
-            "objectId": 0,
-            "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 2, 1.5],
-            "rotationAxis": [0, 0, 1],
-            "rotationAngle": 0,
-            "scale": [4, 4, 4],
-            "velocity": [0.0, 0.0, 0.0],
-            "density": 1000.0,
-            "color": [200, 100, 10],
-            "isDynamic": false
-        },
-
-        {
-            "objectId": 1,
-            "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 2, 3.5],
-            "rotationAxis": [0, 0, 1],
-            "rotationAngle": 0,
-            "scale": [4, 4, 4],
-            "velocity": [0.0, 0.0, 0.0],
-            "density": 100.0,
-            "color": [10, 100, 200],
-            "isDynamic": false
-        }
-    ],
+	"Emitter": {
+		"capacity": 80000,
+		"reuse": false,
+		"emitters": [
+			{
+				"type": "circle",
+				"width": 6,
+				"height": 6,
+				"position": [2.5, 1.5, 0.5],
+				"direction": [0.0, 0.0, 1.0],
+				"velocity": 5.0,
+				"jitter": 0,
+				"spread": 0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 0,
+				"density": 2000.0,
+				"color": [0, 150, 255]
+			},
+			{
+				"type": "circle",
+				"width": 6,
+				"height": 6,
+				"position": [2.5, 2.3, 4.3],
+				"direction": [0.0, 0.0, -1.0],
+				"velocity": 5.0,
+				"jitter": 0,
+				"spread": 0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 1,
+				"density": 1000.0,
+				"color": [255, 150, 0]
+			}
+		]
+	},
     "RigidBodies" : [
         {
             "objectId": 2,
@@ -73,7 +82,7 @@
         {
             "objectId": 4,
             "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 3.0, 3.5],
+            "translation": [2.5, 1.0, 3.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
             "scale": [2,0.5,2],
@@ -85,7 +94,7 @@
         {
             "objectId": 5,
             "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [2.5, 3.0, 1.5],
+            "translation": [2.5, 1.0, 1.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
             "scale": [2,0.5,2],

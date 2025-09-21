@@ -37,13 +37,13 @@ class PBF2Solver(SPHBase):
         self.print_elapsed_time = True
 
         self.volume_constraint = False
-        self.tol_opt = 2
+        self.tol_opt = 4
         self.omega = 1.0
-        self.eps = 0.01
+        self.eps = 0.005
         self.cfl = False
-        self.max_iteration_opt = 3
+        self.max_iteration_opt = 1000
         self.max_iteration_pcg = 1000
-        self.tol_pcg = 3
+        self.tol_pcg = 5
 
         # Stats containers
         # These are plain Python lists to minimize Taichi interaction overhead.
@@ -1087,6 +1087,17 @@ class PBF2Solver(SPHBase):
             if self.iisph:
 
                 err = self.compute_avg_density_error(self.t)
+                # Per-iteration optimizer error logging (IISPH branch)
+                self.stats_opt_error.append(float(err))
+                try:
+                    self.stats_opt_error_frame.append(int(self.current_frame))
+                except Exception:
+                    self.stats_opt_error_frame.append(0)
+                if self.print_opt_error:
+                    print(f"opt error: {err}")
+
+                # Count this iteration before break check so that opt_iter matches logged errors
+                opt_iter += 1
                 if (err < pow(10, -self.tol_opt)) and opt_iter > 1 or opt_iter >= self.max_iteration_opt:
                     break
 
@@ -1129,10 +1140,10 @@ class PBF2Solver(SPHBase):
                 if self.print_opt_error:
                     print(f"opt error: {err}")
 
+                # Count this iteration before break check so that opt_iter matches logged errors
+                opt_iter += 1
                 if (err < pow(10, -self.tol_opt)) and opt_iter > 1  or opt_iter >= self.max_iteration_opt:
                     break
-
-            opt_iter += 1
 
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         # Collect elapsed time per outer solve

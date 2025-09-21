@@ -338,8 +338,12 @@ class ParticleSystem:
     def add_particle(self, p, obj_id, x, v, density, pressure, material, is_dynamic, color):
         self.object_id[p] = obj_id
         self.x[p] = x
+        self.x_old[p] = x
         self.x_0[p] = x
         self.v[p] = v
+        self.v_adv[p] = v
+        self.v_old[p] = v
+        self.acceleration[p] = ti.Vector.zero(float, self.dim)
         self.n[p] = ti.Vector.zero(float, self.dim)
         self.density0[p] = self.density[p] = density
         self.m_V[p] = self.m_V0

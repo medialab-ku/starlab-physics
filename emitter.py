@@ -168,9 +168,10 @@ class Emitter:
 
         diam = 2.0 * self.ps.particle_radius
         if self.v_emit > 1e-12:
-            self.next_emit_time += diam / self.v_emit
+            self.next_emit_time = self.emit_start_time + (self.emit_counter + 1) * (diam / self.v_emit)
         else:
             self.next_emit_time = t + dt
+
         self.emit_counter += 1
         return emitted, reused_now
 
