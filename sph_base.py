@@ -22,7 +22,7 @@ class SPHBase:
         except Exception:
             pass
 
-        self.viscosity = 0.05  # viscosity
+        self.viscosity = 0.01  # viscosity
         self.surface_tension = 0.005
         self.adhesion_coeff = self.surface_tension
 
@@ -162,7 +162,6 @@ class SPHBase:
 
         if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
             self.ps.emitter_system.reset()
-
 
 
     @ti.kernel

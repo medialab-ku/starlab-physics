@@ -256,6 +256,7 @@ class ParticleSystem:
             velocity = np.array(fluid_body.get("velocity", [0.0 for _ in range(self.dim)]), dtype=np.float32)
             density = float(fluid_body.get("density", 1000.0))
             color = np.array(fluid_body.get("color", [10, 100, 200]), dtype=np.int32)
+            
             self.add_particles(obj_id,
                                num_particles_obj,
                                np.array(voxelized_points_np, dtype=np.float32), # position
@@ -300,6 +301,8 @@ class ParticleSystem:
                 velocity = np.array([0.0 for _ in range(self.dim)], dtype=np.float32)
             density = rigid_body["density"]
             color = np.array(rigid_body["color"], dtype=np.int32)
+
+            
             self.add_particles(obj_id,
                                num_particles_obj,
                                np.array(voxelized_points_np, dtype=np.float32), # position
