@@ -274,8 +274,59 @@ def plot_groups_overlay(
     fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(10, 1 + 2.8 * nrows), constrained_layout=True)
     if nrows == 1:
         axes = [axes]
-    for ax, key in zip(axes, selected_keys):
-        _plot_one_key(ax, key)
+
+    for ax, key in zip(axes, present_keys):
+        arr = np.load(group[key])
+        x = np.arange(len(arr))
+        ax.plot(x, arr, lw=1.2)
+        
+        # Set appropriate labels based on the metric type
+        if key == "elapsed_time_ms":
+            ax.set_title("Elapsed Time per Solve")
+            ax.set_xlabel("Solve Step")
+            ax.set_ylabel("Time (ms)")
+        elif key == "opt_iter":
+            ax.set_title("Optimization Iterations per Solve")
+            ax.set_xlabel("Solve Step")
+            ax.set_ylabel("Iterations")
+        elif key == "opt_error":
+            ax.set_title("Optimization Error per Iteration")
+            ax.set_xlabel("Optimization Iteration")
+            ax.set_ylabel("Error")
+        elif key == "pcg_iter":
+            ax.set_title("PCG Iterations per Solve")
+            ax.set_xlabel("PCG Solve")
+            ax.set_ylabel("Iterations")
+        elif key == "pcg_error":
+            ax.set_title("PCG Residual Error per Iteration")
+            ax.set_xlabel("PCG Iteration")
+            ax.set_ylabel("Residual Error")
+        else:
+            ax.set_title(key)
+            ax.set_xlabel("Index")
+            ax.set_ylabel("Value")
+            
+        ax.grid(True, alpha=0.3)
+        if logy_errors and ("error" in key):
+            # avoid non-positive values breaking log-scale
+            safe = np.clip(arr, 1e-16, None)
+            ax.clear()
+            ax.semilogy(x, safe, lw=1.2)
+            if key == "opt_error":
+                ax.set_title("Optimization Error per Iteration (log10)")
+                ax.set_xlabel("Optimization Iteration")
+                ax.set_ylabel("Error (log10)")
+            elif key == "pcg_error":
+                ax.set_title("PCG Residual Error per Iteration (log10)")
+                ax.set_xlabel("PCG Iteration")
+                ax.set_ylabel("Residual Error (log10)")
+            ax.grid(True, which="both", alpha=0.3)
+
+        if key == "elapsed_time_ms" and len(arr) > 0:
+            mean_ms = float(np.mean(arr))
+            ax.axhline(mean_ms, color="orange", lw=1.0, ls="--", alpha=0.7, label=f"mean {mean_ms:.2f} ms")
+            ax.legend(loc="best")
+
     if out_path:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         fig.savefig(out_path, dpi=150)
