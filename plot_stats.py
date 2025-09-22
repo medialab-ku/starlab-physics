@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 
 plt.rcParams["font.family"] = "serif"
@@ -33,26 +33,44 @@ KNOWN_KEYS = [
 # Style and utilities
 #############################################
 
+def _base_variant(label: str) -> str:
+    """Extract base variant name from a legend label.
+
+    Labels may be auto-generated as 'variant@prefix' when comparing different prefixes.
+    This function strips the '@prefix' suffix for color/style decisions.
+    """
+    if not label:
+        return label
+    return label.split("@", 1)[0]
+
+
 def _style_for_label(label: str):
     """Return (color, linestyle, zorder) for a given variant label.
 
     Policy:
-    - ours: royalblue (topmost)
+    - ours (and legacy pcg-ours/nopcg-ours): royalblue (topmost)
     - 2014Bender: orange
-    - backward-compat: legacy 'pcg-ours' and 'nopcg-ours' map to ours color
+    - iisph: seagreen
     - fallback: gray
     """
-    if label == "ours" or label.startswith("pcg-ours") or label.startswith("nopcg-ours"):
+    base = _base_variant(label)
+    if base == "ours" or base.startswith("pcg-ours") or base.startswith("nopcg-ours"):
         return ("royalblue", "-", 10)
-    if label == "2014Bender":
+    if base == "2014Bender":
         return ("orange", "-", 1)
+    if base == "iisph":
+        return ("seagreen", "-", 1)
     return ("gray", "-", 1)
 
 
 def _sorted_pairs(groups: List[Dict[str, str]], labels: List[str]):
     """Return (group, label) pairs with 'ours' variants rendered last (on top)."""
     pairs = list(zip(groups, labels))
-    pairs.sort(key=lambda gl: (gl[1] == "ours" or gl[1].startswith("pcg-ours")))
+    pairs.sort(key=lambda gl: (
+        _base_variant(gl[1]) == "ours"
+        or _base_variant(gl[1]).startswith("pcg-ours")
+        or _base_variant(gl[1]).startswith("nopcg-ours")
+    ))
     return pairs
 
 
@@ -77,9 +95,61 @@ def _smooth_series(y: np.ndarray, ma_window: int = 0, ema_alpha: float = None) -
     if ma_window and int(ma_window) > 1:
         w = int(ma_window)
         kernel = np.ones(w, dtype=float) / float(w)
-        # Use 'same' to preserve length
-        return np.convolve(y.astype(float), kernel, mode="same")
+        # Edge padding to avoid boundary drop when slicing; keep length
+        y_f = y.astype(float)
+        pad_left = w // 2
+        pad_right = w - 1 - pad_left
+        y_pad = np.pad(y_f, (pad_left, pad_right), mode="edge")
+        return np.convolve(y_pad, kernel, mode="valid")
     return y
+
+
+def _extract_prefix_from_fname(fname: str) -> str:
+    base = os.path.basename(fname)
+    m = FNAME_RE_PREFIX.match(base)
+    if not m:
+        return ""
+    return m.group(1)
+
+
+def _parse_dt_from_prefix(prefix: str) -> float:
+    m = re.search(r"dt([0-9]*\.?[0-9]+)", prefix)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except Exception:
+        return None
+
+
+def _get_dt_for_group(group: Dict[str, str]) -> float:
+    # pick any file path from the group
+    for _k, p in group.items():
+        prefix = _extract_prefix_from_fname(p)
+        dt = _parse_dt_from_prefix(prefix)
+        if dt is not None:
+            return dt
+    return None
+
+
+def _extract_scene_from_prefix(prefix: str) -> str:
+    """Heuristic: scene name is substring before '-dt', else before first '-', else the whole prefix."""
+    if not prefix:
+        return ""
+    if "-dt" in prefix:
+        return prefix.split("-dt", 1)[0]
+    if "-" in prefix:
+        return prefix.split("-", 1)[0]
+    return prefix
+
+
+def _legend_text_for_label(label: str) -> str:
+    base = _base_variant(label)
+    if base == "ours" or base.startswith("pcg-ours") or base.startswith("nopcg-ours"):
+        return "Ours"
+    if base == "2014Bender":
+        return "Bender et al."
+    return base or label
 
 
 #############################################
@@ -158,7 +228,18 @@ def _title_for_key(key: str, *, use_log: bool = False) -> str:
         "pcg_error": "PCG Error",
     }
     base = mapping.get(key, key)
-    return base + (" (log)" if use_log else "")
+    return base
+
+
+def _ylabel_for_key(key: str) -> str:
+    mapping = {
+        "elapsed_time_ms": "Elapsed time (ms)",
+        "opt_iter": "Iteration count",
+        "opt_error": "Error",
+        "pcg_iter": "PCG iteration counts",
+        "pcg_error": "PCG error",
+    }
+    return mapping.get(key, key)
 
 
 def _slice_for_key(
@@ -228,11 +309,14 @@ def plot_groups_overlay(
     keys: List[str] = None,
     out_path: str = None,
     show: bool = False,
-    logy_errors: bool = True,
+    ylog: bool = False,
+    show_grid: bool = False,
     separate_figs: bool = False,
     start: int = None,
     end: int = None,
     iter_decay_frame: int = None,
+    dt_min: float = None,
+    dt_max: float = None,
     smooth: int = 0,
     ema: float = None,
     show_raw: bool = True
@@ -244,92 +328,180 @@ def plot_groups_overlay(
         raise ValueError("labels length must match groups length")
 
     # Determine which keys to plot
+    # Support extra, derived keys (e.g., 'iter_decay', 'avg_iter_vs_dt') in addition to KNOWN_KEYS
     if (keys is None) or (len(keys) == 0) or ("all" in keys):
         selected_keys = [k for k in KNOWN_KEYS if any(k in g for g in groups)]
     else:
-        selected_keys = [k for k in keys if k in KNOWN_KEYS and any(k in g for g in groups)]
+        selected_keys = []
+        for k in keys:
+            if k == "iter_decay":
+                selected_keys.append(k)
+            elif k == "avg_iter_vs_dt":
+                selected_keys.append(k)
+            elif (k in KNOWN_KEYS) and any(k in g for g in groups):
+                selected_keys.append(k)
     if len(selected_keys) == 0:
         print("No known keys present in provided groups.")
         return
 
     pairs = _sorted_pairs(groups, labels)
 
-    # Special mode: per-timestep optimizer error decay overlay
-    if iter_decay_frame is not None:
-        key = "opt_error"
-        use_log = bool(logy_errors)
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 3.2), constrained_layout=True)
-        if use_log:
-            ax.set_yscale("log")
-        for group, label in pairs:
-            if (key not in group) or ("opt_iter" not in group):
-                continue
-            opt_err = np.load(group[key])
-            opt_it = np.load(group["opt_iter"])  # per-timestep iteration counts
-            frame = int(iter_decay_frame)
-            if frame < 0 or frame >= len(opt_it):
-                continue
-            start_idx = int(np.sum(opt_it[:frame]))
-            end_idx = start_idx + int(opt_it[frame])
-            if end_idx <= start_idx:
-                continue
-            y_raw = np.clip(opt_err[start_idx:end_idx], 1e-16, None) if use_log else opt_err[start_idx:end_idx]
-            x = np.arange(len(y_raw))
-            color, _, z = _style_for_label(label)
-            do_ma = bool(smooth and int(smooth) > 1)
-            do_ema = ema is not None
-            if do_ma or do_ema:
-                y_s = _smooth_series(y_raw, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
-                if show_raw:
-                    ax.plot(x, y_raw, lw=0.7, color=color, alpha=0.25, ls="-", zorder=z-1)
-                ax.plot(x, y_s, lw=1.6, label=label, color=color, ls="-", zorder=z)
-            else:
-                ax.plot(x, y_raw, lw=1.4, label=label, color=color, ls="-", zorder=z)
-        ax.set_title(f"Error decay in timestep {int(iter_decay_frame)}")
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Error")
-        ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
-        ax.legend(loc="best")
-        if out_path:
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            fig.savefig(out_path, dpi=150)
-            print(f"Saved figure to {out_path}")
-        if show:
-            plt.show()
-        else:
-            plt.close(fig)
-        return
+    # Figure sizing: single-column width for 2-column papers
+    # Approx ~3.4 inches wide per subplot; adjust height per row
+    # width_inch to meet 600px at 150dpi
+    target_px_w = 800
+    dpi = 150
+    single_col_w = target_px_w / dpi
+    row_h = 1.8
+
+    # Integrated plotting; 'iter_decay' handled as a derived key in _plot_one_key
 
     def _plot_one_key(ax, key: str):
-        use_log = bool(logy_errors and ("error" in key))
+        use_log = bool(ylog)
         if use_log:
             ax.set_yscale("log")
+        any_line = False
+        last_x = None
+        # Special aggregation for avg_iter_vs_dt: group by variant and plot dt vs avg iterations
+        if key == "avg_iter_vs_dt":
+            variant_to_points: Dict[str, List[Tuple[float, float]]] = {}
+            for group, label in pairs:
+                if "opt_iter" not in group:
+                    continue
+                dt_val = _get_dt_for_group(group)
+                if dt_val is None:
+                    continue
+                if (dt_min is not None and dt_val < float(dt_min)) or (dt_max is not None and dt_val > float(dt_max)):
+                    continue
+                it = np.load(group["opt_iter"])
+                s = int(start) if (start is not None and int(start) >= 0) else 0
+                e = int(end) if (end is not None and int(end) >= 0) else it.size
+                s = max(0, min(s, it.size))
+                e = max(s, min(e, it.size))
+                it_sub = it[s:e]
+                if it_sub.size == 0:
+                    continue
+                avg_iter = float(np.mean(it_sub))
+                base_var = _base_variant(label)
+                # Normalize legacy names to 'ours'
+                if base_var.startswith("pcg-ours") or base_var.startswith("nopcg-ours"):
+                    base_var = "ours"
+                variant_to_points.setdefault(base_var, []).append((float(dt_val), avg_iter))
+            # Plot aggregated lines
+            for variant, pts in variant_to_points.items():
+                pts.sort(key=lambda t: t[0])
+                xs = np.asarray([p[0] for p in pts], dtype=float)
+                ys = np.asarray([p[1] for p in pts], dtype=float)
+                if xs.size == 0:
+                    continue
+                color, _, z = _style_for_label(variant)
+                label_txt = _legend_text_for_label(variant)
+                ax.plot(xs, ys, lw=0.8, label=label_txt, color=color, ls="-", zorder=z)
+                any_line = True
+                last_x = xs
+            # Axis labels for this special key
+            ax.set_xlabel("Δt")
+            ax.set_ylabel("avg. iterations")
+            # Align x-range
+            if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
+                left = float(last_x.min())
+                right = float(last_x.max())
+                if dt_min is not None:
+                    left = float(dt_min)
+                if dt_max is not None:
+                    right = float(dt_max)
+                ax.set_xlim(left=left, right=right)
+            if not use_log:
+                ax.set_ylim(bottom=0)
+                yticks = ax.get_yticks()
+                ax.set_yticks([t for t in yticks if abs(t) > 1e-12])
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+            if show_grid:
+                ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
+            handles, labels_txt = ax.get_legend_handles_labels()
+            labels_txt = [_legend_text_for_label(l) for l in labels_txt]
+            leg = ax.legend(handles, labels_txt, loc="best")
+            if leg is not None:
+                leg.get_frame().set_linewidth(0.6)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            return
         for group, label in pairs:
-            if key not in group:
-                continue
-            arr_full = np.load(group[key])
-            opt_iter_arr = None
-            if ("error" in key) and ("opt_iter" in group):
-                opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
-            arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
-            x_plot, y_plot = _slice_for_key(arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr)
+            if key == "iter_decay":
+                # Requires iter_decay_frame and presence of opt_error + opt_iter
+                if (iter_decay_frame is None) or ("opt_error" not in group) or ("opt_iter" not in group):
+                    continue
+                opt_err = np.load(group["opt_error"])
+                opt_it = np.load(group["opt_iter"])  # per-timestep counts
+                frame = int(iter_decay_frame)
+                if frame < 0 or frame >= len(opt_it):
+                    continue
+                start_idx = int(np.sum(opt_it[:frame]))
+                end_idx = start_idx + int(opt_it[frame])
+                if end_idx <= start_idx:
+                    continue
+                y_plot = np.clip(opt_err[start_idx:end_idx], 1e-16, None) if use_log else opt_err[start_idx:end_idx]
+                x_plot = np.arange(len(y_plot))
+            else:
+                if key not in group:
+                    continue
+                arr_full = np.load(group[key])
+                opt_iter_arr = None
+                if ("error" in key) and ("opt_iter" in group):
+                    opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
+                arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
+                x_plot, y_plot = _slice_for_key(arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr)
+            # Convert x from timestep index to seconds for per-timestep series
+            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
+                dt = _get_dt_for_group(group)
+                if dt is not None:
+                    x_plot = x_plot * float(dt)
+            y_disp = y_plot
             color, _, z = _style_for_label(label)
             do_ma = bool(smooth and int(smooth) > 1)
             do_ema = ema is not None
             if do_ma or do_ema:
-                y_s = _smooth_series(y_plot, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
+                y_s = _smooth_series(y_disp, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
                 if show_raw:
-                    ax.plot(x_plot, y_plot, lw=0.6, color=color, alpha=0.25, ls="-", zorder=z-1)
-                line = ax.plot(x_plot, y_s, lw=1.6, label=label, color=color, ls="-", zorder=z)[0]
+                    ax.plot(x_plot, y_disp, lw=0.5, color=color, alpha=0.25, ls="-", zorder=z-1)
+                line = ax.plot(x_plot, y_s, lw=0.8, label=label, color=color, ls="-", zorder=z)[0]
             else:
-                line = ax.plot(x_plot, y_plot, lw=1.2, label=label, color=color, ls="-", zorder=z)[0]
+                line = ax.plot(x_plot, y_disp, lw=0.8, label=label, color=color, ls="-", zorder=z)[0]
+            any_line = True
+            last_x = x_plot
             if key in ("elapsed_time_ms", "opt_iter"):
-                _draw_mean_line(ax, key, (x_plot, y_plot), color=line.get_color())
-        ax.set_title(_title_for_key(key, use_log=use_log))
-        ax.set_xlabel(_xlabel_for_key(key))
+                _draw_mean_line(ax, key, (x_plot, y_disp), color=line.get_color())
+        # Axis labels (move title to y-label)
+        if key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
+            ax.set_xlabel("time (s)")
+        elif key == "iter_decay":
+            ax.set_xlabel("Iteration")
+        else:
+            ax.set_xlabel(_xlabel_for_key(key))
+        if key == "iter_decay":
+            ax.set_ylabel("Error (timestep {} )".format(int(iter_decay_frame) if iter_decay_frame is not None else "?"))
+        else:
+            ax.set_ylabel(_ylabel_for_key(key))
+        # Align x-range to plotted data only (respect start/end slicing when seconds are applied above)
+        if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
+            ax.set_xlim(left=float(last_x[0]), right=float(last_x[-1]))
+        if not use_log:
+            ax.set_ylim(bottom=0)
+            # show only x-axis zero at origin: hide y-axis zero tick if present
+            yticks = ax.get_yticks()
+            ax.set_yticks([t for t in yticks if abs(t) > 1e-12])
         ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
-        ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
-        ax.legend(loc="best")
+        if show_grid:
+            ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
+        # Unified legend labels
+        handles, labels_txt = ax.get_legend_handles_labels()
+        labels_txt = [_legend_text_for_label(l) for l in labels_txt]
+        leg = ax.legend(handles, labels_txt, loc="best")
+        if leg is not None:
+            leg.get_frame().set_linewidth(0.6)
+        # remove top/right spines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
     if separate_figs:
         # Create one figure per key
@@ -342,7 +514,7 @@ def plot_groups_overlay(
             )
         base_no_ext, ext = os.path.splitext(base_out)
         for key in selected_keys:
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8.5, 3.0), constrained_layout=True)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(single_col_w, row_h), constrained_layout=True)
             _plot_one_key(ax, key)
             out_key = f"{base_no_ext}-{key}{ext or '.png'}"
             os.makedirs(os.path.dirname(out_key), exist_ok=True)
@@ -356,7 +528,7 @@ def plot_groups_overlay(
 
     # Combined in a single image
     nrows = len(selected_keys)
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(10, 1 + 2.8 * nrows), constrained_layout=True)
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(single_col_w, max(row_h, 0.9 * nrows + 0.9)), constrained_layout=True)
     if nrows == 1:
         axes = [axes]
 
@@ -382,17 +554,20 @@ def main():
     parser.add_argument("--dir", default=os.path.join("data", "stats"), help="Directory containing stats .npy files")
     parser.add_argument("--compare", "-c", nargs="+", required=True, help="Items to compare: 'prefix/variant'. Multiple allowed")
     parser.add_argument("--labels", "-l", nargs="*", default=None, help="Legend labels for compared items; auto when omitted")
-    parser.add_argument("--keys", "-k", nargs="+", default=["all"], choices=KNOWN_KEYS + ["all"], help="Keys to plot. Default 'all'")
+    parser.add_argument("--keys", "-k", nargs="+", default=["all"], choices=KNOWN_KEYS + ["all", "iter_decay", "avg_iter_vs_dt"], help="Keys to plot. Default 'all'")
     parser.add_argument("--separate-figs", action="store_true", help="Save one image per key instead of a combined image")
     parser.add_argument("--show", action="store_true", help="Show figures interactively")
     parser.add_argument("--save", default=None, help="Output image path. Auto-picked when omitted")
-    parser.add_argument("--no-logy-errors", action="store_true", help="Do not use log scale for *error series")
+    parser.add_argument("--ylog", action="store_true", help="Use log scale for Y axis for all series")
     parser.add_argument("--start", type=int, default=None, help="Start frame index (inclusive) for timestep-level series and error slicing")
     parser.add_argument("--end", type=int, default=None, help="End frame index (exclusive) for timestep-level series and error slicing; negative or omitted means till end")
     parser.add_argument("--iter-decay", type=int, default=None, help="Plot opt_error decay for a single timestep index across compared variants")
+    parser.add_argument("--dt-min", type=float, default=None, help="Minimum Δt for avg_iter_vs_dt")
+    parser.add_argument("--dt-max", type=float, default=None, help="Maximum Δt for avg_iter_vs_dt")
     parser.add_argument("--smooth", type=int, default=0)
     parser.add_argument("--ema", type=float, default=None)
     parser.add_argument("--no-raw", action="store_true")
+    parser.add_argument("--show-grid", action="store_true", help="Show grid (off by default)")
     args = parser.parse_args()
 
     groups_by_prefix = scan_groups(args.dir)
@@ -433,21 +608,50 @@ def main():
             kept_pairs.append((prefix, variant))
         labels = auto_labels(kept_pairs, None)
 
-    # Build output path
+    # Determine selected keys (needed for output naming as well)
+    selected_keys = None if (args.keys is None or ("all" in args.keys)) else args.keys
+
+    # Build output path: scene-prefix-key-yScale
     out_path = args.save
     if out_path is None:
-        if args.iter_decay is not None:
-            # Default name: <first-prefix>-iter<frame>-iter_decay_overlay.png
+        if args.iter_decay is not None and selected_keys is not None and len(selected_keys) == 1 and selected_keys[0] == "iter_decay":
+            # Default name: <scene>-<prefix>-iter<frame>-iter_decay-y<scale>.png
             base_prefix = compare_pairs[0][0] if len(compare_pairs) > 0 else "iter"
-            base = f"{base_prefix}-iter{int(args.iter_decay)}-iter_decay_overlay"
+            scene = _extract_scene_from_prefix(base_prefix)
+            yscale = "log" if args.ylog else "linear"
+            base = f"{scene}-{base_prefix}-iter{int(args.iter_decay)}-iter_decay-y{yscale}"
             out_path = os.path.join(args.dir, base + ".png")
         else:
-            safe = [f"{p.replace('/', '_')}-{v}" for p, v in compare_pairs]
-            base = "compare-" + "__".join(safe)
+            # Determine y-scale label per key set; if multiple keys, put 'multi'
+            if selected_keys is None or ("all" in (args.keys or [])):
+                keys_for_name = [k for k in KNOWN_KEYS if any(k in groups_by_prefix[p][v] for p, v in compare_pairs if p in groups_by_prefix and v in groups_by_prefix[p])]
+            else:
+                keys_for_name = selected_keys
+            # Resolve key part including derived keys
+            if len(keys_for_name) == 1:
+                key_part = keys_for_name[0]
+            elif len(keys_for_name) == 0:
+                if selected_keys is not None and len(selected_keys) == 1 and selected_keys[0] == "iter_decay":
+                    key_part = "iter_decay"
+                else:
+                    key_part = "multi"
+            else:
+                key_part = "multi"
+            # y-scale: single global switch
+            yscale = "log" if args.ylog else "linear"
+            # Optional dt range tag for avg_iter_vs_dt naming
+            range_tag = ""
+            if (selected_keys is not None and len(selected_keys) == 1 and selected_keys[0] == "avg_iter_vs_dt") or key_part == "avg_iter_vs_dt":
+                if args.dt_min is not None or args.dt_max is not None:
+                    lo = f"{args.dt_min:.3f}" if args.dt_min is not None else ""
+                    hi = f"{args.dt_max:.3f}" if args.dt_max is not None else ""
+                    if lo or hi:
+                        range_tag = f"-dt{lo}-{hi}"
+            # Take first compare pair to form scene/prefix
+            base_prefix = compare_pairs[0][0] if len(compare_pairs) > 0 else "scene"
+            scene = _extract_scene_from_prefix(base_prefix)
+            base = f"{scene}-{base_prefix}-{key_part}{range_tag}-y{yscale}"
             out_path = os.path.join(args.dir, base + ".png")
-
-    # Determine selected keys
-    selected_keys = None if (args.keys is None or ("all" in args.keys)) else args.keys
 
     # Always use overlay logic (works for single or multiple groups)
     plot_groups_overlay(
@@ -456,11 +660,14 @@ def main():
         keys=selected_keys,
         out_path=out_path,
         show=bool(args.show),
-        logy_errors=not args.no_logy_errors,
+        ylog=bool(args.ylog),
         separate_figs=bool(args.separate_figs),
         start=args.start,
         end=args.end,
         iter_decay_frame=args.iter_decay,
+        dt_min=args.dt_min,
+        dt_max=args.dt_max,
+        show_grid=bool(args.show_grid),
         smooth=args.smooth,
         ema=args.ema,
         show_raw=not args.no_raw,

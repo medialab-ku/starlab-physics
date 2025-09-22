@@ -162,6 +162,7 @@ if __name__ == "__main__":
 
                 if not solver.iisph:
                     solver.smooth_max = w.checkbox("smooth max(Ours)", solver.smooth_max)
+                    solver.density_error = w.checkbox("density error", solver.density_error)
                     if solver.smooth_max:
                         solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
                         solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
@@ -308,6 +309,13 @@ if __name__ == "__main__":
             prefix_parts = [f"dt{dt_val:.5f}", f"tol{tol_opt_val}", f"opt{max_iter_opt_val}"]
             if cfl_flag:
                 prefix_parts.append("cfl")
+            # Error metric tag (always include for clarity)
+            try:
+                density_error_flag = bool(getattr(solver, "density_error", False))
+            except Exception:
+                density_error_flag = False
+            error_metric_tag = "errden" if (iisph_flag or density_error_flag) else "errl2"
+            prefix_parts.append(error_metric_tag)
             # Add warmstart tag to prefix for our method when enabled
             if label == "ours" and use_pcg_flag:
                 prefix_parts.append("warmstart")

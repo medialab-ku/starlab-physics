@@ -28,6 +28,7 @@ class PBF2Solver(SPHBase):
         self.enable_DF = False
         self.pressure_boundary = False
         self.smooth_max = False
+        self.density_error = False
         self.print_info = True
         
         self.print_pcg_iter  = False
@@ -763,7 +764,7 @@ class PBF2Solver(SPHBase):
         r_old = self.dot(r, r)
         pcg_iter = 0
         # if r_old > pow(10, -self.tol_pcg):
-        if r_old > 1e-12:
+        if self.smooth_max and r_old > 1e-12:
             p.copy_from(r)
             for _ in range(self.max_iteration_pcg):
                 # Ap.fill(0.0)
@@ -1051,6 +1052,7 @@ class PBF2Solver(SPHBase):
                 continue
 
             value += a[p_i] / self.ps.density0[p_i]
+        value /= self.ps.dynamic_particle_num
 
         return value
 
@@ -1111,22 +1113,25 @@ class PBF2Solver(SPHBase):
                 self.compute_J_tr_x(g, self.f)
                 coef_wise_div(p, g, self.ps.m)
 
-                if self.smooth_max:
+                # if self.smooth_max:
 
-                    if not self.use_pcg:
-                        p.fill(0.0)
+                #     if not self.use_pcg:
+                #         p.fill(0.0)
 
-                    self.PCG(x=p, b=g)
+                self.PCG(x=p, b=g)
 
                 #Bender et al. 2014 (Constant density solver OF DFSPH)
                 # else:
                 #     coef_wise_div(p, g, self.ps.m)
 
                 self.add(d, d, -self.omega, p)
-                err = dot(p, p)
                 # err = inf_norm(p)
                 # err = dot2(Jd, Jd)
-                # err = self.compute_avg_density_error(self.f)
+                if self.density_error:
+                    err = self.compute_avg_density_error(self.f)
+                else:
+                    err = dot(p, p)
+
                 # Collect optimizer error per iteration
                 self.stats_opt_error.append(float(err))
                 try:

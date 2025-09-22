@@ -40,21 +40,33 @@ python plot_stats.py \
   - Directory containing `.npy` stats files; non-recursive.
 - `--compare`, `-c` (required; multiple)
   - Items to compare, each in the form `prefix/variant`.
-  - Example: `pillar-dt0.00200-tol4-opt1000/pcg-ours`.
+  - Example: `pillar-dt0.00200-tol4-opt1000/ours`.
 - `--labels`, `-l` (multiple)
   - Custom legend labels. If omitted, labels are auto-generated.
 - `--keys`, `-k` (multiple; default: `all`)
-  - Metrics to plot. Valid values: `elapsed_time_ms`, `opt_iter`, `opt_error`, `pcg_iter`, `pcg_error`, `all`.
+  - Metrics to plot. Valid: `elapsed_time_ms`, `opt_iter`, `opt_error`, `pcg_iter`, `pcg_error`, `iter_decay`, `avg_iter_vs_dt`, `all`.
+  - `iter_decay`는 특정 프레임의 최적화 에러 감소 곡선을 그리는 파생 키입니다. `--iter-decay`와 함께 사용하세요.
+  - `avg_iter_vs_dt`는 각 비교 항목의 Δt에 대해 평균 `opt_iter`(선택 범위 `--start/--end` 반영)를 계산해 Δt-평균 이터레이션 곡선을 그립니다.
 - `--separate-figs`
   - Save one image per key instead of a single multi-row image.
 - `--show`
   - Display figures interactively.
 - `--save` (path)
   - Output file path. If omitted, a name is auto-picked based on compared items.
-- `--no-logy-errors`
-  - Do not use log scale for error series.
+- `--ylog`
+  - 모든 시리즈에 대해 Y축 로그 스케일을 적용합니다. 미지정 시 선형 스케일.
 - `--start`, `--end` (ints)
   - Timestep frame range (start, end) used for slicing series and computing means. Negative or omitted `end` means until the end.
+- `--iter-decay` (int)
+  - `-k iter_decay`와 함께 사용합니다. 해당 프레임 인덱스의 per-iteration `opt_error` 감소를 플로팅합니다.
+- `--smooth` (int, default: 0)
+  - Moving average window size. 0 or 1 disables smoothing (default off).
+- `--ema` (float, default: None)
+  - Exponential moving average alpha in (0,1). If set, takes precedence over `--smooth`.
+- `--no-raw`
+  - When smoothing is enabled, hide the faint raw line background.
+- `--dt-min`, `--dt-max` (floats)
+  - `-k avg_iter_vs_dt`와 함께 사용합니다. Δt 범위를 제한합니다. 파일명에도 범위 태그가 포함됩니다.
 
 ### What gets plotted
 - Keys and titles
@@ -63,11 +75,15 @@ python plot_stats.py \
   - `opt_error` → "Error"
   - `pcg_iter` → "PCG Iteration"
   - `pcg_error` → "PCG Error"
+  - `iter_decay` → "Error (timestep <frame>)" (프레임은 `--iter-decay`로 지정)
+  - `avg_iter_vs_dt` → "avg. iterations" vs "Δt"
 - Scale
-  - Error series (`*error`) are shown on a log scale by default. Disable with `--no-logy-errors`.
+  - `--ylog` 제공 시 로그 스케일, 아니면 선형 스케일.
 - Lines and means
   - All series are rendered with solid lines.
   - For `elapsed_time_ms` and `opt_iter`, a colored dotted horizontal mean line is drawn using values from the selected (start, end) range.
+ - Smoothing (optional)
+   - If `--ema` or `--smooth` is provided, a smoothed trend is plotted; the original series is shown faintly unless `--no-raw` is set.
 
 ### Overlay behavior
 - Overlays are always supported. Supply multiple `--compare` items; each becomes a legend entry.
@@ -79,7 +95,8 @@ python plot_stats.py \
 
 ### Range slicing semantics
 - Timestep-level keys (`elapsed_time_ms`, `opt_iter`, `pcg_iter`):
-  - `start`/`end` slice frames directly and set x-axis to the actual frame numbers.
+  - `start`/`end` slice frames directly.
+  - The x-axis is rendered in seconds by parsing `dt` from the filename prefix (e.g., `dt0.00200`).
 - Iteration-level keys (`opt_error`, `pcg_error`):
   - If `opt_iter` is present, the frame range [start, end) is mapped to an iteration subrange using per-timestep iteration counts.
   - x-axis becomes the iteration index within the selected subrange.
@@ -102,16 +119,34 @@ python plot_stats.py \
   -c "pillar-dt0.00200-tol4-opt1000/2014Bender" \
      "pillar-dt0.00200-tol4-opt1000/ours" \
      "pillar-dt0.00200-tol4-opt1000/iisph" \
-  -k opt_error --separate-figs --show
+  -k opt_error --ylog --separate-figs --show
 
 # Compare the same method but different tolerances (different prefixes)
 python plot_stats.py \
   -c "pillar-dt0.00200-tol2-opt1000/ours" \
      "pillar-dt0.00200-tol4-opt1000/ours" \
   -k elapsed_time_ms opt_iter --save data/stats/tol-sweep.png
+
+# Plot optimizer error decay at a specific timestep across variants
+python plot_stats.py \
+  -c "pillar-dt0.00200-tol4-opt1000/ours" \
+     "pillar-dt0.00200-tol4-opt1000/2014Bender" \
+  -k iter_decay --iter-decay 320 --ylog --save data/stats/pillar-iter320-iter_decay.png
+
+# Average iterations vs Δt for ours vs Bender in [0.001, 0.003]
+python plot_stats.py \
+  -c "pillar-dt0.00100-tol4-opt1000/ours" \
+     "pillar-dt0.00200-tol4-opt1000/ours" \
+     "pillar-dt0.00300-tol4-opt1000/ours" \
+     "pillar-dt0.00100-tol4-opt1000/2014Bender" \
+     "pillar-dt0.00200-tol4-opt1000/2014Bender" \
+     "pillar-dt0.00300-tol4-opt1000/2014Bender" \
+  -k avg_iter_vs_dt --dt-min 0.001 --dt-max 0.003 --save data/stats/pillar-avg_iter_vs_dt.png
 ```
 
 ### Notes
 - The script does not recurse into subdirectories. Point `--dir` at the folder that directly contains the `.npy` files you want to plot.
 - If some keys are missing for a variant, that series is silently skipped for that key.
 - Auto labels remove common prefix context when possible; override with `--labels` to control legend text explicitly.
+- Legends unify method names to "Ours" and "Bender et al." automatically.
+- Figures default to single-column width (~3.4 inches) suitable for 2-column papers.
