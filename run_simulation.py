@@ -273,7 +273,7 @@ if __name__ == "__main__":
                 return
             os.makedirs(os.path.join("data", "stats"), exist_ok=True)
             # Build descriptive prefix instead of timestamp
-            # Format: dt<dt>-tol<tol_opt>-opt<maxOptIter>(-cfl)
+            # Format: dt<dt>-tol<tol_opt>-opt<maxOptIter>(-cfl)(-warmstart)
             try:
                 label = "ours" if bool(getattr(solver, "smooth_max", False)) else "2014Bender"
             except Exception:
@@ -308,16 +308,19 @@ if __name__ == "__main__":
             prefix_parts = [f"dt{dt_val:.5f}", f"tol{tol_opt_val}", f"opt{max_iter_opt_val}"]
             if cfl_flag:
                 prefix_parts.append("cfl")
+            # Add warmstart tag to prefix for our method when enabled
+            if label == "ours" and use_pcg_flag:
+                prefix_parts.append("warmstart")
             prefix = "-".join(prefix_parts)
             # Variant selection
             if iisph_flag:
                 variant = "iisph"
             else:
                 if label == "ours":
-                    pcg_part = "pcg" if use_pcg_flag else "nopcg"
-                    variant = f"{pcg_part}-ours"
+                    # Drop pcg/nopcg suffix; always use 'ours'
+                    variant = "ours"
                 else:
-                    # 2014Bender has no pcg/nopcg option
+                    # 2014Bender has no warmstart option
                     variant = "2014Bender"
             for name, arr in stats.items():
                 try:
@@ -464,9 +467,14 @@ if __name__ == "__main__":
 
         if runSim:
 
-            # Move boundary object if the scene is moving_boundary
-            dt = solver.dt
-            solver.dt = dt / solver.num_substep
+            dt_frame = solver.dt
+            dt_sub = dt_frame / solver.num_substep
+            try:
+                if getattr(solver, "cfl", False) and hasattr(solver, "compute_cfl_dt"):
+                    dt_sub = float(solver.compute_cfl_dt(dt_sub))
+            except Exception:
+                pass
+            solver.dt = dt_sub
             for i in range(solver.num_substep):
                 # apply animation each substep depending on mode
                 if animator.has_animations():
@@ -524,8 +532,8 @@ if __name__ == "__main__":
 
             # advance time only in auto-running mode
             if anim_auto_mode and runAnim:
-                anim_time += dt
-            solver.dt = dt
+                anim_time += dt_frame
+            solver.dt = dt_frame
             frame_cnt += 1
 
             # After completing a frame, cache the end-of-frame state

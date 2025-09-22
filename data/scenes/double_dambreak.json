@@ -2,7 +2,7 @@
 	"Configuration": 
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [4.0, 5.0, 9.0],
+        "domainEnd": [4.0, 7.5, 9.0],
 		"particleRadius": 0.02,
 		"numSubstepping": 1,
 		"density0": 1000, 
@@ -24,18 +24,30 @@
 			"translation": [0.2, 0.2, 0.2],
 			"rotationAxis": [0, 1, 0],
 			"rotationAngle": 0,
-			"scale": [2.0, 1.25, 1.25],
+			"scale": [2.0, 2.5, 1.25],
 			"velocity": [0.0, 0.0, 0.0],
 			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
 			"isDynamic": false
-		}
+		},
+        {
+            "objectId": 2,
+            "geometryFile": "./data/models/rigid_cube.obj",
+            "translation": [1.8, 1.0, 4.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [7,3,0.5],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 3000.0,
+            "color": [255, 255, 0, 1.0],
+            "isDynamic": true
+        }
 	],
 	"FluidBlocks": [
 		{
             "objectId": 0,
 			"start": [0.4, 0.4, 5.8],
-			"end": [1.5, 2.9, 7.8],
+			"end": [1.5, 3.3, 7.8],
 			"translation": [0.1, 0.0, 0.0],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
@@ -45,7 +57,7 @@
 		{
             "objectId": 0,
 			"start": [2.4, 0.4, 0.7],
-			"end": [3.5, 2.9, 2.7],
+			"end": [3.5, 3.3, 2.7],
 			"translation": [-0.3, 0.0, 0.0],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],

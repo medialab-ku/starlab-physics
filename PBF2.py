@@ -205,38 +205,38 @@ class PBF2Solver(SPHBase):
         # ---------- Cohesion & Viscosity ----------
         # Akinci2012
         # Akinci2013
-        # if self.ps.material[p_j] == self.ps.material_fluid:
-        # Cohesion
-        f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
-        # Curvature
-        f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
-        # Neighborhood deficiency correction K_ij
-        K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
-        # K_ij = ti.min(K_ij, 1.0)
-        ret += K_ij * (f_coh + f_curv)
+        if self.ps.material[p_j] == self.ps.material_fluid:
+            # Cohesion
+            f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
+            # Curvature
+            f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
+            # Neighborhood deficiency correction K_ij
+            K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
+            # K_ij = ti.min(K_ij, 1.0)
+            ret += K_ij * (f_coh + f_curv)
 
-        # Viscosity (fluid-fluid)
-        k_visc = 2.0 * (self.ps.dim + 2.0)
-        f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (vxy / (rn * rn + eps2)) * gradW
-        ret += K_ij * f_v
+            # Viscosity (fluid-fluid)
+            k_visc = 2.0 * (self.ps.dim + 2.0)
+            f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (vxy / (rn * rn + eps2)) * gradW
+            ret += K_ij * f_v
 
         # ---------- Adhesion ----------
-        # elif self.ps.material[p_j] == self.ps.material_solid:
-        #     f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
-        #     ret += f_adh
+        elif self.ps.material[p_j] == self.ps.material_solid:
+            f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
+            ret += f_adh
 
-        #     # (Optional) Boundary Viscosity
-        #     boundary_viscosity = 0.0
-        #     if boundary_viscosity > 0.0:
-        #         k_visc = 2.0 * (self.ps.dim + 2.0)
-        #         f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
-        #         ret += f_vb
-        #         if self.ps.is_dynamic_rigid_body(p_j):
-        #             # Two-way coupling
-        #             self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
+            # (Optional) Boundary Viscosity
+            boundary_viscosity = 0.0
+            if boundary_viscosity > 0.0:
+                k_visc = 2.0 * (self.ps.dim + 2.0)
+                f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
+                ret += f_vb
+                if self.ps.is_dynamic_rigid_body(p_j):
+                    # Two-way coupling
+                    self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
 
-        #     if self.ps.is_dynamic_rigid_body(p_j):
-        #         self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
+            if self.ps.is_dynamic_rigid_body(p_j):
+                self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
 
     @ti.kernel
     def compute_non_pressure_forces(self):
@@ -248,10 +248,10 @@ class PBF2Solver(SPHBase):
             acc = ti.Vector(self.g)
             self.ps.acceleration[p_i] = acc
 
-            # if self.ps.material[p_i] == self.ps.material_fluid:
-            self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
-                # Write back the accumulated non-pressure forces into acceleration
-            self.ps.acceleration[p_i] = acc
+            if self.ps.material[p_i] == self.ps.material_fluid:
+                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
+                    # Write back the accumulated non-pressure forces into acceleration
+                self.ps.acceleration[p_i] = acc
 
     @ti.kernel
     def advect_velocity(self, dt: float):
@@ -760,16 +760,12 @@ class PBF2Solver(SPHBase):
         self.compute_Ax(Ap, Jp, x)
         self.add(r, b, -1.0, Ap)
 
-        pcg_prec_ms = 0.0
-        pcg_matvec_ms = 0.0
-        pcg_t0 = time.perf_counter()
-
         r_old = self.dot(r, r)
         pcg_iter = 0
-        if r_old > pow(10, -self.tol_pcg):
+        # if r_old > pow(10, -self.tol_pcg):
+        if r_old > 1e-12:
             p.copy_from(r)
             for _ in range(self.max_iteration_pcg):
-                t0 = time.perf_counter()
                 # Ap.fill(0.0)
                 self.compute_Ax(Ap, Jp, p)
 
@@ -1215,6 +1211,12 @@ class PBF2Solver(SPHBase):
             add(self.ps.v, self.ps.v, -1.0, self.tmp)
 
             iter += 1
+
+    def compute_cfl_dt(self, dt_in: float) -> float:
+        v_max = inf_norm(self.ps.v)
+        dt_upper_bound = 0.4 * (self.ps.particle_diameter / (v_max + 1e-12))
+        dt_lower_bound = 0.001
+        return max(dt_lower_bound, min(dt_upper_bound, float(dt_in)))
 
     @ti.kernel
     def compute_variance(self):

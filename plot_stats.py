@@ -8,17 +8,16 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
 
-# Use Times New Roman for titles and axis labels (and other text by default)
-plt.rcParams["font.family"] = "Times New Roman"
-plt.rcParams["font.serif"] = ["Times New Roman"]
-
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman", "Liberation Serif", "DejaVu Serif", "Noto Serif"]
 
 # File naming: <prefix>-<variant>-<key>.npy
-#   prefix  := arbitrary string (often dt<dt>-tol<tol>-opt<maxOptIter>)
-#   variant := iisph | 2014Bender | (pcg|nopcg)-ours
+#   prefix  := arbitrary string (often dt<dt>-tol<tol>-opt<maxOptIter>), may include flags like '-cfl' and '-warmstart'
+#   variant := iisph | 2014Bender | ours
+#              (backward-compat: also accepts legacy 'pcg-ours' and 'nopcg-ours')
 #   key     := elapsed_time_ms | opt_iter | opt_error | pcg_iter | pcg_error
 FNAME_RE_PREFIX = re.compile(
-    r"^(.+)-((?:iisph)|(?:2014Bender)|(?:(?:pcg|nopcg)-ours))-(elapsed_time_ms|opt_iter|opt_error|pcg_iter|pcg_error)\.npy$"
+    r"^(.+)-((?:iisph)|(?:2014Bender)|(?:ours)|(?:(?:pcg|nopcg)-ours))-(elapsed_time_ms|opt_iter|opt_error|pcg_iter|pcg_error)\.npy$"
 )
 
 KNOWN_KEYS = [
@@ -38,25 +37,49 @@ def _style_for_label(label: str):
     """Return (color, linestyle, zorder) for a given variant label.
 
     Policy:
-    - pcg-ours: royalblue (topmost)
-    - nopcg-ours: seagreen
-    - nopcg-2014Bender: orange
+    - ours: royalblue (topmost)
+    - 2014Bender: orange
+    - backward-compat: legacy 'pcg-ours' and 'nopcg-ours' map to ours color
     - fallback: gray
     """
-    if label.startswith("pcg-ours"):
+    if label == "ours" or label.startswith("pcg-ours") or label.startswith("nopcg-ours"):
         return ("royalblue", "-", 10)
-    if label.startswith("nopcg-ours"):
-        return ("seagreen", "-", 5)
     if label == "2014Bender":
         return ("orange", "-", 1)
     return ("gray", "-", 1)
 
 
 def _sorted_pairs(groups: List[Dict[str, str]], labels: List[str]):
-    """Return (group, label) pairs with pcg-ours variants rendered last (on top)."""
+    """Return (group, label) pairs with 'ours' variants rendered last (on top)."""
     pairs = list(zip(groups, labels))
-    pairs.sort(key=lambda gl: (gl[1].startswith("pcg-ours")))
+    pairs.sort(key=lambda gl: (gl[1] == "ours" or gl[1].startswith("pcg-ours")))
     return pairs
+
+
+def _smooth_series(y: np.ndarray, ma_window: int = 0, ema_alpha: float = None) -> np.ndarray:
+    """Return a smoothed copy of y using MA or EMA.
+
+    - If ema_alpha is provided (0<a<1), use EMA (takes precedence)
+    - Else if ma_window > 1, use centered moving average with "same" length
+    - Otherwise, return y unchanged
+    """
+    if y.size == 0:
+        return y
+    if ema_alpha is not None:
+        a = float(ema_alpha)
+        if not (0.0 < a < 1.0):
+            return y
+        out = np.empty_like(y, dtype=float)
+        out[0] = float(y[0])
+        for i in range(1, y.size):
+            out[i] = a * float(y[i]) + (1.0 - a) * out[i - 1]
+        return out
+    if ma_window and int(ma_window) > 1:
+        w = int(ma_window)
+        kernel = np.ones(w, dtype=float) / float(w)
+        # Use 'same' to preserve length
+        return np.convolve(y.astype(float), kernel, mode="same")
+    return y
 
 
 #############################################
@@ -210,6 +233,9 @@ def plot_groups_overlay(
     start: int = None,
     end: int = None,
     iter_decay_frame: int = None,
+    smooth: int = 0,
+    ema: float = None,
+    show_raw: bool = True
 ):
     if len(groups) == 0:
         print("No groups to plot.")
@@ -247,13 +273,21 @@ def plot_groups_overlay(
             end_idx = start_idx + int(opt_it[frame])
             if end_idx <= start_idx:
                 continue
-            y = np.clip(opt_err[start_idx:end_idx], 1e-16, None) if use_log else opt_err[start_idx:end_idx]
-            x = np.arange(len(y))
+            y_raw = np.clip(opt_err[start_idx:end_idx], 1e-16, None) if use_log else opt_err[start_idx:end_idx]
+            x = np.arange(len(y_raw))
             color, _, z = _style_for_label(label)
-            ax.plot(x, y, lw=1.4, label=label, color=color, ls="-", zorder=z)
-        ax.set_title(f"opt_error decay in timestep {int(iter_decay_frame)}", fontname="Times New Roman")
-        ax.set_xlabel("iteration", fontname="Times New Roman")
-        ax.set_ylabel("opt_error", fontname="Times New Roman")
+            do_ma = bool(smooth and int(smooth) > 1)
+            do_ema = ema is not None
+            if do_ma or do_ema:
+                y_s = _smooth_series(y_raw, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
+                if show_raw:
+                    ax.plot(x, y_raw, lw=0.7, color=color, alpha=0.25, ls="-", zorder=z-1)
+                ax.plot(x, y_s, lw=1.6, label=label, color=color, ls="-", zorder=z)
+            else:
+                ax.plot(x, y_raw, lw=1.4, label=label, color=color, ls="-", zorder=z)
+        ax.set_title(f"Error decay in timestep {int(iter_decay_frame)}")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Error")
         ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
         ax.legend(loc="best")
         if out_path:
@@ -278,14 +312,21 @@ def plot_groups_overlay(
             if ("error" in key) and ("opt_iter" in group):
                 opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
             arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
-            color, _, z = _style_for_label(label)
             x_plot, y_plot = _slice_for_key(arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr)
-            # Series lines are always solid; only mean lines are dotted
-            line = ax.plot(x_plot, y_plot, lw=1.2, label=label, color=color, ls="-", zorder=z)[0]
+            color, _, z = _style_for_label(label)
+            do_ma = bool(smooth and int(smooth) > 1)
+            do_ema = ema is not None
+            if do_ma or do_ema:
+                y_s = _smooth_series(y_plot, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
+                if show_raw:
+                    ax.plot(x_plot, y_plot, lw=0.6, color=color, alpha=0.25, ls="-", zorder=z-1)
+                line = ax.plot(x_plot, y_s, lw=1.6, label=label, color=color, ls="-", zorder=z)[0]
+            else:
+                line = ax.plot(x_plot, y_plot, lw=1.2, label=label, color=color, ls="-", zorder=z)[0]
             if key in ("elapsed_time_ms", "opt_iter"):
                 _draw_mean_line(ax, key, (x_plot, y_plot), color=line.get_color())
-        ax.set_title(_title_for_key(key, use_log=use_log), fontname="Times New Roman")
-        ax.set_xlabel(_xlabel_for_key(key), fontname="Times New Roman")
+        ax.set_title(_title_for_key(key, use_log=use_log))
+        ax.set_xlabel(_xlabel_for_key(key))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
         ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
         ax.legend(loc="best")
@@ -349,6 +390,9 @@ def main():
     parser.add_argument("--start", type=int, default=None, help="Start frame index (inclusive) for timestep-level series and error slicing")
     parser.add_argument("--end", type=int, default=None, help="End frame index (exclusive) for timestep-level series and error slicing; negative or omitted means till end")
     parser.add_argument("--iter-decay", type=int, default=None, help="Plot opt_error decay for a single timestep index across compared variants")
+    parser.add_argument("--smooth", type=int, default=0)
+    parser.add_argument("--ema", type=float, default=None)
+    parser.add_argument("--no-raw", action="store_true")
     args = parser.parse_args()
 
     groups_by_prefix = scan_groups(args.dir)
@@ -417,6 +461,9 @@ def main():
         start=args.start,
         end=args.end,
         iter_decay_frame=args.iter_decay,
+        smooth=args.smooth,
+        ema=args.ema,
+        show_raw=not args.no_raw,
     )
 
 

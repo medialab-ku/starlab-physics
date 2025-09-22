@@ -7,30 +7,30 @@ A flexible CLI for plotting experiment statistics saved as .npy arrays. It suppo
 - Filenames follow:
   - `<prefix>-<variant>-<key>.npy`
   - `prefix`: `dt<dt>-tol<tol>-opt<max>` optionally with `-cfl`, e.g. `dt0.00200-tol4-opt1000-cfl`
-  - `variant`: one of
-    - `iisph`
-    - `2014Bender`
-    - `(pcg|nopcg)-ours`
+- `variant`: one of
+  - `iisph`
+  - `2014Bender`
+  - `ours` (과거 호환: `pcg-ours`, `nopcg-ours`도 읽힘)
   - `key`: one of
     - `elapsed_time_ms`, `opt_iter`, `opt_error`, `pcg_iter`, `pcg_error`
 
 Example filename:
-- `pillar-dt0.00200-tol4-opt1000-cfl/pcg-ours` variant would generate files like:
-  - `pillar-dt0.00200-tol4-opt1000-cfl-pcg-ours-elapsed_time_ms.npy`
+- `pillar-dt0.00200-tol4-opt1000-cfl-warmstart/ours` variant would generate files like:
+  - `pillar-dt0.00200-tol4-opt1000-cfl-warmstart-ours-elapsed_time_ms.npy`
 
 ### Quick start
 ```bash
 # Compare two variants under the default stats directory
 python plot_stats.py \
-  -c "pillar-dt0.00200-tol4-opt1000/pcg-ours" \
+  -c "pillar-dt0.00200-tol4-opt1000/ours" \
      "pillar-dt0.00200-tol4-opt1000/2014Bender" \
   -k elapsed_time_ms opt_iter opt_error \
   --save data/stats/compare.png
 
 # If your .npy files are inside a subdirectory, point --dir explicitly
 python plot_stats.py \
-  --dir data/stats/pillar-dt0.00200-tol4-opt1000-cfl \
-  -c "pillar-dt0.00200-tol4-opt1000/pcg-ours" \
+  --dir data/stats/pillar-dt0.00200-tol4-opt1000-cfl-warmstart \
+  -c "pillar-dt0.00200-tol4-opt1000/ours" \
      "pillar-dt0.00200-tol4-opt1000/iisph" \
   -k elapsed_time_ms --show
 ```
@@ -93,21 +93,21 @@ python plot_stats.py \
 ```bash
 # Compare ours-pcg vs ours-nopcg for Elapsed Time only, frames [200, 1200)
 python plot_stats.py \
-  -c "pillar-dt0.00200-tol4-opt1000/pcg-ours" \
-     "pillar-dt0.00200-tol4-opt1000/nopcg-ours" \
+  -c "pillar-dt0.00200-tol4-opt1000/ours" \
+     "pillar-dt0.00200-tol4-opt1000/2014Bender" \
   -k elapsed_time_ms --start 200 --end 1200 --save data/stats/et-compare.png
 
 # Compare across methods for Error and show as separate images per key
 python plot_stats.py \
   -c "pillar-dt0.00200-tol4-opt1000/2014Bender" \
-     "pillar-dt0.00200-tol4-opt1000/pcg-ours" \
+     "pillar-dt0.00200-tol4-opt1000/ours" \
      "pillar-dt0.00200-tol4-opt1000/iisph" \
   -k opt_error --separate-figs --show
 
 # Compare the same method but different tolerances (different prefixes)
 python plot_stats.py \
-  -c "pillar-dt0.00200-tol2-opt1000/pcg-ours" \
-     "pillar-dt0.00200-tol4-opt1000/pcg-ours" \
+  -c "pillar-dt0.00200-tol2-opt1000/ours" \
+     "pillar-dt0.00200-tol4-opt1000/ours" \
   -k elapsed_time_ms opt_iter --save data/stats/tol-sweep.png
 ```
 
