@@ -463,7 +463,7 @@ class ParticleSystem:
         for d in ti.static(range(self.dim)):
             gi[d] = ti.max(0, ti.min(gi[d], self.grid_num[d] - 1))
         return gi
-
+    
     @ti.func
     def clamp_cell(self, cell):
         out = ti.Vector([0 for _ in range(self.dim)])
@@ -643,7 +643,6 @@ class ParticleSystem:
             for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
                 if p_i[0] != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
                     task(p_i, p_j, ret)
-
 
     @ti.kernel
     def copy_to_numpy(self, np_arr: ti.types.ndarray(), src_arr: ti.template()):

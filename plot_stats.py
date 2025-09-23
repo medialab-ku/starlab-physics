@@ -249,6 +249,7 @@ def _slice_for_key(
     start: int = None,
     end: int = None,
     opt_iter: np.ndarray = None,
+    pcg_iter: np.ndarray = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Return (x, y) with frame slicing and error-series iteration mapping.
 
@@ -262,9 +263,15 @@ def _slice_for_key(
         s = 0 if start is None else max(0, int(start))
         e = len(base) if (end is None or int(end) < 0) else int(end)
         if "error" in key:
-            if opt_iter is not None:
-                s_it = int(np.sum(opt_iter[:s]))
-                e_it = int(np.sum(opt_iter[:e]))
+            # Map error-series to iteration subrange using the corresponding per-timestep iteration counts
+            iter_counts = None
+            if key == "pcg_error" and pcg_iter is not None:
+                iter_counts = pcg_iter
+            elif key != "pcg_error" and opt_iter is not None:
+                iter_counts = opt_iter
+            if iter_counts is not None:
+                s_it = int(np.sum(iter_counts[:s]))
+                e_it = int(np.sum(iter_counts[:e]))
                 s_it = max(0, min(s_it, len(base)))
                 e_it = max(s_it, min(e_it, len(base)))
                 sub = base[s_it:e_it]
@@ -356,12 +363,82 @@ def plot_groups_overlay(
 
     # Integrated plotting; 'iter_decay' handled as a derived key in _plot_one_key
 
+    # Multi-mode: combined image with multiple keys → do not convert timestep x to seconds
+    multi_mode = (not separate_figs) and (len(selected_keys) > 1)
+
     def _plot_one_key(ax, key: str):
         use_log = bool(ylog)
         if use_log:
             ax.set_yscale("log")
         any_line = False
         last_x = None
+        # Special handling for iter_decay: align series to the maximum iteration count within the frame
+        if key == "iter_decay":
+            collected = []  # list of tuples (label, y_raw)
+            max_len = 0
+            frame = int(iter_decay_frame) if (iter_decay_frame is not None) else None
+            for group, label in pairs:
+                if (frame is None) or ("opt_error" not in group) or ("opt_iter" not in group):
+                    continue
+                opt_err = np.load(group["opt_error"])
+                opt_it = np.load(group["opt_iter"])  # per-timestep counts
+                if frame < 0 or frame >= len(opt_it):
+                    continue
+                start_idx = int(np.sum(opt_it[:frame]))
+                end_idx = start_idx + int(opt_it[frame])
+                if end_idx <= start_idx:
+                    continue
+                y_raw = opt_err[start_idx:end_idx]
+                if use_log:
+                    y_raw = np.clip(y_raw, 1e-16, None)
+                y_raw = np.asarray(y_raw, dtype=float)
+                collected.append((label, y_raw))
+                if y_raw.size > max_len:
+                    max_len = y_raw.size
+            if max_len == 0 or len(collected) == 0:
+                return
+            x_master = np.arange(max_len)
+            for label, y_raw in collected:
+                real_len = int(y_raw.size)
+                y_disp = y_raw.astype(float)
+                color, _, z = _style_for_label(label)
+                do_ma = bool(smooth and int(smooth) > 1)
+                do_ema = ema is not None
+                if do_ma or do_ema:
+                    y_s = _smooth_series(y_disp, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
+                    if show_raw:
+                        # Draw original unsmoothed real segment faintly
+                        ax.plot(x_master[:real_len], y_disp[:real_len], lw=0.5, color=color, alpha=0.25, ls="-", zorder=z-1)
+                    # Draw smoothed only on real segment
+                    ax.plot(x_master[:real_len], y_s[:real_len], lw=0.8, label=label, color=color, ls="-", zorder=z)
+                else:
+                    # Draw only real iterations; no padding
+                    ax.plot(x_master[:real_len], y_disp[:real_len], lw=0.9, label=label, color=color, ls="-", zorder=z)
+                any_line = True
+                last_x = x_master
+            ax.set_xlabel("Iteration")
+            ax.set_ylabel("Error (timestep {} )".format(int(iter_decay_frame) if iter_decay_frame is not None else "?"))
+            if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
+                ax.set_xlim(left=float(last_x[0]), right=float(last_x[-1]))
+            if not use_log:
+                ax.set_ylim(bottom=0)
+                yticks = ax.get_yticks()
+                ax.set_yticks([t for t in yticks if abs(t) > 1e-12])
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+            if show_grid:
+                ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
+            # Larger tick labels in multi mode
+            if multi_mode:
+                ax.tick_params(axis='x', labelsize=12)
+                ax.tick_params(axis='y', labelsize=11)
+            handles, labels_txt = ax.get_legend_handles_labels()
+            labels_txt = [_legend_text_for_label(l) for l in labels_txt]
+            leg = ax.legend(handles, labels_txt, loc="best")
+            if leg is not None:
+                leg.get_frame().set_linewidth(0.6)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            return
         # Special aggregation for avg_iter_vs_dt: group by variant and plot dt vs avg iterations
         if key == "avg_iter_vs_dt":
             variant_to_points: Dict[str, List[Tuple[float, float]]] = {}
@@ -447,12 +524,17 @@ def plot_groups_overlay(
                     continue
                 arr_full = np.load(group[key])
                 opt_iter_arr = None
+                pcg_iter_arr = None
                 if ("error" in key) and ("opt_iter" in group):
                     opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
+                if ("error" in key or key == "pcg_error") and ("pcg_iter" in group):
+                    pcg_iter_arr = np.load(group["pcg_iter"])  # per-timestep PCG iteration counts
                 arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
-                x_plot, y_plot = _slice_for_key(arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr)
+                x_plot, y_plot = _slice_for_key(
+                    arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr, pcg_iter=pcg_iter_arr
+                )
             # Convert x from timestep index to seconds for per-timestep series
-            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
+            if (not multi_mode) and key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
                 dt = _get_dt_for_group(group)
                 if dt is not None:
                     x_plot = x_plot * float(dt)
@@ -469,7 +551,7 @@ def plot_groups_overlay(
                 line = ax.plot(x_plot, y_disp, lw=0.8, label=label, color=color, ls="-", zorder=z)[0]
             any_line = True
             last_x = x_plot
-            if key in ("elapsed_time_ms", "opt_iter"):
+        if key in ("elapsed_time_ms", "opt_iter"):
                 _draw_mean_line(ax, key, (x_plot, y_disp), color=line.get_color())
         # Axis labels (move title to y-label)
         if key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
@@ -493,6 +575,9 @@ def plot_groups_overlay(
         ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
         if show_grid:
             ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
+        if multi_mode:
+            ax.tick_params(axis='x', labelsize=12)
+            ax.tick_params(axis='y', labelsize=11)
         # Unified legend labels
         handles, labels_txt = ax.get_legend_handles_labels()
         labels_txt = [_legend_text_for_label(l) for l in labels_txt]
@@ -528,7 +613,11 @@ def plot_groups_overlay(
 
     # Combined in a single image
     nrows = len(selected_keys)
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(single_col_w, max(row_h, 0.9 * nrows + 0.9)), constrained_layout=True)
+    multi_w_inch = 12.0  # ~1800 px at 150 dpi
+    multi_row_h = 2.2
+    width_inch = single_col_w if not ((not separate_figs) and (nrows > 1)) else multi_w_inch
+    row_h_eff = row_h if not ((not separate_figs) and (nrows > 1)) else multi_row_h
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, max(row_h_eff, 0.9 * nrows + 0.9)), constrained_layout=True)
     if nrows == 1:
         axes = [axes]
 
@@ -581,6 +670,27 @@ def main():
     except ValueError as e:
         print(f"--compare parse error: {e}")
         return
+
+    # Auto-expand compare pairs for avg_iter_vs_dt: allow base prefix without '-dt'
+    if args.keys is not None and ("avg_iter_vs_dt" in args.keys):
+        expanded: List[Tuple[str, str]] = []
+        for (base_prefix, variant) in compare_pairs:
+            if "-dt" in base_prefix:
+                expanded.append((base_prefix, variant))
+                continue
+            # Match all prefixes in scanned groups whose '-dt<..>' segment removed equals base_prefix
+            for cand_prefix in list(groups_by_prefix.keys()):
+                cand_no_dt = re.sub(r"-dt[0-9]*\.?[0-9]+", "", cand_prefix)
+                if cand_no_dt != base_prefix:
+                    continue
+                dt_val = _parse_dt_from_prefix(cand_prefix)
+                if args.dt_min is not None and (dt_val is None or dt_val < float(args.dt_min)):
+                    continue
+                if args.dt_max is not None and (dt_val is None or dt_val > float(args.dt_max)):
+                    continue
+                expanded.append((cand_prefix, variant))
+        if expanded:
+            compare_pairs = expanded
 
     missing: List[str] = []
     group_list: List[Dict[str, str]] = []

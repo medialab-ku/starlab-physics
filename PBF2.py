@@ -1130,7 +1130,7 @@ class PBF2Solver(SPHBase):
                 if self.density_error:
                     err = self.compute_avg_density_error(self.f)
                 else:
-                    err = dot(p, p)
+                    err = self.dot(p, p)
 
                 # Collect optimizer error per iteration
                 self.stats_opt_error.append(float(err))

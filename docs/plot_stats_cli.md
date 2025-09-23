@@ -68,6 +68,19 @@ python plot_stats.py \
 - `--dt-min`, `--dt-max` (floats)
   - `-k avg_iter_vs_dt`와 함께 사용합니다. Δt 범위를 제한합니다. 파일명에도 범위 태그가 포함됩니다.
 
+#### avg_iter_vs_dt 전용 간소화 입력
+- `-k avg_iter_vs_dt`일 때는 `-c`에 장황한 prefix를 모두 나열하지 않고, `scene-tol<tol>-opt<max>/variant` 형식의 "베이스 prefix"만 주면 됩니다.
+- 스크립트가 동일한 `scene-tol-opt` 조합의 모든 `-dt<...>` prefix를 자동으로 검색해 `--dt-min/--dt-max` 범위에 해당하는 것만 확장합니다.
+
+예시:
+```bash
+python plot_stats.py \
+  -c "pillar-tol4-opt1000/ours" "pillar-tol4-opt1000/2014Bender" \
+  -k avg_iter_vs_dt --dt-min 0.001 --dt-max 0.003 \
+  --save data/stats/pillar-avg_iter_vs_dt.png
+```
+위 명령은 내부적으로 `pillar-dt0.00100-tol4-opt1000`, `pillar-dt0.00200-tol4-opt1000`, `pillar-dt0.00300-tol4-opt1000` 등으로 자동 확장합니다.
+
 ### What gets plotted
 - Keys and titles
   - `elapsed_time_ms` → "Elapsed Time (ms)"
