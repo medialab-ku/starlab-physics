@@ -220,10 +220,8 @@ def auto_labels(compare_pairs: List[Tuple[str, str]], user_labels: List[str] = N
 #############################################
 
 def _xlabel_for_key(key: str) -> str:
-    if key in ("elapsed_time_ms", "opt_iter"):
+    if ("error" in key) or key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
         return "timestep"
-    if ("error" in key) or (key == "pcg_iter"):
-        return "iteration"
     return "index"
 
 
@@ -244,7 +242,7 @@ def _ylabel_for_key(key: str) -> str:
     mapping = {
         "elapsed_time_ms": "Elapsed time (ms)",
         "opt_iter": "Iteration count",
-        "opt_error": "||Δv||^2 Error",
+        "opt_error": "||Δv|| Error",
         "pcg_iter": "PCG iteration counts",
         "pcg_error": "PCG error",
     }
@@ -665,19 +663,70 @@ def plot_groups_overlay(
             else:
                 if key not in group:
                     continue
-                arr_full = np.load(group[key])
-                opt_iter_arr = None
-                pcg_iter_arr = None
-                if ("error" in key) and ("opt_iter" in group):
-                    opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
-                if ("error" in key or key == "pcg_error") and ("pcg_iter" in group):
-                    pcg_iter_arr = np.load(group["pcg_iter"])  # per-timestep PCG iteration counts
-                arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
-                x_plot, y_plot = _slice_for_key(
-                    arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr, pcg_iter=pcg_iter_arr
-                )
+                # For error-series, expand to per-iteration timeline with x in time (ms)
+                if "error" in key:
+                    # Select per-timestep iteration counts
+                    counts = None
+                    if key == "pcg_error" and ("pcg_iter" in group):
+                        counts = np.load(group["pcg_iter"]).astype(int)
+                    elif "opt_iter" in group:
+                        counts = np.load(group["opt_iter"]).astype(int)
+                    if counts is None:
+                        continue
+                    # Elapsed time per frame in milliseconds
+                    elapsed_ms = None
+                    if "elapsed_time_ms" in group:
+                        elapsed_ms = np.load(group["elapsed_time_ms"]).astype(float)
+                    if elapsed_ms is None:
+                        # Fallback: use dt (seconds) if available
+                        dt_guess = _get_dt_for_group(group)
+                        if dt_guess is None:
+                            continue
+                        elapsed_ms = np.full(counts.shape, float(dt_guess) * 1000.0, dtype=float)
+                    num_frames = int(counts.size)
+                    # Apply frame slicing on [start, end) at frame level
+                    s = int(start) if (start is not None and int(start) >= 0) else 0
+                    e = int(end) if (end is not None and int(end) >= 0) else num_frames
+                    s = max(0, min(s, num_frames))
+                    e = max(s, min(e, num_frames))
+                    # Global iteration offsets for slicing error array
+                    cum_counts = np.concatenate(([0], np.cumsum(counts)))
+                    s_it = int(cum_counts[s])
+                    e_it = int(cum_counts[e])
+                    err_flat = np.load(group[key]).astype(float)
+                    err_flat = err_flat[s_it:e_it]
+                    if use_log:
+                        err_flat = np.clip(err_flat, 1e-16, None)
+                    # Build per-iteration time (ms), evenly distributing per-frame elapsed time
+                    times = []
+                    t_acc = 0.0
+                    for f in range(s, e):
+                        c = int(counts[f])
+                        if c <= 0:
+                            t_acc += float(elapsed_ms[f])
+                            continue
+                        inc = float(elapsed_ms[f]) / float(c)
+                        # Place iterations at end-of-iteration times within the frame window
+                        for j in range(c):
+                            times.append(t_acc + (j + 1) * inc)
+                        t_acc += float(elapsed_ms[f])
+                    x_plot = np.asarray(times, dtype=float)
+                    y_plot = err_flat
+                else:
+                    # Non-error series: use natural series with slicing
+                    arr_full = np.load(group[key])
+                    opt_iter_arr = None
+                    pcg_iter_arr = None
+                    if ("error" in key) and ("opt_iter" in group):
+                        opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
+                    if ("error" in key or key == "pcg_error") and ("pcg_iter" in group):
+                        pcg_iter_arr = np.load(group["pcg_iter"])  # per-timestep PCG iteration counts
+                    arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
+                    x_plot, y_plot = _slice_for_key(
+                        arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr, pcg_iter=pcg_iter_arr
+                    )
             # Convert x from timestep index to seconds for per-timestep series
-            if (not multi_mode) and key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
+            if (not multi_mode) and key in ("opt_iter", "pcg_iter"):
                 dt = _get_dt_for_group(group)
                 if dt is not None:
                     x_plot = x_plot * float(dt)
@@ -700,9 +749,12 @@ def plot_groups_overlay(
         if key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
             ax.set_xlabel("time (s)")
         elif key == "iter_decay":
-            ax.set_xlabel("Iteration")
+            ax.set_xlabel("iteration")
         else:
             ax.set_xlabel(_xlabel_for_key(key))
+        # Override for error-series plotted in time (ms)
+        if key in ("opt_error", "pcg_error"):
+            ax.set_xlabel("time (ms)")
         if key == "iter_decay":
             ax.set_ylabel("Error (timestep {} )".format(int(iter_decay_frame) if iter_decay_frame is not None else "?"))
         else:
