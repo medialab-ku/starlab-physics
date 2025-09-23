@@ -122,6 +122,15 @@ def _parse_dt_from_prefix(prefix: str) -> float:
         return None
 
 
+def _parse_tol_from_prefix(prefix: str) -> int:
+    m = re.search(r"-tol(\d+)", prefix)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
 def _get_dt_for_group(group: Dict[str, str]) -> float:
     # pick any file path from the group
     for _k, p in group.items():
@@ -235,7 +244,7 @@ def _ylabel_for_key(key: str) -> str:
     mapping = {
         "elapsed_time_ms": "Elapsed time (ms)",
         "opt_iter": "Iteration count",
-        "opt_error": "Error",
+        "opt_error": "||Δv||^2 Error",
         "pcg_iter": "PCG iteration counts",
         "pcg_error": "PCG error",
     }
@@ -326,7 +335,8 @@ def plot_groups_overlay(
     dt_max: float = None,
     smooth: int = 0,
     ema: float = None,
-    show_raw: bool = True
+    show_raw: bool = True,
+    title_text: str = None
 ):
     if len(groups) == 0:
         print("No groups to plot.")
@@ -353,6 +363,44 @@ def plot_groups_overlay(
 
     pairs = _sorted_pairs(groups, labels)
 
+    # When comparing multiple items of the same base variant (e.g., two 'ours'),
+    # assign distinct colors per-label so overlays are visually separable.
+    labels_in_order = [lbl for _grp, lbl in pairs]
+
+    def _build_label_styles(labels_list: List[str]):
+        base_counts = {}
+        for lbl in labels_list:
+            b = _base_variant(lbl)
+            base_counts[b] = base_counts.get(b, 0) + 1
+        # Use a dedicated palette for 'ours' duplicates; keep zorder high
+        palette_ours = [
+            "royalblue",
+            "crimson",
+            "darkmagenta",
+            "darkcyan",
+            "goldenrod",
+            "forestgreen",
+            "slateblue",
+            "chocolate",
+        ]
+        styles = {}
+        ours_index = 0
+        for lbl in labels_list:
+            b = _base_variant(lbl)
+            is_ours_family = (b == "ours") or b.startswith("pcg-ours") or b.startswith("nopcg-ours")
+            if is_ours_family and base_counts.get(b, 0) > 1:
+                color = palette_ours[ours_index % len(palette_ours)]
+                ours_index += 1
+                styles[lbl] = (color, "-", 10)
+            else:
+                styles[lbl] = _style_for_label(lbl)
+        return styles
+
+    _label_styles = _build_label_styles(labels_in_order)
+
+    def _style_for(lbl: str):
+        return _label_styles.get(lbl, _style_for_label(lbl))
+
     # Figure sizing: single-column width for 2-column papers
     # Approx ~3.4 inches wide per subplot; adjust height per row
     # width_inch to meet 600px at 150dpi
@@ -377,10 +425,73 @@ def plot_groups_overlay(
             collected = []  # list of tuples (label, y_raw)
             max_len = 0
             frame = int(iter_decay_frame) if (iter_decay_frame is not None) else None
+
+            # Auto-select timestep: choose the frame where the difference between
+            # max error of Ours and Bender is largest. Fallback to first label if needed.
+            if frame is None:
+                # Find candidate labels for 'ours' and '2014Bender'
+                ours_idx = None
+                bender_idx = None
+                for idx, (_g, lbl) in enumerate(pairs):
+                    base = _base_variant(lbl)
+                    if ours_idx is None and (base == "ours" or base.startswith("pcg-ours") or base.startswith("nopcg-ours")):
+                        ours_idx = idx
+                    if bender_idx is None and base == "2014Bender":
+                        bender_idx = idx
+                # Compute argmax over frames when both present and data available
+                if ours_idx is not None and bender_idx is not None:
+                    g_ours = pairs[ours_idx][0]
+                    g_bndr = pairs[bender_idx][0]
+                    if ("opt_error" in g_ours and "opt_iter" in g_ours and
+                        "opt_error" in g_bndr and "opt_iter" in g_bndr):
+                        err_o = np.load(g_ours["opt_error"]).astype(float)
+                        it_o = np.load(g_ours["opt_iter"]).astype(int)
+                        err_b = np.load(g_bndr["opt_error"]).astype(float)
+                        it_b = np.load(g_bndr["opt_iter"]).astype(int)
+                        num_frames = min(it_o.size, it_b.size)
+                        best_frame = None
+                        best_diff = -1.0
+                        cum_o = np.concatenate(([0], np.cumsum(it_o)))
+                        cum_b = np.concatenate(([0], np.cumsum(it_b)))
+                        for f in range(num_frames):
+                            s_o, e_o = int(cum_o[f]), int(cum_o[f+1])
+                            s_b, e_b = int(cum_b[f]), int(cum_b[f+1])
+                            if e_o <= s_o or e_b <= s_b:
+                                continue
+                            max_o = float(np.max(err_o[s_o:e_o]))
+                            max_b = float(np.max(err_b[s_b:e_b]))
+                            diff = abs(max_o - max_b)
+                            if diff > best_diff:
+                                best_diff = diff
+                                best_frame = f
+                        if best_frame is not None:
+                            frame = int(best_frame)
+                            print(f"iter_decay: auto-selected timestep {frame} (max |Δerror_max| between Ours and Bender)")
+                # Fallback: pick frame with largest max error from the first available label
+                if frame is None and len(pairs) > 0:
+                    g0 = pairs[0][0]
+                    if ("opt_error" in g0) and ("opt_iter" in g0):
+                        err0 = np.load(g0["opt_error"]).astype(float)
+                        it0 = np.load(g0["opt_iter"]).astype(int)
+                        if it0.size > 0:
+                            cum0 = np.concatenate(([0], np.cumsum(it0)))
+                            best_frame = 0
+                            best_max = -1.0
+                            for f in range(it0.size):
+                                s0, e0 = int(cum0[f]), int(cum0[f+1])
+                                if e0 <= s0:
+                                    continue
+                                mx = float(np.max(err0[s0:e0]))
+                                if mx > best_max:
+                                    best_max = mx
+                                    best_frame = f
+                            frame = int(best_frame)
+                            print(f"iter_decay: auto-selected timestep {frame} (fallback by max error)")
+
             for group, label in pairs:
                 if (frame is None) or ("opt_error" not in group) or ("opt_iter" not in group):
                     continue
-                opt_err = np.load(group["opt_error"])
+                opt_err = np.load(group["opt_error"])  # use raw for slicing; clip later if needed
                 opt_it = np.load(group["opt_iter"])  # per-timestep counts
                 if frame < 0 or frame >= len(opt_it):
                     continue
@@ -397,11 +508,26 @@ def plot_groups_overlay(
                     max_len = y_raw.size
             if max_len == 0 or len(collected) == 0:
                 return
-            x_master = np.arange(max_len)
+            # Force integer iteration index on x-axis
+            x_master = np.arange(max_len, dtype=int)
+            # Determine tolerance threshold (10^-tol) from any participating prefix
+            tol_mag = None
+            for group, _label in pairs:
+                if len(group) == 0:
+                    continue
+                try:
+                    any_path = next(iter(group.values()))
+                except Exception:
+                    any_path = ""
+                prefix = _extract_prefix_from_fname(any_path)
+                tmag = _parse_tol_from_prefix(prefix)
+                if tmag is not None:
+                    tol_mag = tmag if tol_mag is None else min(tol_mag, tmag)
+            thr = (10.0 ** (-int(tol_mag))) if tol_mag is not None else None
             for label, y_raw in collected:
                 real_len = int(y_raw.size)
                 y_disp = y_raw.astype(float)
-                color, _, z = _style_for_label(label)
+                color, _, z = _style_for(label)
                 do_ma = bool(smooth and int(smooth) > 1)
                 do_ema = ema is not None
                 if do_ma or do_ema:
@@ -411,20 +537,37 @@ def plot_groups_overlay(
                         ax.plot(x_master[:real_len], y_disp[:real_len], lw=0.5, color=color, alpha=0.25, ls="-", zorder=z-1)
                     # Draw smoothed only on real segment
                     ax.plot(x_master[:real_len], y_s[:real_len], lw=0.8, label=label, color=color, ls="-", zorder=z)
+                    if thr is not None:
+                        arr = y_s[:real_len]
+                        idxs = np.nonzero(arr <= thr)[0]
+                        if idxs.size > 0:
+                            k = int(idxs[0])
+                            ax.axvline(k, color=color, ls="--", lw=0.8, alpha=0.7, zorder=z+1)
+                            ax.annotate(f"{k}", xy=(k, arr[k]), xytext=(k+0.5, arr[k]), color=color, fontsize=8)
                 else:
                     # Draw only real iterations; no padding
                     ax.plot(x_master[:real_len], y_disp[:real_len], lw=0.9, label=label, color=color, ls="-", zorder=z)
+                    if thr is not None:
+                        arr = y_disp[:real_len]
+                        idxs = np.nonzero(arr <= thr)[0]
+                        if idxs.size > 0:
+                            k = int(idxs[0])
+                            ax.axvline(k, color=color, ls="--", lw=0.8, alpha=0.7, zorder=z+1)
+                            ax.annotate(f"{k}", xy=(k, arr[k]), xytext=(k+0.5, arr[k]), color=color, fontsize=8)
                 any_line = True
                 last_x = x_master
-            ax.set_xlabel("Iteration")
-            ax.set_ylabel("Error (timestep {} )".format(int(iter_decay_frame) if iter_decay_frame is not None else "?"))
+            ax.set_xlabel("iteration")
+            ax.set_ylabel("error")
             if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
                 ax.set_xlim(left=float(last_x[0]), right=float(last_x[-1]))
             if not use_log:
                 ax.set_ylim(bottom=0)
                 yticks = ax.get_yticks()
                 ax.set_yticks([t for t in yticks if abs(t) > 1e-12])
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+            # Draw tolerance reference line
+            if thr is not None:
+                ax.axhline(thr, color="gray", lw=0.8, ls="--", alpha=0.7)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=8))
             if show_grid:
                 ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
             # Larger tick labels in multi mode
@@ -539,7 +682,7 @@ def plot_groups_overlay(
                 if dt is not None:
                     x_plot = x_plot * float(dt)
             y_disp = y_plot
-            color, _, z = _style_for_label(label)
+            color, _, z = _style_for(label)
             do_ma = bool(smooth and int(smooth) > 1)
             do_ema = ema is not None
             if do_ma or do_ema:
@@ -600,6 +743,8 @@ def plot_groups_overlay(
         base_no_ext, ext = os.path.splitext(base_out)
         for key in selected_keys:
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(single_col_w, row_h), constrained_layout=True)
+            if title_text:
+                fig.suptitle(title_text)
             _plot_one_key(ax, key)
             out_key = f"{base_no_ext}-{key}{ext or '.png'}"
             os.makedirs(os.path.dirname(out_key), exist_ok=True)
@@ -618,6 +763,8 @@ def plot_groups_overlay(
     width_inch = single_col_w if not ((not separate_figs) and (nrows > 1)) else multi_w_inch
     row_h_eff = row_h if not ((not separate_figs) and (nrows > 1)) else multi_row_h
     fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, max(row_h_eff, 0.9 * nrows + 0.9)), constrained_layout=True)
+    if title_text:
+        fig.suptitle(title_text)
     if nrows == 1:
         axes = [axes]
 
@@ -657,6 +804,7 @@ def main():
     parser.add_argument("--ema", type=float, default=None)
     parser.add_argument("--no-raw", action="store_true")
     parser.add_argument("--show-grid", action="store_true", help="Show grid (off by default)")
+    parser.add_argument("--title", type=str, default=None, help="Figure title (omit when not set)")
     args = parser.parse_args()
 
     groups_by_prefix = scan_groups(args.dir)
@@ -781,6 +929,7 @@ def main():
         smooth=args.smooth,
         ema=args.ema,
         show_raw=not args.no_raw,
+        title_text=args.title,
     )
 
 

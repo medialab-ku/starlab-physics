@@ -494,9 +494,9 @@ if __name__ == "__main__":
                             animator.apply_manual()
                     except Exception:
                         pass
-                # provide current global frame index to solver for per-iteration frame tagging
+                # provide current global substep index to solver for per-iteration frame tagging
                 try:
-                    solver.current_frame = int(frame_cnt)
+                    solver.current_frame = int(frame_cnt * solver.num_substep + i)
                 except Exception:
                     pass
                 # Manual continuous input handling for smooth motion (manual mode)

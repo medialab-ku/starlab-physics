@@ -1096,7 +1096,7 @@ class PBF2Solver(SPHBase):
 
                 # Count this iteration before break check so that opt_iter matches logged errors
                 opt_iter += 1
-                if (err < pow(10, -self.tol_opt)) and opt_iter > 1 or opt_iter >= self.max_iteration_opt:
+                if ((err < pow(10, -self.tol_opt)) and (opt_iter > 1)) or (opt_iter >= self.max_iteration_opt):
                     break
 
                 coef_wise_op(self.dp, self.t, self.Aii, 1)
@@ -1107,6 +1107,7 @@ class PBF2Solver(SPHBase):
                 self.add(d, d, -1.0, g)
 
             else:
+                err_log = 0.0
                 self.compute_f(self.f, self.t, self.eps)
                 self.compute_f_derivative(self.dfdt, self.t, self.eps)
                 coef_wise_mul(self.f, self.f, self.k)
@@ -1131,19 +1132,21 @@ class PBF2Solver(SPHBase):
                     err = self.compute_avg_density_error(self.f)
                 else:
                     err = self.dot(p, p)
+                err_log = self.dot(p, p)
+
 
                 # Collect optimizer error per iteration
-                self.stats_opt_error.append(float(err))
+                self.stats_opt_error.append(float(err_log))
                 try:
                     self.stats_opt_error_frame.append(int(self.current_frame))
                 except Exception:
                     self.stats_opt_error_frame.append(0)
                 if self.print_opt_error:
-                    print(f"opt error: {err}")
+                    print(f"opt error: {err_log}")
 
                 # Count this iteration before break check so that opt_iter matches logged errors
                 opt_iter += 1
-                if (err < pow(10, -self.tol_opt)) and opt_iter > 1  or opt_iter >= self.max_iteration_opt:
+                if ((err < pow(10, -self.tol_opt)) and (opt_iter > 1)) or (opt_iter >= self.max_iteration_opt):
                     break
 
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
