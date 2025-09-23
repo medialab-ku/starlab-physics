@@ -10,6 +10,7 @@ from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman", "Liberation Serif", "DejaVu Serif", "Noto Serif"]
+plt.rcParams["axes.labelsize"] = 14  # slightly larger axis label font size
 
 # File naming: <prefix>-<variant>-<key>.npy
 #   prefix  := arbitrary string (often dt<dt>-tol<tol>-opt<maxOptIter>), may include flags like '-cfl' and '-warmstart'
@@ -412,6 +413,59 @@ def plot_groups_overlay(
     # Multi-mode: combined image with multiple keys → do not convert timestep x to seconds
     multi_mode = (not separate_figs) and (len(selected_keys) > 1)
 
+    # Helper: print the frame index where the difference of per-frame MAX(opt_error)
+    # across compared variants is maximal within current [start, end). Print only once.
+    _printed_error_diff = {"done": False}
+
+    def _maybe_print_max_error_diff():
+        if _printed_error_diff["done"]:
+            return
+        per_frame_max_arrays = []
+        min_frames = None
+        for group, _label in pairs:
+            if ("opt_error" in group) and ("opt_iter" in group):
+                try:
+                    err = np.load(group["opt_error"]).astype(float)
+                    itc = np.load(group["opt_iter"]).astype(int)
+                except Exception:
+                    continue
+                if itc.size == 0:
+                    continue
+                cum = np.concatenate(([0], np.cumsum(itc)))
+                # compute max error per frame
+                frame_max = []
+                for f in range(itc.size):
+                    s_i, e_i = int(cum[f]), int(cum[f + 1])
+                    if e_i <= s_i:
+                        frame_max.append(0.0)
+                    else:
+                        frame_max.append(float(np.max(err[s_i:e_i])))
+                arr = np.asarray(frame_max, dtype=float)
+                per_frame_max_arrays.append(arr)
+                min_frames = arr.size if min_frames is None else min(min_frames, arr.size)
+        if len(per_frame_max_arrays) < 2 or not min_frames:
+            return
+        s = int(start) if (start is not None and int(start) >= 0) else 0
+        e = int(end) if (end is not None and int(end) >= 0) else min_frames
+        s = max(0, min(s, min_frames))
+        e = max(s, min(e, min_frames))
+        if e <= s:
+            return
+        best_idx = s
+        best_diff = -1.0
+        for i in range(s, e):
+            vals = [float(a[i]) for a in per_frame_max_arrays]
+            d = float(max(vals) - min(vals))
+            if d > best_diff:
+                best_diff = d
+                best_idx = i
+        print(best_idx)
+        _printed_error_diff["done"] = True
+
+    # If we're in multi-mode, print once here
+    if multi_mode:
+        _maybe_print_max_error_diff()
+
     def _plot_one_key(ax, key: str):
         use_log = bool(ylog)
         if use_log:
@@ -541,7 +595,6 @@ def plot_groups_overlay(
                         if idxs.size > 0:
                             k = int(idxs[0])
                             ax.axvline(k, color=color, ls="--", lw=0.8, alpha=0.7, zorder=z+1)
-                            ax.annotate(f"{k}", xy=(k, arr[k]), xytext=(k+0.5, arr[k]), color=color, fontsize=8)
                 else:
                     # Draw only real iterations; no padding
                     ax.plot(x_master[:real_len], y_disp[:real_len], lw=0.9, label=label, color=color, ls="-", zorder=z)
@@ -551,11 +604,10 @@ def plot_groups_overlay(
                         if idxs.size > 0:
                             k = int(idxs[0])
                             ax.axvline(k, color=color, ls="--", lw=0.8, alpha=0.7, zorder=z+1)
-                            ax.annotate(f"{k}", xy=(k, arr[k]), xytext=(k+0.5, arr[k]), color=color, fontsize=8)
                 any_line = True
                 last_x = x_master
-            ax.set_xlabel("iteration")
-            ax.set_ylabel("error")
+            ax.set_xlabel("Iteration")
+            ax.set_ylabel("||Δv|| Error")
             if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
                 ax.set_xlim(left=float(last_x[0]), right=float(last_x[-1]))
             if not use_log:
@@ -663,8 +715,11 @@ def plot_groups_overlay(
             else:
                 if key not in group:
                     continue
-                # For error-series, expand to per-iteration timeline with x in time (ms)
+                # For error-series, expand to per-iteration timeline with x in time (s)
                 if "error" in key:
+                    # When plotting opt_error as its own key, also print max per-frame error-max difference once
+                    if key == "opt_error" and not multi_mode:
+                        _maybe_print_max_error_diff()
                     # Select per-timestep iteration counts
                     counts = None
                     if key == "pcg_error" and ("pcg_iter" in group):
@@ -710,7 +765,7 @@ def plot_groups_overlay(
                         for j in range(c):
                             times.append(t_acc + (j + 1) * inc)
                         t_acc += float(elapsed_ms[f])
-                    x_plot = np.asarray(times, dtype=float)
+                    x_plot = np.asarray(times, dtype=float) / 1000.0  # convert ms -> s
                     y_plot = err_flat
                 else:
                     # Non-error series: use natural series with slicing
@@ -752,9 +807,9 @@ def plot_groups_overlay(
             ax.set_xlabel("iteration")
         else:
             ax.set_xlabel(_xlabel_for_key(key))
-        # Override for error-series plotted in time (ms)
+        # Override for error-series plotted in time (s)
         if key in ("opt_error", "pcg_error"):
-            ax.set_xlabel("time (ms)")
+            ax.set_xlabel("time (s)")
         if key == "iter_decay":
             ax.set_ylabel("Error (timestep {} )".format(int(iter_decay_frame) if iter_decay_frame is not None else "?"))
         else:
