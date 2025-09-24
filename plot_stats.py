@@ -421,46 +421,42 @@ def plot_groups_overlay(
     def _maybe_print_max_error_diff():
         if _printed_error_diff["done"]:
             return
-        per_frame_max_arrays = []
+        per_frame_max_err_arrays = []
+        per_frame_iter_arrays = []
         min_frames = None
         for group, _label in pairs:
             if ("opt_error" in group) and ("opt_iter" in group):
                 try:
                     err = np.load(group["opt_error"]).astype(float)
                     itc = np.load(group["opt_iter"]).astype(int)
+                    per_frame_iter_arrays.append(itc)
                 except Exception:
                     continue
                 if itc.size == 0:
                     continue
                 cum = np.concatenate(([0], np.cumsum(itc)))
-                # compute max error per frame
-                frame_max = []
-                for f in range(itc.size):
-                    s_i, e_i = int(cum[f]), int(cum[f + 1])
-                    if e_i <= s_i:
-                        frame_max.append(0.0)
-                    else:
-                        frame_max.append(float(np.max(err[s_i:e_i])))
+                frame_max = [float(np.max(err[int(cum[f]):int(cum[f+1])])) if int(cum[f+1]) > int(cum[f]) else 0.0 for f in range(itc.size)]
                 arr = np.asarray(frame_max, dtype=float)
-                per_frame_max_arrays.append(arr)
+                per_frame_max_err_arrays.append(arr)
                 min_frames = arr.size if min_frames is None else min(min_frames, arr.size)
-        if len(per_frame_max_arrays) < 2 or not min_frames:
-            return
-        s = int(start) if (start is not None and int(start) >= 0) else 0
-        e = int(end) if (end is not None and int(end) >= 0) else min_frames
-        s = max(0, min(s, min_frames))
-        e = max(s, min(e, min_frames))
-        if e <= s:
-            return
-        best_idx = s
-        best_diff = -1.0
-        for i in range(s, e):
-            vals = [float(a[i]) for a in per_frame_max_arrays]
-            d = float(max(vals) - min(vals))
-            if d > best_diff:
-                best_diff = d
-                best_idx = i
-        print(best_idx)
+
+        if min_frames and len(per_frame_max_err_arrays) >= 2:
+            s = int(start) if (start is not None and int(start) >= 0) else 0
+            e = int(end) if (end is not None and int(end) >= 0) else min_frames
+            s, e = max(0, min(s, min_frames)), max(s, min(e, min_frames))
+
+            if e > s:
+                err_diffs = [abs(v[i] - per_frame_max_err_arrays[0][i]) for v in per_frame_max_err_arrays[1:] for i in range(s, e)]
+                if err_diffs:
+                    best_err_idx = s + np.argmax(err_diffs)
+                    print(f"Frame with max error difference: {best_err_idx}")
+
+                if len(per_frame_iter_arrays) >= 2:
+                    iter_diffs = [abs(v[i] - per_frame_iter_arrays[0][i]) for v in per_frame_iter_arrays[1:] for i in range(s, e)]
+                    if iter_diffs:
+                        best_iter_idx = s + np.argmax(iter_diffs)
+                        print(f"Frame with max iteration count difference: {best_iter_idx}")
+        
         _printed_error_diff["done"] = True
 
     # If we're in multi-mode, print once here
@@ -609,6 +605,7 @@ def plot_groups_overlay(
                 any_line = True
                 last_x = x_master
             ax.set_xlabel("Iteration")
+            ax.set_ylabel(r"$\|$Δv$\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
 
             if any_line:
                 ax.margins(x=0)
@@ -635,7 +632,7 @@ def plot_groups_overlay(
             labels_txt = [_legend_text_for_label(l) for l in labels_txt]
             leg = ax.legend(handles, labels_txt, loc="best")
             if leg is not None:
-                leg.get_frame().set_linewidth(0.6)
+                leg.get_frame().set_linewidth(0.8)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             return
@@ -819,23 +816,18 @@ def plot_groups_overlay(
                 if global_x_max is None or x_plot[-1] > global_x_max:
                     global_x_max = x_plot[-1]
         
-        # Axis labels (move title to y-label)
-        if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error"):
-            ax.set_xlabel("time (s)")
-        elif key == "iter_decay":
-            ax.set_xlabel("iteration")
-        else:
-            ax.set_xlabel(_xlabel_for_key(key))
+        # Axis labels for keys other than iter_decay and avg_iter_vs_dt
+        if key not in ("iter_decay", "avg_iter_vs_dt"):
+            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error"):
+                ax.set_xlabel("time (s)")
+            else:
+                ax.set_xlabel(_xlabel_for_key(key))
 
-        ylabel_kwargs = {}
-        if key not in ("opt_iter", "pcg_iter", "elapsed_time_ms"):
-             ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
-        
-        if key == "iter_decay":
-            ax.set_ylabel("$\|$Δv$\|^2$", **ylabel_kwargs)
-        else:
+            ylabel_kwargs = {}
+            if key not in ("opt_iter", "pcg_iter", "elapsed_time_ms"):
+                ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
             ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
-
+        
         # Align x-range to plotted data only
         if any_line and global_x_min is not None and global_x_max is not None:
             ax.set_xlim(left=float(global_x_min), right=float(global_x_max))
@@ -895,12 +887,13 @@ def plot_groups_overlay(
             )
         base_no_ext, ext = os.path.splitext(base_out)
         for key in selected_keys:
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(single_col_w, row_h), constrained_layout=True)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(single_col_w, row_h), constrained_layout=False)
             if title_text:
                 fig.suptitle(title_text)
             _plot_one_key(ax, key)
             out_key = f"{base_no_ext}-{key}{ext or '.png'}"
             os.makedirs(os.path.dirname(out_key), exist_ok=True)
+            fig.tight_layout(pad=0.3)
             fig.savefig(out_key, dpi=150)
             print(f"Saved figure to {out_key}")
             if show:
@@ -915,7 +908,7 @@ def plot_groups_overlay(
     multi_row_h = 2.2
     width_inch = single_col_w if not ((not separate_figs) and (nrows > 1)) else multi_w_inch
     row_h_eff = row_h if not ((not separate_figs) and (nrows > 1)) else multi_row_h
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, max(row_h_eff, 0.9 * nrows + 0.9)), constrained_layout=True)
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, max(row_h_eff, 0.9 * nrows + 0.9)), constrained_layout=False)
     if title_text:
         fig.suptitle(title_text)
     if nrows == 1:
