@@ -11,6 +11,7 @@ from matplotlib.ticker import MaxNLocator, FuncFormatter
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman", "Liberation Serif", "DejaVu Serif", "Noto Serif"]
 plt.rcParams["axes.labelsize"] = 14  # slightly larger axis label font size
+plt.rcParams["mathtext.fontset"] = "dejavuserif"
 
 # File naming: <prefix>-<variant>-<key>.npy
 #   prefix  := arbitrary string (often dt<dt>-tol<tol>-opt<maxOptIter>), may include flags like '-cfl' and '-warmstart'
@@ -243,7 +244,7 @@ def _ylabel_for_key(key: str) -> str:
     mapping = {
         "elapsed_time_ms": "Elapsed time (ms)",
         "opt_iter": "Iteration count",
-        "opt_error": "||Δv|| Error",
+        "opt_error": r"$\|$Δv$\|^2$",
         "pcg_iter": "PCG iteration counts",
         "pcg_error": "PCG error",
     }
@@ -471,7 +472,8 @@ def plot_groups_overlay(
         if use_log:
             ax.set_yscale("log")
         any_line = False
-        last_x = None
+        global_x_min, global_x_max = None, None
+
         # Special handling for iter_decay: align series to the maximum iteration count within the frame
         if key == "iter_decay":
             collected = []  # list of tuples (label, y_raw)
@@ -607,9 +609,14 @@ def plot_groups_overlay(
                 any_line = True
                 last_x = x_master
             ax.set_xlabel("Iteration")
-            ax.set_ylabel("||Δv|| Error")
-            if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
-                ax.set_xlim(left=float(last_x[0]), right=float(last_x[-1]))
+
+            if any_line:
+                ax.margins(x=0)
+                if global_x_min is not None and global_x_max is not None:
+                    ax.set_xlim(left=0, right=float(global_x_max))
+                else:
+                    ax.set_xlim(left=0)
+
             if not use_log:
                 ax.set_ylim(bottom=0)
                 yticks = ax.get_yticks()
@@ -666,21 +673,20 @@ def plot_groups_overlay(
                     continue
                 color, _, z = _style_for_label(variant)
                 label_txt = _legend_text_for_label(variant)
-                ax.plot(xs, ys, lw=0.8, label=label_txt, color=color, ls="-", zorder=z)
+                ax.plot(xs, ys, lw=1.0, label=label_txt, color=color, ls="-", zorder=z)
                 any_line = True
-                last_x = xs
+                if xs.size > 0:
+                    if global_x_min is None or xs[0] < global_x_min:
+                        global_x_min = xs[0]
+                    if global_x_max is None or xs[-1] > global_x_max:
+                        global_x_max = xs[-1]
+
             # Axis labels for this special key
             ax.set_xlabel("Δt")
             ax.set_ylabel("avg. iterations")
             # Align x-range
-            if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
-                left = float(last_x.min())
-                right = float(last_x.max())
-                if dt_min is not None:
-                    left = float(dt_min)
-                if dt_max is not None:
-                    right = float(dt_max)
-                ax.set_xlim(left=left, right=right)
+            if any_line and global_x_min is not None and global_x_max is not None:
+                ax.set_xlim(left=float(global_x_min), right=float(global_x_max))
             if not use_log:
                 ax.set_ylim(bottom=0)
                 yticks = ax.get_yticks()
@@ -698,131 +704,171 @@ def plot_groups_overlay(
             return
         for group, label in pairs:
             if key == "iter_decay":
-                # Requires iter_decay_frame and presence of opt_error + opt_iter
-                if (iter_decay_frame is None) or ("opt_error" not in group) or ("opt_iter" not in group):
+                # This key is handled above as a special case
+                continue
+            
+            x_plot, y_plot = None, None
+
+            if key not in group:
+                continue
+            
+            if key == 'opt_error':
+                # Plot the LAST error per frame on a logical time axis.
+                if 'opt_iter' not in group:
                     continue
-                opt_err = np.load(group["opt_error"])
-                opt_it = np.load(group["opt_iter"])  # per-timestep counts
-                frame = int(iter_decay_frame)
-                if frame < 0 or frame >= len(opt_it):
+                counts = np.load(group['opt_iter']).astype(int)
+                err_flat = np.load(group[key]).astype(float)
+                num_frames = int(counts.size)
+
+                y_per_frame = np.full(num_frames, np.nan, dtype=float)
+                cum_counts = np.concatenate(([0], np.cumsum(counts)))
+                
+                for f in range(num_frames):
+                    s_it = int(cum_counts[f])
+                    e_it = int(cum_counts[f+1])
+                    if e_it > s_it and e_it <= len(err_flat):
+                        y_per_frame[f] = err_flat[e_it - 1]
+
+                s = int(start) if start is not None and int(start) >= 0 else 0
+                e = int(end) if end is not None and int(end) >= 0 else num_frames
+                s = max(0, min(s, num_frames))
+                e = max(s, min(e, num_frames))
+                
+                y_plot = y_per_frame[s:e]
+                frame_indices = np.arange(s, e)
+                
+                dt_s = _get_dt_for_group(group)
+                if dt_s is None: continue
+                x_plot = frame_indices * dt_s
+            
+            elif "error" in key:
+                # For other errors (e.g., pcg_error), expand all iterations to a logical time axis.
+                counts_key = "pcg_iter" if key == "pcg_error" else "opt_iter"
+                if counts_key not in group:
                     continue
-                start_idx = int(np.sum(opt_it[:frame]))
-                end_idx = start_idx + int(opt_it[frame])
-                if end_idx <= start_idx:
+                counts = np.load(group[counts_key]).astype(int)
+
+                dt_s = _get_dt_for_group(group)
+                if dt_s is None:
+                    print(f"Warning: could not determine dt for '{label}', skipping error plot.")
                     continue
-                y_plot = np.clip(opt_err[start_idx:end_idx], 1e-16, None) if use_log else opt_err[start_idx:end_idx]
-                x_plot = np.arange(len(y_plot))
+                elapsed_ms_per_frame = dt_s * 1000.0
+
+                num_frames = int(counts.size)
+                s = int(start) if (start is not None and int(start) >= 0) else 0
+                e = int(end) if (end is not None and int(end) >= 0) else num_frames
+                s = max(0, min(s, num_frames))
+                e = max(s, min(e, num_frames))
+                
+                cum_counts = np.concatenate(([0], np.cumsum(counts)))
+                s_it = int(cum_counts[s])
+                e_it = int(cum_counts[e])
+                
+                err_flat_full = np.load(group[key]).astype(float)
+                err_flat = err_flat_full[s_it:e_it]
+                
+                times_ms = []
+                t0_ms = s * elapsed_ms_per_frame
+                t_acc_frame = t0_ms
+                for f_idx in range(s, e):
+                    iter_count = int(counts[f_idx])
+                    if iter_count > 0:
+                        inc = elapsed_ms_per_frame / iter_count
+                        for j in range(iter_count):
+                            times_ms.append(t_acc_frame + (j + 1) * inc)
+                    t_acc_frame += elapsed_ms_per_frame
+                x_plot = np.asarray(times_ms, dtype=float) / 1000.0
+                y_plot = err_flat
             else:
-                if key not in group:
-                    continue
-                # For error-series, expand to per-iteration timeline with x in time (s)
-                if "error" in key:
-                    # When plotting opt_error as its own key, also print max per-frame error-max difference once
-                    if key == "opt_error" and not multi_mode:
-                        _maybe_print_max_error_diff()
-                    # Select per-timestep iteration counts
-                    counts = None
-                    if key == "pcg_error" and ("pcg_iter" in group):
-                        counts = np.load(group["pcg_iter"]).astype(int)
-                    elif "opt_iter" in group:
-                        counts = np.load(group["opt_iter"]).astype(int)
-                    if counts is None:
-                        continue
-                    # Elapsed time per frame in milliseconds
-                    elapsed_ms = None
-                    if "elapsed_time_ms" in group:
-                        elapsed_ms = np.load(group["elapsed_time_ms"]).astype(float)
-                    if elapsed_ms is None:
-                        # Fallback: use dt (seconds) if available
-                        dt_guess = _get_dt_for_group(group)
-                        if dt_guess is None:
-                            continue
-                        elapsed_ms = np.full(counts.shape, float(dt_guess) * 1000.0, dtype=float)
-                    num_frames = int(counts.size)
-                    # Apply frame slicing on [start, end) at frame level
-                    s = int(start) if (start is not None and int(start) >= 0) else 0
-                    e = int(end) if (end is not None and int(end) >= 0) else num_frames
-                    s = max(0, min(s, num_frames))
-                    e = max(s, min(e, num_frames))
-                    # Global iteration offsets for slicing error array
-                    cum_counts = np.concatenate(([0], np.cumsum(counts)))
-                    s_it = int(cum_counts[s])
-                    e_it = int(cum_counts[e])
-                    err_flat = np.load(group[key]).astype(float)
-                    err_flat = err_flat[s_it:e_it]
-                    if use_log:
-                        err_flat = np.clip(err_flat, 1e-16, None)
-                    # Build per-iteration time (ms), evenly distributing per-frame elapsed time
-                    times = []
-                    t_acc = 0.0
-                    for f in range(s, e):
-                        c = int(counts[f])
-                        if c <= 0:
-                            t_acc += float(elapsed_ms[f])
-                            continue
-                        inc = float(elapsed_ms[f]) / float(c)
-                        # Place iterations at end-of-iteration times within the frame window
-                        for j in range(c):
-                            times.append(t_acc + (j + 1) * inc)
-                        t_acc += float(elapsed_ms[f])
-                    x_plot = np.asarray(times, dtype=float) / 1000.0  # convert ms -> s
-                    y_plot = err_flat
-                else:
-                    # Non-error series: use natural series with slicing
-                    arr_full = np.load(group[key])
-                    opt_iter_arr = None
-                    pcg_iter_arr = None
-                    if ("error" in key) and ("opt_iter" in group):
-                        opt_iter_arr = np.load(group["opt_iter"])  # per-timestep counts
-                    if ("error" in key or key == "pcg_error") and ("pcg_iter" in group):
-                        pcg_iter_arr = np.load(group["pcg_iter"])  # per-timestep PCG iteration counts
-                    arr_plot = np.clip(arr_full, 1e-16, None) if use_log else arr_full
-                    x_plot, y_plot = _slice_for_key(
-                        arr_plot, key, start=start, end=end, opt_iter=opt_iter_arr, pcg_iter=pcg_iter_arr
-                    )
-            # Convert x from timestep index to seconds for per-timestep series
-            if (not multi_mode) and key in ("opt_iter", "pcg_iter"):
+                # Non-error series: use natural series with slicing, then convert to logical time
+                arr_full = np.load(group[key])
+                x_idx, y_plot = _slice_for_key(
+                    arr_full, key, start=start, end=end
+                )
                 dt = _get_dt_for_group(group)
                 if dt is not None:
-                    x_plot = x_plot * float(dt)
+                    x_plot = x_idx * float(dt)
+                else:
+                    x_plot = x_idx
+            
+            if use_log and y_plot is not None:
+                y_plot = np.where(np.isnan(y_plot), np.nan, np.clip(y_plot, 1e-16, None))
+
             y_disp = y_plot
             color, _, z = _style_for(label)
             do_ma = bool(smooth and int(smooth) > 1)
             do_ema = ema is not None
+            
+            if x_plot is None or y_plot is None: continue
+
             if do_ma or do_ema:
                 y_s = _smooth_series(y_disp, ma_window=int(smooth) if do_ma else 0, ema_alpha=ema if do_ema else None)
                 if show_raw:
-                    ax.plot(x_plot, y_disp, lw=0.5, color=color, alpha=0.25, ls="-", zorder=z-1)
-                line = ax.plot(x_plot, y_s, lw=0.8, label=label, color=color, ls="-", zorder=z)[0]
+                    ax.plot(x_plot, y_disp, lw=0.6, color=color, alpha=0.25, ls="-", zorder=z-1)
+                line = ax.plot(x_plot, y_s, lw=1.0, label=label, color=color, ls="-", zorder=z)[0]
             else:
-                line = ax.plot(x_plot, y_disp, lw=0.8, label=label, color=color, ls="-", zorder=z)[0]
-            any_line = True
-            last_x = x_plot
-        if key in ("elapsed_time_ms", "opt_iter"):
+                line = ax.plot(x_plot, y_disp, lw=1.0, label=label, color=color, ls="-", zorder=z)[0]
+
+            if key in ("elapsed_time_ms", "opt_iter"):
                 _draw_mean_line(ax, key, (x_plot, y_disp), color=line.get_color())
+            
+            any_line = True
+            if x_plot.size > 0:
+                if global_x_min is None or x_plot[0] < global_x_min:
+                    global_x_min = x_plot[0]
+                if global_x_max is None or x_plot[-1] > global_x_max:
+                    global_x_max = x_plot[-1]
+        
         # Axis labels (move title to y-label)
-        if key in ("elapsed_time_ms", "opt_iter", "pcg_iter"):
+        if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error"):
             ax.set_xlabel("time (s)")
         elif key == "iter_decay":
             ax.set_xlabel("iteration")
         else:
             ax.set_xlabel(_xlabel_for_key(key))
-        # Override for error-series plotted in time (s)
-        if key in ("opt_error", "pcg_error"):
-            ax.set_xlabel("time (s)")
+
+        ylabel_kwargs = {}
+        if key not in ("opt_iter", "pcg_iter", "elapsed_time_ms"):
+             ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
+        
         if key == "iter_decay":
-            ax.set_ylabel("Error (timestep {} )".format(int(iter_decay_frame) if iter_decay_frame is not None else "?"))
+            ax.set_ylabel("$\|$Δv$\|^2$", **ylabel_kwargs)
         else:
-            ax.set_ylabel(_ylabel_for_key(key))
-        # Align x-range to plotted data only (respect start/end slicing when seconds are applied above)
-        if any_line and (last_x is not None) and (getattr(last_x, "size", 0) > 0):
-            ax.set_xlim(left=float(last_x[0]), right=float(last_x[-1]))
+            ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
+
+        # Align x-range to plotted data only
+        if any_line and global_x_min is not None and global_x_max is not None:
+            ax.set_xlim(left=float(global_x_min), right=float(global_x_max))
+        
         if not use_log:
-            ax.set_ylim(bottom=0)
-            # show only x-axis zero at origin: hide y-axis zero tick if present
-            yticks = ax.get_yticks()
-            ax.set_yticks([t for t in yticks if abs(t) > 1e-12])
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+            if "error" in key and any_line:
+                ax.margins(y=0.03)
+                y_min, _ = ax.get_ylim()
+                if y_min >= 0:
+                    ax.set_ylim(bottom=0)
+                
+                ticks = [t for t in ax.get_yticks() if t >= -1e-9]
+                if 0.0 not in ticks:
+                    ticks.append(0.0)
+                ax.set_yticks(sorted(list(set(ticks))))
+            else:
+                ax.set_ylim(bottom=0)
+
+        # X-axis tick formatting
+        try:
+            label_lower = ax.get_xlabel().strip().lower()
+        except Exception:
+            label_lower = ""
+        if label_lower == "time (s)":
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=8))
+            # Fallback to float ticks if integer ticks are too sparse
+            x0, x1 = ax.get_xlim()
+            int_ticks = [t for t in ax.get_xticks() if x0 <= t <= x1 and float(t).is_integer()]
+            if len(int_ticks) <= 2:
+                ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+        else:
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+
         if show_grid:
             ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
         if multi_mode:
@@ -833,7 +879,7 @@ def plot_groups_overlay(
         labels_txt = [_legend_text_for_label(l) for l in labels_txt]
         leg = ax.legend(handles, labels_txt, loc="best")
         if leg is not None:
-            leg.get_frame().set_linewidth(0.6)
+            leg.get_frame().set_linewidth(0.8)
         # remove top/right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -877,6 +923,8 @@ def plot_groups_overlay(
 
     for ax, key in zip(axes, selected_keys):
         _plot_one_key(ax, key)
+
+    fig.tight_layout(rect=[0, 0, 1, 0.96] if title_text else None)
 
     if out_path:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -1042,5 +1090,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
