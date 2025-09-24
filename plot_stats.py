@@ -244,7 +244,7 @@ def _ylabel_for_key(key: str) -> str:
     mapping = {
         "elapsed_time_ms": "Elapsed time (ms)",
         "opt_iter": "Iteration count",
-        "opt_error": r"$\|$Δv$\|^2$",
+        "opt_error": r"$\|$Δ$\mathbf{v}\|^2$",
         "pcg_iter": "PCG iteration counts",
         "pcg_error": "PCG error",
     }
@@ -605,7 +605,7 @@ def plot_groups_overlay(
                 any_line = True
                 last_x = x_master
             ax.set_xlabel("Iteration")
-            ax.set_ylabel(r"$\|$Δv$\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
+            ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
 
             if any_line:
                 ax.margins(x=0)
@@ -826,7 +826,10 @@ def plot_groups_overlay(
             ylabel_kwargs = {}
             if key not in ("opt_iter", "pcg_iter", "elapsed_time_ms"):
                 ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
-            ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
+            if key == "iter_decay":
+                ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", **ylabel_kwargs)
+            else:
+                ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
         
         # Align x-range to plotted data only
         if any_line and global_x_min is not None and global_x_max is not None:
@@ -893,7 +896,7 @@ def plot_groups_overlay(
             _plot_one_key(ax, key)
             out_key = f"{base_no_ext}-{key}{ext or '.png'}"
             os.makedirs(os.path.dirname(out_key), exist_ok=True)
-            fig.tight_layout(pad=0.3)
+            fig.tight_layout()
             fig.savefig(out_key, dpi=150)
             print(f"Saved figure to {out_key}")
             if show:
