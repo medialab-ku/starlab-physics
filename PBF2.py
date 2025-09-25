@@ -32,10 +32,11 @@ class PBF2Solver(SPHBase):
         self.print_info = True
         
         self.print_pcg_iter  = False
-        self.print_opt_iter  = False
+        self.print_opt_iter  = True
         self.print_pcg_error = False
         self.print_opt_error = False 
-        self.print_elapsed_time = True
+        self.print_elapsed_time = False
+        self.print_kinetic_energy = False
 
         self.volume_constraint = False
         self.tol_opt = 4
@@ -44,7 +45,7 @@ class PBF2Solver(SPHBase):
         self.cfl = False
         self.max_iteration_opt = 1000
         self.max_iteration_pcg = 1000
-        self.tol_pcg = 5
+        self.tol_pcg = 10
 
         # Stats containers
         # These are plain Python lists to minimize Taichi interaction overhead.
@@ -55,6 +56,7 @@ class PBF2Solver(SPHBase):
         self.stats_opt_error = []
         self.stats_pcg_iter = []
         self.stats_pcg_error = []
+        self.stats_kinetic_energy = []
         # Per-iteration → timestep mapping (global substep index)
         self.stats_opt_error_frame = []
         self.stats_pcg_error_frame = []
@@ -123,6 +125,7 @@ class PBF2Solver(SPHBase):
         self.stats_pcg_error.clear()
         self.stats_opt_error_frame.clear()
         self.stats_pcg_error_frame.clear()
+        self.stats_kinetic_energy.clear()
 
     def get_stats_numpy(self):
         """Return stats as numpy arrays. Keys:
@@ -142,6 +145,7 @@ class PBF2Solver(SPHBase):
             "pcg_iter": np.asarray(self.stats_pcg_iter, dtype=np.int32),
             "pcg_error": np.asarray(self.stats_pcg_error, dtype=np.float64),
             "pcg_error_frame": np.asarray(self.stats_pcg_error_frame, dtype=np.int32),
+            "kinetic_energy": np.asarray(self.stats_kinetic_energy, dtype=np.float64)
         }
 
     @ti.kernel
@@ -249,7 +253,8 @@ class PBF2Solver(SPHBase):
             acc = ti.Vector(self.g)
             self.ps.acceleration[p_i] = acc
 
-            if self.ps.material[p_i] == self.ps.material_fluid:
+            # Stabilize freshly emitted particles by skipping strong neighbor forces for a few substeps
+            if self.ps.material[p_i] == self.ps.material_fluid and self.ps.age[p_i] >= 2:
                 self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
                     # Write back the accumulated non-pressure forces into acceleration
                 self.ps.acceleration[p_i] = acc
@@ -1079,28 +1084,33 @@ class PBF2Solver(SPHBase):
 
         opt_iter = 0
         for _ in range(self.max_iteration_opt):
+            
             self.compute_J_x(Jd, d)
             self.add(self.t, Jd, 1.0, c)
-
             if self.iisph:
+                self.f.copy_from(self.t)
+                max(self.f)
+                err = self.compute_avg_density_error(self.f)
 
-                err = self.compute_avg_density_error(self.t)
-                # Per-iteration optimizer error logging (IISPH branch)
-                self.stats_opt_error.append(float(err))
+                err_log = self.dot(p, p)
+                # Collect optimizer error per iteration
+                self.stats_opt_error.append(float(err_log))
                 try:
                     self.stats_opt_error_frame.append(int(self.current_frame))
                 except Exception:
                     self.stats_opt_error_frame.append(0)
                 if self.print_opt_error:
-                    print(f"opt error: {err}")
+                    print(f"opt error: {err_log}")
 
                 # Count this iteration before break check so that opt_iter matches logged errors
                 opt_iter += 1
                 if ((err < pow(10, -self.tol_opt)) and (opt_iter > 1)) or (opt_iter >= self.max_iteration_opt):
                     break
 
-                coef_wise_op(self.dp, self.t, self.Aii, 1)
-                self.add(self.p, self.p, self.omega, self.dp)
+            
+
+                coef_wise_div(self.dp, self.t, self.Aii)
+                self.add(self.p, self.p, 0.5, self.dp)
                 max(self.p)
                 self.compute_J_tr_x(g, self.p)
                 coef_wise_div(g, g, self.ps.m)
@@ -1109,6 +1119,9 @@ class PBF2Solver(SPHBase):
             else:
                 err_log = 0.0
                 self.compute_f(self.f, self.t, self.eps)
+
+                # self.f.copy_from(self.t)
+                # max(self.f)
                 self.compute_f_derivative(self.dfdt, self.t, self.eps)
                 coef_wise_mul(self.f, self.f, self.k)
                 self.compute_J_tr_x(g, self.f)
@@ -1146,9 +1159,10 @@ class PBF2Solver(SPHBase):
 
                 # Count this iteration before break check so that opt_iter matches logged errors
                 opt_iter += 1
-                if ((err < pow(10, -self.tol_opt)) and (opt_iter > 1)) or (opt_iter >= self.max_iteration_opt):
+                if ((err < pow(10, -self.tol_opt)) and (opt_iter > 2)) or (opt_iter >= self.max_iteration_opt):
                     break
 
+        
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         # Collect elapsed time per outer solve
         self.stats_elapsed_ms.append(float(elapsed_ms))
@@ -1166,6 +1180,7 @@ class PBF2Solver(SPHBase):
             print(f"opt iter: {opt_iter}")
 
 
+
         #x_n+1
         self.add(self.ps.x, self.ps.x, 1.0, self.dx)
         # self.enforce_boundary_3D(self.ps.material_fluid)
@@ -1173,6 +1188,13 @@ class PBF2Solver(SPHBase):
         #v_n+1_tmp
         self.update_velocities(self.dt)
         self.ps.x.copy_from(self.ps.x_old)
+
+        self.v_tmp.copy_from(self.ps.v)
+        coef_wise_mul(self.v_tmp, self.v_tmp, self.ps.m)
+        kinetic_energy = 0.5 * self.dot(self.ps.v, self.v_tmp)
+        if self.print_kinetic_energy:
+            print(f"kinetic energy: {kinetic_energy}")
+        self.stats_kinetic_energy.append(float(kinetic_energy))
 
         if self.ps.num_rigid_bodies > 0:
             self.rigid_compute_cm_and_vcm()

@@ -2,7 +2,7 @@
 	"Configuration": 
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [3.0, 5.0, 9.0],
+        "domainEnd": [5.0, 8.0, 9.0],
 		"particleRadius": 0.02,
 		"numSubstepping": 1,
 		"density0": 1000, 
@@ -21,10 +21,10 @@
 		{
 			"objectId": 1,
 			"geometryFile": "./data/models/damBreakBox.obj",
-			"translation": [0.2, 1.2, 0.2],
+			"translation": [0.2, 1.0, 0.2],
 			"rotationAxis": [0, 1, 0],
 			"rotationAngle": 0,
-			"scale": [1.25, 1.2, 0.8],
+			"scale": [1.8, 1.7, 1.2],
 			"velocity": [0.0, 0.0, 0.0],
 			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
@@ -33,10 +33,10 @@
         {
             "objectId": 2,
             "geometryFile": "./data/models/rigid_cube.obj",
-            "translation": [1.2, 4.3, 4.4],
+            "translation": [1.8, 5.3, 4.3],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [6.0, 1.0, 21.0],
+            "scale": [9.0, 1.0, 20.0],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
@@ -47,8 +47,8 @@
 		{
             "objectId": 0,
 			"start": [0.4, 0.4, 0.6],
-			"end": [2.0, 2.5, 2.5],
-			"translation": [0.0, 1.0, 0.0],
+			"end": [2.8, 2.8, 2.5],
+			"translation": [0.0, 0.8, 0.2],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, -1.0, 0.0],
 			"density": 1000.0,

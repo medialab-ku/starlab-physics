@@ -2,8 +2,8 @@
 	"Configuration":
 	{
         "domainStart": [0.0, 0.0, 0.0],
-        "domainEnd": [4.2, 4.2, 7.0],
-		"particleRadius": 0.02,
+        "domainEnd": [4.2, 4.2, 12.0],
+		"particleRadius": 0.03,
 		"numSubstepping": 1,
 		"density0": 1000,
 		"simulationMethod": 2,
@@ -23,8 +23,8 @@
 		{
             "objectId": 0,
 			"start": [0.5, 0.2, 0.6],
-			"end": [3.0, 0.8, 3.0],
-			"translation": [0.2, 0.2, 3.0],
+			"end": [3.0, 1.8, 3.0],
+			"translation": [0.2, 0.2, 0.2],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
 			"density": 1000.0,
@@ -36,10 +36,10 @@
 		{
 			"objectId": 1,
 			"geometryFile": "./data/models/movingBoundaryBox.obj",
-			"translation": [0.3, 0.1, 0.1],
+			"translation": [0.3, 0.1, 0.2],
 			"rotationAxis": [0, 1, 0],
 			"rotationAngle": 0,
-			"scale": [2.0, 4.0, 2.0],
+			"scale": [2.0, 4.0, 3.0],
 			"velocity": [0.0, 0.0, 0.0],
 			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
@@ -48,7 +48,7 @@
 		{
 			"objectId": 2,
 			"geometryFile": "./data/models/movingBoundaryWall.obj",
-			"translation": [0.3, 0.1, 0.3],
+			"translation": [0.3, 0.1, 0.4],
 			"rotationAxis": [0, 1, 0],
 			"rotationAngle": 0,
 			"scale": [2.0, 4.0, 1.0],
@@ -60,18 +60,18 @@
 				"type": "oscillate",
 				"auto": true,
 				"axis": "z",
-				"amplitude": 5.13,
-				"period": 10.0,
+				"amplitude": 0.7,
+				"period": 1.5,
 				"phase": 0.0
 			}
 		},
         {
             "objectId": 3,
             "geometryFile": "./data/models/floorThickCenterPivot.obj",
-            "translation": [2.0, 3.0, 3.5],
+            "translation": [2.0, 3.0, 5.0],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.2, 1.2, 2.7],
+            "scale": [1.2, 1.2, 3.5],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],

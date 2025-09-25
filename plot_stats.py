@@ -19,7 +19,7 @@ plt.rcParams["mathtext.fontset"] = "dejavuserif"
 #              (backward-compat: also accepts legacy 'pcg-ours' and 'nopcg-ours')
 #   key     := elapsed_time_ms | opt_iter | opt_error | pcg_iter | pcg_error
 FNAME_RE_PREFIX = re.compile(
-    r"^(.+)-((?:iisph)|(?:2014Bender)|(?:ours)|(?:(?:pcg|nopcg)-ours))-(elapsed_time_ms|opt_iter|opt_error|pcg_iter|pcg_error)\.npy$"
+    r"^(.+)-((?:iisph)|(?:2014Bender)|(?:ours)|(?:(?:pcg|nopcg)-ours))-(elapsed_time_ms|opt_iter|opt_error|pcg_iter|pcg_error|kinetic_energy)\.npy$"
 )
 
 KNOWN_KEYS = [
@@ -28,6 +28,7 @@ KNOWN_KEYS = [
     "opt_error",
     "pcg_iter",
     "pcg_error",
+    "kinetic_energy",
 ]
 
 
@@ -160,6 +161,8 @@ def _legend_text_for_label(label: str) -> str:
         return "Ours"
     if base == "2014Bender":
         return "Bender et al."
+    if base == "iisph":
+        return "IISPH"
     return base or label
 
 
@@ -235,6 +238,7 @@ def _title_for_key(key: str, *, use_log: bool = False) -> str:
         "opt_error": "Error",
         "pcg_iter": "PCG Iteration",
         "pcg_error": "PCG Error",
+        "kinetic_energy": "Kinetic Energy",
     }
     base = mapping.get(key, key)
     return base
@@ -247,6 +251,7 @@ def _ylabel_for_key(key: str) -> str:
         "opt_error": r"$\|$Δ$\mathbf{v}\|^2$",
         "pcg_iter": "PCG iteration counts",
         "pcg_error": "PCG error",
+        "kinetic_energy": "Kinetic energy",
     }
     return mapping.get(key, key)
 
@@ -818,13 +823,13 @@ def plot_groups_overlay(
         
         # Axis labels for keys other than iter_decay and avg_iter_vs_dt
         if key not in ("iter_decay", "avg_iter_vs_dt"):
-            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error"):
+            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error", "kinetic_energy"):
                 ax.set_xlabel("time (s)")
             else:
                 ax.set_xlabel(_xlabel_for_key(key))
 
             ylabel_kwargs = {}
-            if key not in ("opt_iter", "pcg_iter", "elapsed_time_ms"):
+            if key in ("opt_error", "iter_decay"):
                 ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
             if key == "iter_decay":
                 ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", **ylabel_kwargs)
@@ -894,11 +899,16 @@ def plot_groups_overlay(
             if title_text:
                 fig.suptitle(title_text)
             _plot_one_key(ax, key)
-            out_key = f"{base_no_ext}-{key}{ext or '.png'}"
-            os.makedirs(os.path.dirname(out_key), exist_ok=True)
+            out_base = f"{base_no_ext}-{key}"
+            out_png = out_base + ".png"
+            out_pdf = out_base + ".pdf"
+            os.makedirs(os.path.dirname(out_png), exist_ok=True)
+            os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
             fig.tight_layout()
-            fig.savefig(out_key, dpi=150)
-            print(f"Saved figure to {out_key}")
+            fig.savefig(out_png, dpi=150)
+            fig.savefig(out_pdf)
+            print(f"Saved figure to {out_png}")
+            print(f"Saved figure to {out_pdf}")
             if show:
                 plt.show()
             else:
@@ -923,9 +933,12 @@ def plot_groups_overlay(
     fig.tight_layout(rect=[0, 0, 1, 0.96] if title_text else None)
 
     if out_path:
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        fig.savefig(out_path, dpi=150)
-        print(f"Saved figure to {out_path}")
+        base_no_ext, _ext = os.path.splitext(out_path)
+        out_png = base_no_ext + ".png"
+        os.makedirs(os.path.dirname(out_png), exist_ok=True)
+        fig.savefig(out_png, dpi=150)
+        print(f"Saved figure to {out_png}")
+
     if show:
         plt.show()
     else:

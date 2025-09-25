@@ -156,19 +156,22 @@ if __name__ == "__main__":
                 solver.tol_opt = w.slider_int("opt tol magnitude", solver.tol_opt, 1, 7)
                 solver.max_iteration_opt = w.slider_int("max opt. iter", solver.max_iteration_opt, 1, 1000)
 
-                # solver.enable_DF = w.checkbox("divergence-free solve", solver.enable_DF)
+                solver.density_error = w.checkbox("density error", solver.density_error)
                 solver.iisph = w.checkbox("iisph", solver.iisph)
-                solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
 
-                if not solver.iisph:
+                if solver.iisph:
+                    solver.omega = w.slider_float("relaxation", solver.omega, 0.001, 2.0)
+
+                else:
                     solver.smooth_max = w.checkbox("smooth max(Ours)", solver.smooth_max)
-                    solver.density_error = w.checkbox("density error", solver.density_error)
                     if solver.smooth_max:
                         solver.eps = w.slider_float("eps", solver.eps, 0.001, 10.0)
                         solver.max_iteration_pcg = w.slider_int("max pcg. iter", solver.max_iteration_pcg, 1, 1000)
                         solver.tol_pcg = w.slider_int("pcg tol magnitude", solver.tol_pcg, 1, 15)
                         
                         solver.use_pcg = w.checkbox("warm-start", solver.use_pcg)
+
+                solver.enable_DF = w.checkbox("DF solve", solver.enable_DF)
 
 
             try:
@@ -249,6 +252,7 @@ if __name__ == "__main__":
             solver.print_pcg_iter  = w.checkbox("print pcg iter", solver.print_pcg_iter)
             solver.print_pcg_error = w.checkbox("print pcg error", solver.print_pcg_error)
             solver.print_elapsed_time = w.checkbox("print elapsed time", solver.print_elapsed_time)
+            solver.print_kinetic_energy = w.checkbox("print kinetic energy", solver.print_kinetic_energy)
 
         
             
