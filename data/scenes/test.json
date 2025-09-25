@@ -1,0 +1,132 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [10.0, 10.0, 10.0],
+		"particleRadius": 0.03,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.002,
+		"stiffness": 50000,
+		"exponent": 7, 
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+        "transparentObjects": [2],
+        "alpha": 0.2
+	},
+    "Emitter": {
+		"capacity": 300000,
+		"reuse": false,
+		"emitters": [
+			{
+				"type": "circle",
+				"width": 15,
+				"height": 15,
+				"position": [0.5, 6.0, 5.0],
+				"direction": [1.0, -0.5, 0.0],
+				"velocity": 5.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 0,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			},
+			{
+				"type": "circle",
+				"width": 15,
+				"height": 15,
+				"position": [9.5, 6.0, 5.0],
+				"direction": [-1.0, -0.5, 0.0],
+				"velocity": 5.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 1,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			}
+		]
+	},
+    "RigidBodies": [
+        {
+			"objectId": 2,
+			"geometryFile": "./data/models/BowlH.obj",
+			"translation": [5.0, 0.1, 5.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [3.0, 3.0, 3.0],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false,
+            "isToggled": false
+		},
+		{
+			"objectId": 3,
+			"geometryFile": "./data/models/blender.obj",
+			"translation": [1.8, 0.5, 2.5],
+			"rotationAxis": [0, 1, 0],
+			"rotationAngle": 0,
+			"scale": [1.5, 1.0, 1.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false,
+			"isToggled": true,
+            "animation": {
+                "type": "rotate",
+                "axis": "y",
+                "period": 2.0,
+                "phase": 0.0,
+                "auto": true
+            }            
+		},
+        {
+			"objectId": 4,
+			"geometryFile": "./data/models/armadillo_small.obj",
+			"translation": [2.5, 7.5, 5.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.5, 0.5, 0.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 800.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 5,
+			"geometryFile": "./data/models/armadillo_small.obj",
+			"translation": [5.0, 7.5, 5.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.5, 0.5, 0.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 600.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 6,
+			"geometryFile": "./data/models/armadillo_small.obj",
+			"translation": [7.5, 7.5, 5.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.5, 0.5, 0.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 500.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		}
+    ]
+}
+

@@ -22,7 +22,7 @@ class SPHBase:
         except Exception:
             pass
 
-        self.viscosity = 0.01  # viscosity
+        self.viscosity = 0.05  # viscosity
         self.surface_tension = 0.01
         self.adhesion_coeff = self.surface_tension
 

@@ -418,6 +418,11 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     anim_time = 0.0
+                    # Reset toggled rigid bodies to static state
+                    try:
+                        ps.reset_toggled_state()
+                    except Exception:
+                        pass
                     # Clear per-session stats
                     _clear_solver_stats_if_any()
                     try:
@@ -441,6 +446,11 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     anim_time = 0.0
+                    # Ensure any toggled bodies start static after full rebuild
+                    try:
+                        ps.reset_toggled_state()
+                    except Exception:
+                        pass
                     anim_auto_mode = bool(animator.has_auto())
                     runAnim = False
                     try:
@@ -458,6 +468,25 @@ if __name__ == "__main__":
             else:
                 # Manual mode: discrete press will be ignored; we handle continuous below
                 pass
+
+            # ----- Toggle dynamic rigid bodies -----
+            if window.event.key == 't':
+                try:
+                    # Activate next isToggled rigid body in ascending object id
+                    ps.activate_next_toggled_rigid_body()
+                    # Rebuild per-object counts and masses for correctness
+                    try:
+                        ps.initialize_object_particle_num()
+                    except Exception:
+                        pass
+                    try:
+                        if ps.num_rigid_bodies > 0:
+                            ps.initialize_rigid_mass()
+                    except Exception:
+                        pass
+                except Exception:
+                    # Avoid UI crash on toggle
+                    pass
 
         if export_ply and frame_cnt > end_frame:
             runSim = False

@@ -53,6 +53,13 @@ class ParticleSystem:
         self.object_collection = dict()
         self.object_id_rigid_body = set()
 
+        # Toggle-able rigid bodies
+        self.toggled_rigid_bodies = set()
+        self.toggled_dynamic_velocity = {}
+        self.toggled_activated = set()
+        self.toggled_ids_sorted = []
+        self.toggled_index = 0
+
         # Emitter timer and emitter system
         self.emitter_system = None
         self.time = 0.0
@@ -295,8 +302,15 @@ class ParticleSystem:
             num_particles_obj = rigid_body["particleNum"]
             voxelized_points_np = rigid_body["voxelizedPoints"]
             is_dynamic = rigid_body["isDynamic"]
-            if is_dynamic:
-                velocity = np.array(rigid_body["velocity"], dtype=np.float32)
+            is_toggled = bool(rigid_body.get("isToggled", False))
+            desired_vel = np.array(rigid_body.get("velocity", [0.0 for _ in range(self.dim)]), dtype=np.float32)
+            init_is_dynamic = bool(is_dynamic and (not is_toggled))
+            if is_dynamic and is_toggled:
+                # Register this rigid body for runtime activation
+                self.toggled_rigid_bodies.add(obj_id)
+                self.toggled_dynamic_velocity[obj_id] = desired_vel
+            if init_is_dynamic:
+                velocity = desired_vel
             else:
                 velocity = np.array([0.0 for _ in range(self.dim)], dtype=np.float32)
             density = rigid_body["density"]
@@ -310,10 +324,79 @@ class ParticleSystem:
                                density * np.ones(num_particles_obj, dtype=np.float32), # density
                                np.zeros(num_particles_obj, dtype=np.float32), # pressure
                                np.array([0 for _ in range(num_particles_obj)], dtype=np.int32), # material is solid
-                               is_dynamic * np.ones(num_particles_obj, dtype=np.int32), # is_dynamic
+                               init_is_dynamic * np.ones(num_particles_obj, dtype=np.int32), # is_dynamic (toggled solids start static)
                                np.stack([color for _ in range(num_particles_obj)])) # color
             
+        # Prepare toggle order (ascending object id)
+        if len(self.toggled_rigid_bodies) > 0:
+            self.toggled_ids_sorted = sorted(list(self.toggled_rigid_bodies))
+            self.toggled_index = 0
+
         self._setup_emitter_system()
+
+
+    @ti.kernel
+    def _activate_object_dynamic_kernel(self, obj_id: int, vx: float, vy: float, vz: float):
+        for p in range(self.particle_num[None]):
+            if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 0:
+                self.is_dynamic[p] = 1
+                # Revert static-mass scaling (static solids used 10x mass)
+                self.m[p] = self.m[p] / 10.0
+                self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
+                self.m_inv[p] = 1.0 / (self.m[p] + 1e-12)
+                self.v[p] = ti.Vector([vx, vy, vz])
+                self.v_adv[p] = self.v[p]
+                self.v_old[p] = self.v[p]
+
+    def activate_toggled_rigid_bodies(self):
+        # Activate all registered toggle-able rigid bodies that haven't been activated yet
+        for oid in list(self.toggled_rigid_bodies):
+            if oid in self.toggled_activated:
+                continue
+            vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
+            self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
+            self.toggled_activated.add(oid)
+
+    @ti.kernel
+    def _deactivate_object_to_static_kernel(self, obj_id: int):
+        for p in range(self.particle_num[None]):
+            if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 1:
+                # Switch to static: zero velocity, set large mass, zero inv mass
+                self.is_dynamic[p] = 0
+                self.v[p] = ti.Vector.zero(float, self.dim)
+                self.v_adv[p] = self.v[p]
+                self.v_old[p] = self.v[p]
+                self.m[p] = self.m[p] * 10.0
+                self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
+                self.m_inv[p] = 0.0
+
+    def reset_toggled_state(self):
+        # Deactivate all toggle-able bodies to static and reset order pointer
+        for oid in list(self.toggled_rigid_bodies):
+            self._deactivate_object_to_static_kernel(int(oid))
+        self.toggled_activated.clear()
+        if len(self.toggled_rigid_bodies) > 0:
+            self.toggled_ids_sorted = sorted(list(self.toggled_rigid_bodies))
+        else:
+            self.toggled_ids_sorted = []
+        self.toggled_index = 0
+
+    def activate_next_toggled_rigid_body(self):
+        # Activate one toggle-able rigid body at a time in ascending object id
+        n = len(self.toggled_ids_sorted)
+        if n == 0:
+            return
+        # Find next not-yet-activated id from current index forward
+        idx = self.toggled_index
+        while idx < n and (self.toggled_ids_sorted[idx] in self.toggled_activated):
+            idx += 1
+        if idx >= n:
+            return
+        oid = self.toggled_ids_sorted[idx]
+        vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
+        self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
+        self.toggled_activated.add(oid)
+        self.toggled_index = idx + 1
 
 
     def build_solver(self):
