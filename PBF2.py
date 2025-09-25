@@ -41,7 +41,7 @@ class PBF2Solver(SPHBase):
         self.volume_constraint = False
         self.tol_opt = 4
         self.omega = 1.0
-        self.eps = 0.005
+        self.eps = 0.001
         self.cfl = False
         self.max_iteration_opt = 1000
         self.max_iteration_pcg = 1000

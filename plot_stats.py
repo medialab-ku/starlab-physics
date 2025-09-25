@@ -610,7 +610,8 @@ def plot_groups_overlay(
                 any_line = True
                 last_x = x_master
             ax.set_xlabel("Iteration")
-            ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
+            # ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
+            ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$")
 
             if any_line:
                 ax.margins(x=0)
@@ -635,9 +636,10 @@ def plot_groups_overlay(
                 ax.tick_params(axis='y', labelsize=11)
             handles, labels_txt = ax.get_legend_handles_labels()
             labels_txt = [_legend_text_for_label(l) for l in labels_txt]
-            leg = ax.legend(handles, labels_txt, loc="best")
+            leg = ax.legend(handles, labels_txt, loc="best", frameon=False)
             if leg is not None:
                 leg.get_frame().set_linewidth(0.8)
+                leg.get_frame().set_alpha(0.8)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             return
@@ -698,9 +700,10 @@ def plot_groups_overlay(
                 ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
             handles, labels_txt = ax.get_legend_handles_labels()
             labels_txt = [_legend_text_for_label(l) for l in labels_txt]
-            leg = ax.legend(handles, labels_txt, loc="best")
+            leg = ax.legend(handles, labels_txt, loc="best", frameon=False)
             if leg is not None:
                 leg.get_frame().set_linewidth(0.6)
+                leg.get_frame().set_alpha(0.8)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             return
@@ -821,6 +824,16 @@ def plot_groups_overlay(
                 if global_x_max is None or x_plot[-1] > global_x_max:
                     global_x_max = x_plot[-1]
         
+        if key == 'opt_error':
+            dt_s = None
+            if len(pairs) > 0:
+                dt_s = _get_dt_for_group(pairs[0][0])
+            if dt_s is not None:
+                frames_to_mark = [220, 420, 480, 500]
+                for frame in frames_to_mark:
+                    time_s = frame * dt_s
+                    ax.axvline(time_s, color='darkgray', ls='--', lw=0.8, alpha=0.8)
+
         # Axis labels for keys other than iter_decay and avg_iter_vs_dt
         if key not in ("iter_decay", "avg_iter_vs_dt"):
             if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error", "kinetic_energy"):
@@ -829,8 +842,8 @@ def plot_groups_overlay(
                 ax.set_xlabel(_xlabel_for_key(key))
 
             ylabel_kwargs = {}
-            if key in ("opt_error", "iter_decay"):
-                ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
+            # if key in ("opt_error", "iter_decay"):
+            #     ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
             if key == "iter_decay":
                 ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", **ylabel_kwargs)
             else:
@@ -877,9 +890,17 @@ def plot_groups_overlay(
         # Unified legend labels
         handles, labels_txt = ax.get_legend_handles_labels()
         labels_txt = [_legend_text_for_label(l) for l in labels_txt]
-        leg = ax.legend(handles, labels_txt, loc="best")
+        
+        legend_kwargs = {'loc': 'best'}
+        if key == 'opt_error':
+            legend_kwargs = {'loc': 'upper left', 'bbox_to_anchor': (0.02, 1.0)}
+        if key == 'opt_iter':
+            legend_kwargs = {'loc': 'upper right', 'bbox_to_anchor': (1.02, 1.0)}
+        
+        leg = ax.legend(handles, labels_txt, frameon=False, **legend_kwargs)
         if leg is not None:
             leg.get_frame().set_linewidth(0.8)
+            leg.get_frame().set_alpha(0.8)
         # remove top/right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -938,6 +959,10 @@ def plot_groups_overlay(
         os.makedirs(os.path.dirname(out_png), exist_ok=True)
         fig.savefig(out_png, dpi=150)
         print(f"Saved figure to {out_png}")
+        if nrows == 1:
+            out_pdf = base_no_ext + ".pdf"
+            fig.savefig(out_pdf)
+            print(f"Saved figure to {out_pdf}")
 
     if show:
         plt.show()

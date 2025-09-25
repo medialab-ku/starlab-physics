@@ -119,7 +119,7 @@ if __name__ == "__main__":
 
     frame_cnt = 0
     export_ply = output_ply
-    end_frame = 1000
+    end_frame = 8000
 
     # Initialize animation system
     animator = AnimationSystem(ps, config)
