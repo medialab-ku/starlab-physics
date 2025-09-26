@@ -474,6 +474,8 @@ def plot_groups_overlay(
             ax.set_yscale("log")
         any_line = False
         global_x_min, global_x_max = None, None
+        # Track global y-range to set ylim to data-driven max when saving single plots
+        global_y_min, global_y_max = None, None
 
         # Special handling for iter_decay: align series to the maximum iteration count within the frame
         if key == "iter_decay":
@@ -823,6 +825,20 @@ def plot_groups_overlay(
                     global_x_min = x_plot[0]
                 if global_x_max is None or x_plot[-1] > global_x_max:
                     global_x_max = x_plot[-1]
+            # Track y-range excluding NaNs
+            try:
+                yv = np.asarray(y_disp, dtype=float)
+                if yv.size > 0:
+                    yv = yv[np.isfinite(yv)]
+                    if yv.size > 0:
+                        y_min_loc = float(np.min(yv))
+                        y_max_loc = float(np.max(yv))
+                        if global_y_min is None or y_min_loc < global_y_min:
+                            global_y_min = y_min_loc
+                        if global_y_max is None or y_max_loc > global_y_max:
+                            global_y_max = y_max_loc
+            except Exception:
+                pass
         
         if key == 'opt_error':
             dt_s = None
@@ -847,7 +863,11 @@ def plot_groups_overlay(
             if key == "iter_decay":
                 ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", **ylabel_kwargs)
             else:
-                ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
+                # Smaller ylabel font for elapsed_time_ms only
+                if key == "elapsed_time_ms":
+                    ax.set_ylabel(_ylabel_for_key(key), fontsize=max(plt.rcParams.get("axes.labelsize", 12) - 2, 8), **ylabel_kwargs)
+                else:
+                    ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
         
         # Align x-range to plotted data only
         if any_line and global_x_min is not None and global_x_max is not None:
@@ -865,7 +885,17 @@ def plot_groups_overlay(
                     ticks.append(0.0)
                 ax.set_yticks(sorted(list(set(ticks))))
             else:
+                # For non-error keys, bottom at 0, and if single-plot mode use data max for top
                 ax.set_ylim(bottom=0)
+                if separate_figs and (global_y_max is not None):
+                    # Pad slightly (5%) for headroom
+                    ax.set_ylim(top=float(global_y_max) * 1.05 if float(global_y_max) > 0 else 1.0)
+
+        # # In log scale, also snap top to data-driven max when saving single plots
+        # if use_log and separate_figs and (global_y_max is not None):
+        #     ax.set_ylim(top=float(global_y_max) * 1.05 if float(global_y_max) > 0 else 1.0)
+
+        # (removed stacked-mode-specific log-scale ylim tweak)
 
         # X-axis tick formatting
         try:
@@ -894,10 +924,24 @@ def plot_groups_overlay(
         legend_kwargs = {'loc': 'best'}
         if key == 'opt_error':
             legend_kwargs = {'loc': 'upper left', 'bbox_to_anchor': (0.02, 1.0)}
-        if key == 'opt_iter':
-            legend_kwargs = {'loc': 'upper right', 'bbox_to_anchor': (1.02, 1.0)}
+        if key == 'elapsed_time_ms':
+            legend_kwargs = {'loc': 'upper right', 'bbox_to_anchor': (1.01, 1.05)}
         
-        leg = ax.legend(handles, labels_txt, frameon=False, **legend_kwargs)
+        # (removed stacked-mode-specific legend override)
+
+        # For single opt_iter figure: remove y=0 tick and show only x=0.0 on left-bottom
+        if separate_figs and key == 'opt_iter':
+            # y: remove 0 tick
+            yt = [t for t in ax.get_yticks() if abs(float(t)) > 1e-12]
+            ax.set_yticks(yt)
+            # x: force ticks to include only 0.0 if possible
+            ax.set_xlim(left=0)
+            ax.set_xticks([0.0])
+        
+        # Draw legend: hide for opt_iter by default
+        leg = None
+        if key != 'opt_iter':
+            leg = ax.legend(handles, labels_txt, frameon=False, **legend_kwargs)
         if leg is not None:
             leg.get_frame().set_linewidth(0.8)
             leg.get_frame().set_alpha(0.8)
@@ -942,7 +986,8 @@ def plot_groups_overlay(
     multi_row_h = 2.2
     width_inch = single_col_w if not ((not separate_figs) and (nrows > 1)) else multi_w_inch
     row_h_eff = row_h if not ((not separate_figs) and (nrows > 1)) else multi_row_h
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, max(row_h_eff, 0.9 * nrows + 0.9)), constrained_layout=False)
+    height_inch = max(row_h_eff, 0.9 * nrows + 0.9)
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, height_inch), constrained_layout=False)
     if title_text:
         fig.suptitle(title_text)
     if nrows == 1:
@@ -959,7 +1004,7 @@ def plot_groups_overlay(
         os.makedirs(os.path.dirname(out_png), exist_ok=True)
         fig.savefig(out_png, dpi=150)
         print(f"Saved figure to {out_png}")
-        if nrows == 1:
+        if (nrows == 1):
             out_pdf = base_no_ext + ".pdf"
             fig.savefig(out_pdf)
             print(f"Saved figure to {out_pdf}")
