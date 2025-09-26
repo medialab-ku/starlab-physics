@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 plt.rcParams.update({
     'text.usetex': True,
@@ -8,73 +9,71 @@ plt.rcParams.update({
     "text.latex.preamble": r"\usepackage{amsmath}",
 })
 
-# Define the functions based on the provided formulas
 def f_prime(t, a):
-    """
-    Defines the first smoothed max function F'(t).
-    F'(t) = -a + sqrt(max(t, 0)^2 + a^2)
-    """
     return -a + np.sqrt(np.maximum(t, 0)**2 + a**2)
 
 def f_double_prime(t, a):
-    """
-    Defines the second smoothed max function F''(t).
-    F''(t) is a piecewise function.
-    F''(t) = 0 for t <= 0
-    F''(t) = t / sqrt(t^2 + a^2) for t > 0
-    """
     result = np.zeros_like(t)
     positive_t_indices = t > 0
     result[positive_t_indices] = t[positive_t_indices] / np.sqrt(t[positive_t_indices]**2 + a**2)
     return result
 
 # --- Plotting Setup ---
+a_values = [0.01, 0.05, 0.1]
+t_values = np.linspace(0, 1.0, 1000)
 
-# Set a value for 'a'. This parameter controls the 'smoothness'.
-# A smaller 'a' value makes the functions more closely approximate the non-smoothed versions.
-a_value = 0.1
+# 색상 팔레트 (진한 → 연한)
+colors_fprime = ["#1f77b4", "#4c9be8", "#a6cee3"]   # 블루 계열 (F')
+colors_fdouble = ["#1b7837", "#33a02c", "#66c2a5"]  # 그린 계열 (F'')
 
-# Create a range of t values for the plot.
-t_values = np.linspace(0, 3, 1000)
+plt.figure(figsize=(6, 3.5))
 
-# Calculate the function values
-y_prime = f_prime(t_values, a_value)
-y_double_prime = f_double_prime(t_values, a_value)
+# 먼저 모든 곡선 그림
+for i, a_value in enumerate(a_values):
+    y_prime = f_prime(t_values, a_value)
+    y_double_prime = f_double_prime(t_values, a_value)
 
-# --- Create the plot ---
-plt.figure(figsize=(6, 6))
+    plt.plot(t_values, y_prime,
+             color=colors_fprime[i],
+             linestyle="-",
+             linewidth=1.5)
 
-# Plot F'(t)
-plt.plot(
-    t_values, y_prime,
-    label=r"$F'(t) = -a + \sqrt{\max(t, 0)^2 + a^2}$",
-    color='blue'
-)
+    plt.plot(t_values, y_double_prime,
+             color=colors_fdouble[i],
+             linestyle="--",
+             linewidth=1.5)
 
-# Plot F''(t)
-plt.plot(
-    t_values, y_double_prime,
-    label=r"$F''(t) = \begin{cases} 0 & t \leq 0 \\ \frac{t}{\sqrt{t^2 + a^2}} & t > 0 \end{cases}$",
-    color='red'
-)
+# 그룹 대표선만 legend에 추가
+line_fprime, = plt.plot([], [], color="black", linestyle="-", linewidth=2, label=r"$F'(\phi)$")
+line_fdouble, = plt.plot([], [], color="black", linestyle="--", linewidth=2, label=r"$F''(\phi)$")
 
-# Add a dashed line for y = 0 for better visualization
-plt.axhline(0, color='gray', linestyle='--', linewidth=0.8)
+# 보조선
+plt.axhline(1, color='gray', linestyle='--', linewidth=1.0)
+plt.axvline(0, color='k', linestyle=':', linewidth=1.0)
 
-# Add a dashed line for the non-smoothed max and its derivative for comparison
-# F(t) = max(t, 0) is a ReLU-like function
-# F'(t) = 0 for t <= 0, 1 for t > 0 (Heaviside step function)
-plt.plot(
-    t_values, np.maximum(t_values, 0),
-    'g--',
-    label=r"$\max(t, 0)$" + " (Non-smoothed max)"
-)
-plt.axvline(0, color='k', linestyle=':', linewidth=0.8)
+# 축 라벨
+plt.xlabel(r'$\phi$', fontsize=20)
+plt.xlim(0, 1.0)
+plt.ylim(0, 1.0)
 
-# Add labels, title, and legend
-plt.title(f'Smoothed Max Functions for a = {a_value}', fontsize=16)
-plt.xlabel('t', fontsize=12)
-plt.ylabel('Function Value', fontsize=12)
-plt.legend(fontsize=10)
-plt.grid(True)
+# Formatter 설정 (0.0 겹침 방지)
+ax = plt.gca()
+ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
+ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+def y_fmt(val, pos):
+    if np.isclose(val, 0.0):
+        return ""           
+    return f"{val:g}"
+
+ax.yaxis.set_major_formatter(ticker.FuncFormatter(y_fmt))
+
+# Layout & 저장
+plt.tight_layout()
+plt.subplots_adjust(left=0.06, right=0.98, top=0.98, bottom=0.14)
+plt.legend(fontsize=16)
+plt.savefig("smoothed_max_grouped.png", bbox_inches='tight', pad_inches=0, dpi=300)
+
 plt.show()
