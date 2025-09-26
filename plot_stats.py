@@ -899,6 +899,25 @@ def plot_groups_overlay(
             fig.tight_layout()
             fig.savefig(out_key, dpi=150)
             print(f"Saved figure to {out_key}")
+            # Print average elapsed time (ms) over the requested frame range, if applicable
+            if key == "elapsed_time_ms":
+                try:
+                    s = 0 if (start is None) else max(0, int(start))
+                    # end: negative or None means till end
+                    for group, label in pairs:
+                        if "elapsed_time_ms" not in group:
+                            continue
+                        et = np.load(group["elapsed_time_ms"]).astype(float)
+                        e = et.size if (end is None or int(end) < 0) else int(end)
+                        s_b = max(0, min(s, et.size))
+                        e_b = max(s_b, min(e, et.size))
+                        sub = et[s_b:e_b]
+                        if sub.size > 0:
+                            avg_ms = float(np.mean(sub))
+                            lbl_txt = _legend_text_for_label(label)
+                            print(f"elapsed_time_ms mean [{s_b},{e_b}): {avg_ms:.6f} ms ({lbl_txt})")
+                except Exception:
+                    pass
             if show:
                 plt.show()
             else:
@@ -926,6 +945,24 @@ def plot_groups_overlay(
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         fig.savefig(out_path, dpi=150)
         print(f"Saved figure to {out_path}")
+        # Print average elapsed time (ms) over the requested frame range when plotting only elapsed_time_ms
+        try:
+            if (len(selected_keys) == 1 and selected_keys[0] == "elapsed_time_ms"):
+                s = 0 if (start is None) else max(0, int(start))
+                for group, label in pairs:
+                    if "elapsed_time_ms" not in group:
+                        continue
+                    et = np.load(group["elapsed_time_ms"]).astype(float)
+                    e = et.size if (end is None or int(end) < 0) else int(end)
+                    s_b = max(0, min(s, et.size))
+                    e_b = max(s_b, min(e, et.size))
+                    sub = et[s_b:e_b]
+                    if sub.size > 0:
+                        avg_ms = float(np.mean(sub))
+                        lbl_txt = _legend_text_for_label(label)
+                        print(f"elapsed_time_ms mean [{s_b},{e_b}): {avg_ms:.6f} ms ({lbl_txt})")
+        except Exception:
+            pass
     if show:
         plt.show()
     else:
