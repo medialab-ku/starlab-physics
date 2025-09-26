@@ -65,7 +65,9 @@ class Emitter:
             up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
             if abs(np.dot(emit_dir, up)) > 0.95:
                 up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-            w = np.cross(up, emit_dir); w = w / (np.linalg.norm(w) + 1e-8)
+            # make w robust for both positive/negative emit_dir
+            w = np.cross(up, emit_dir)
+            w = w / (np.linalg.norm(w) + 1e-8)
             theta = (np.random.rand() * 2.0 - 1.0) * (deg * np.pi / 180.0)
             K = np.array([[0, -w[2], w[1]], [w[2], 0, -w[0]], [-w[1], w[0], 0]], dtype=np.float32)
             Rsmall = np.eye(3, dtype=np.float32) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
@@ -149,6 +151,7 @@ class Emitter:
             emitted += reused_now
 
         if new_now > 0:
+            start_idx = int(self.ps.particle_num[None])
             self.ps.add_particles(
                 object_id=self.object_id,
                 new_particles_num=new_now,
@@ -164,6 +167,11 @@ class Emitter:
                     np.full(new_now, self.color[2], dtype=np.int32)
                 ], axis=1)
             )
+            # Mark freshly created particles with age=0 for stabilization in the next force pass
+            try:
+                self.ps.set_age_range(start_idx, new_now, 0)
+            except Exception:
+                pass
             emitted += new_now
 
         diam = 2.0 * self.ps.particle_radius
@@ -220,7 +228,7 @@ class EmitterSystem:
         if N <= 0:
             return []
 
-        np_x = np.empty((N, 3), dtype=np.float32)
+        np_x = np.empty((N, self.ps.dim), dtype=np.float32)
         self.ps.copy_to_numpy(np_x, self.ps.x)
 
         mask_min = np.zeros((N,), dtype=bool)

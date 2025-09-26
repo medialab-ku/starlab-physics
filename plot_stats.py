@@ -19,7 +19,7 @@ plt.rcParams["mathtext.fontset"] = "dejavuserif"
 #              (backward-compat: also accepts legacy 'pcg-ours' and 'nopcg-ours')
 #   key     := elapsed_time_ms | opt_iter | opt_error | pcg_iter | pcg_error
 FNAME_RE_PREFIX = re.compile(
-    r"^(.+)-((?:iisph)|(?:2014Bender)|(?:ours)|(?:(?:pcg|nopcg)-ours))-(elapsed_time_ms|opt_iter|opt_error|pcg_iter|pcg_error)\.npy$"
+    r"^(.+)-((?:iisph)|(?:2014Bender)|(?:ours)|(?:(?:pcg|nopcg)-ours))-(elapsed_time_ms|opt_iter|opt_error|pcg_iter|pcg_error|kinetic_energy)\.npy$"
 )
 
 KNOWN_KEYS = [
@@ -28,6 +28,7 @@ KNOWN_KEYS = [
     "opt_error",
     "pcg_iter",
     "pcg_error",
+    "kinetic_energy",
 ]
 
 
@@ -160,6 +161,8 @@ def _legend_text_for_label(label: str) -> str:
         return "Ours"
     if base == "2014Bender":
         return "Bender et al."
+    if base == "iisph":
+        return "IISPH"
     return base or label
 
 
@@ -235,6 +238,7 @@ def _title_for_key(key: str, *, use_log: bool = False) -> str:
         "opt_error": "Error",
         "pcg_iter": "PCG Iteration",
         "pcg_error": "PCG Error",
+        "kinetic_energy": "Kinetic Energy",
     }
     base = mapping.get(key, key)
     return base
@@ -247,6 +251,7 @@ def _ylabel_for_key(key: str) -> str:
         "opt_error": r"$\|$Δ$\mathbf{v}\|^2$",
         "pcg_iter": "PCG iteration counts",
         "pcg_error": "PCG error",
+        "kinetic_energy": "Kinetic energy",
     }
     return mapping.get(key, key)
 
@@ -469,6 +474,8 @@ def plot_groups_overlay(
             ax.set_yscale("log")
         any_line = False
         global_x_min, global_x_max = None, None
+        # Track global y-range to set ylim to data-driven max when saving single plots
+        global_y_min, global_y_max = None, None
 
         # Special handling for iter_decay: align series to the maximum iteration count within the frame
         if key == "iter_decay":
@@ -605,7 +612,8 @@ def plot_groups_overlay(
                 any_line = True
                 last_x = x_master
             ax.set_xlabel("Iteration")
-            ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
+            # ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", rotation='horizontal', ha='right', va='center', x=-0.1)
+            ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$")
 
             if any_line:
                 ax.margins(x=0)
@@ -630,9 +638,10 @@ def plot_groups_overlay(
                 ax.tick_params(axis='y', labelsize=11)
             handles, labels_txt = ax.get_legend_handles_labels()
             labels_txt = [_legend_text_for_label(l) for l in labels_txt]
-            leg = ax.legend(handles, labels_txt, loc="best")
+            leg = ax.legend(handles, labels_txt, loc="best", frameon=False)
             if leg is not None:
                 leg.get_frame().set_linewidth(0.8)
+                leg.get_frame().set_alpha(0.8)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             return
@@ -693,9 +702,10 @@ def plot_groups_overlay(
                 ax.grid(True, which=("both" if use_log else "major"), alpha=0.3)
             handles, labels_txt = ax.get_legend_handles_labels()
             labels_txt = [_legend_text_for_label(l) for l in labels_txt]
-            leg = ax.legend(handles, labels_txt, loc="best")
+            leg = ax.legend(handles, labels_txt, loc="best", frameon=False)
             if leg is not None:
                 leg.get_frame().set_linewidth(0.6)
+                leg.get_frame().set_alpha(0.8)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             return
@@ -815,21 +825,49 @@ def plot_groups_overlay(
                     global_x_min = x_plot[0]
                 if global_x_max is None or x_plot[-1] > global_x_max:
                     global_x_max = x_plot[-1]
+            # Track y-range excluding NaNs
+            try:
+                yv = np.asarray(y_disp, dtype=float)
+                if yv.size > 0:
+                    yv = yv[np.isfinite(yv)]
+                    if yv.size > 0:
+                        y_min_loc = float(np.min(yv))
+                        y_max_loc = float(np.max(yv))
+                        if global_y_min is None or y_min_loc < global_y_min:
+                            global_y_min = y_min_loc
+                        if global_y_max is None or y_max_loc > global_y_max:
+                            global_y_max = y_max_loc
+            except Exception:
+                pass
         
+        if key == 'opt_error':
+            dt_s = None
+            if len(pairs) > 0:
+                dt_s = _get_dt_for_group(pairs[0][0])
+            if dt_s is not None:
+                frames_to_mark = [220, 420, 480, 500]
+                for frame in frames_to_mark:
+                    time_s = frame * dt_s
+                    ax.axvline(time_s, color='darkgray', ls='--', lw=0.8, alpha=0.8)
+
         # Axis labels for keys other than iter_decay and avg_iter_vs_dt
         if key not in ("iter_decay", "avg_iter_vs_dt"):
-            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error"):
+            if key in ("elapsed_time_ms", "opt_iter", "pcg_iter", "opt_error", "pcg_error", "kinetic_energy"):
                 ax.set_xlabel("time (s)")
             else:
                 ax.set_xlabel(_xlabel_for_key(key))
 
             ylabel_kwargs = {}
-            if key not in ("opt_iter", "pcg_iter", "elapsed_time_ms"):
-                ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
+            # if key in ("opt_error", "iter_decay"):
+            #     ylabel_kwargs = {'rotation': 'horizontal', 'ha': 'right', 'va': 'center', 'x': -0.1}
             if key == "iter_decay":
                 ax.set_ylabel(r"$\|$Δ$\mathbf{v}\|^2$", **ylabel_kwargs)
             else:
-                ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
+                # Smaller ylabel font for elapsed_time_ms only
+                if key == "elapsed_time_ms":
+                    ax.set_ylabel(_ylabel_for_key(key), fontsize=max(plt.rcParams.get("axes.labelsize", 12) - 2, 8), **ylabel_kwargs)
+                else:
+                    ax.set_ylabel(_ylabel_for_key(key), **ylabel_kwargs)
         
         # Align x-range to plotted data only
         if any_line and global_x_min is not None and global_x_max is not None:
@@ -847,7 +885,17 @@ def plot_groups_overlay(
                     ticks.append(0.0)
                 ax.set_yticks(sorted(list(set(ticks))))
             else:
+                # For non-error keys, bottom at 0, and if single-plot mode use data max for top
                 ax.set_ylim(bottom=0)
+                if separate_figs and (global_y_max is not None):
+                    # Pad slightly (5%) for headroom
+                    ax.set_ylim(top=float(global_y_max) * 1.05 if float(global_y_max) > 0 else 1.0)
+
+        # # In log scale, also snap top to data-driven max when saving single plots
+        # if use_log and separate_figs and (global_y_max is not None):
+        #     ax.set_ylim(top=float(global_y_max) * 1.05 if float(global_y_max) > 0 else 1.0)
+
+        # (removed stacked-mode-specific log-scale ylim tweak)
 
         # X-axis tick formatting
         try:
@@ -872,9 +920,31 @@ def plot_groups_overlay(
         # Unified legend labels
         handles, labels_txt = ax.get_legend_handles_labels()
         labels_txt = [_legend_text_for_label(l) for l in labels_txt]
-        leg = ax.legend(handles, labels_txt, loc="best")
+        
+        legend_kwargs = {'loc': 'best'}
+        if key == 'opt_error':
+            legend_kwargs = {'loc': 'upper left', 'bbox_to_anchor': (0.02, 1.0)}
+        if key == 'elapsed_time_ms':
+            legend_kwargs = {'loc': 'upper right', 'bbox_to_anchor': (1.01, 1.05)}
+        
+        # (removed stacked-mode-specific legend override)
+
+        # For single opt_iter figure: remove y=0 tick and show only x=0.0 on left-bottom
+        if separate_figs and key == 'opt_iter':
+            # y: remove 0 tick
+            yt = [t for t in ax.get_yticks() if abs(float(t)) > 1e-12]
+            ax.set_yticks(yt)
+            # x: force ticks to include only 0.0 if possible
+            ax.set_xlim(left=0)
+            ax.set_xticks([0.0])
+        
+        # Draw legend: hide for opt_iter by default
+        leg = None
+        if key != 'opt_iter':
+            leg = ax.legend(handles, labels_txt, frameon=False, **legend_kwargs)
         if leg is not None:
             leg.get_frame().set_linewidth(0.8)
+            leg.get_frame().set_alpha(0.8)
         # remove top/right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -894,9 +964,13 @@ def plot_groups_overlay(
             if title_text:
                 fig.suptitle(title_text)
             _plot_one_key(ax, key)
-            out_key = f"{base_no_ext}-{key}{ext or '.png'}"
-            os.makedirs(os.path.dirname(out_key), exist_ok=True)
+            out_base = f"{base_no_ext}-{key}"
+            out_png = out_base + ".png"
+            out_pdf = out_base + ".pdf"
+            os.makedirs(os.path.dirname(out_png), exist_ok=True)
+            os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
             fig.tight_layout()
+<<<<<<< HEAD
             fig.savefig(out_key, dpi=150)
             print(f"Saved figure to {out_key}")
             # Print average opt_iter over the requested frame range, if applicable
@@ -918,6 +992,12 @@ def plot_groups_overlay(
                             print(f"opt_iter mean [{s_b},{e_b}): {avg_v:.6f} ({lbl_txt})")
                 except Exception:
                     pass
+=======
+            fig.savefig(out_png, dpi=150)
+            fig.savefig(out_pdf)
+            print(f"Saved figure to {out_png}")
+            print(f"Saved figure to {out_pdf}")
+>>>>>>> 9485e69ffbdf52d8dfa510baa66db7c9d91c48c7
             if show:
                 plt.show()
             else:
@@ -930,7 +1010,8 @@ def plot_groups_overlay(
     multi_row_h = 2.2
     width_inch = single_col_w if not ((not separate_figs) and (nrows > 1)) else multi_w_inch
     row_h_eff = row_h if not ((not separate_figs) and (nrows > 1)) else multi_row_h
-    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, max(row_h_eff, 0.9 * nrows + 0.9)), constrained_layout=False)
+    height_inch = max(row_h_eff, 0.9 * nrows + 0.9)
+    fig, axes = plt.subplots(nrows=nrows, ncols=1, figsize=(width_inch, height_inch), constrained_layout=False)
     if title_text:
         fig.suptitle(title_text)
     if nrows == 1:
@@ -942,6 +1023,7 @@ def plot_groups_overlay(
     fig.tight_layout(rect=[0, 0, 1, 0.96] if title_text else None)
 
     if out_path:
+<<<<<<< HEAD
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         fig.savefig(out_path, dpi=150)
         print(f"Saved figure to {out_path}")
@@ -963,6 +1045,18 @@ def plot_groups_overlay(
                         print(f"opt_iter mean [{s_b},{e_b}): {avg_v:.6f} ({lbl_txt})")
         except Exception:
             pass
+=======
+        base_no_ext, _ext = os.path.splitext(out_path)
+        out_png = base_no_ext + ".png"
+        os.makedirs(os.path.dirname(out_png), exist_ok=True)
+        fig.savefig(out_png, dpi=150)
+        print(f"Saved figure to {out_png}")
+        if (nrows == 1):
+            out_pdf = base_no_ext + ".pdf"
+            fig.savefig(out_pdf)
+            print(f"Saved figure to {out_pdf}")
+
+>>>>>>> 9485e69ffbdf52d8dfa510baa66db7c9d91c48c7
     if show:
         plt.show()
     else:

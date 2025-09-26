@@ -176,6 +176,8 @@ class ParticleSystem:
         self.material = ti.field(dtype=int, shape=self.particle_max_num)
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
+        # Age of particles in substeps; used to stabilize freshly emitted particles
+        self.age = ti.field(dtype=int, shape=self.particle_max_num)
 
         self.cache_size = 50 
         self.fluid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
@@ -314,6 +316,8 @@ class ParticleSystem:
                                np.stack([color for _ in range(num_particles_obj)])) # color
             
         self._setup_emitter_system()
+        # Mark all initially created particles as mature so they fully participate in interactions
+        self.mark_all_particles_mature()
 
 
     def build_solver(self):
@@ -352,6 +356,8 @@ class ParticleSystem:
         self.pressure[p] = pressure
         self.material[p] = material
         self.is_dynamic[p] = is_dynamic
+        # Default: consider initially created particles as mature; emitters will reset age to 0
+        self.age[p] = 2
 
         if is_dynamic:
             self.m_inv[p] = 1.0 / self.m[p]
@@ -445,6 +451,8 @@ class ParticleSystem:
             self.material[p] = self.material_fluid
             self.is_dynamic[p] = 1
             self.color[p] = ti.Vector([color_r, color_g, color_b, 255])
+            # Freshly emitted
+            self.age[p] = 0
 
     def set_emitted_on_indices(self, count, idxs_np, P_np, V_np, object_id, density, color_np):
         r, g, b = int(color_np[0]), int(color_np[1]), int(color_np[2])
@@ -561,6 +569,25 @@ class ParticleSystem:
         self.prefix_sum_executor.run(self.grid_particles_num)
         self.counting_sort()
 
+    @ti.kernel
+    def increment_age(self):
+        for p in range(self.particle_num[None]):
+            # saturate to avoid overflow
+            if self.age[p] < 1000000000:
+                self.age[p] += 1
+
+    @ti.kernel
+    def set_age_range(self, start: int, count: int, value: int):
+        for k in range(count):
+            p = start + k
+            if p < self.particle_num[None]:
+                self.age[p] = value
+
+    @ti.kernel
+    def mark_all_particles_mature(self):
+        for p in range(self.particle_num[None]):
+            self.age[p] = 2
+
 
     @ti.kernel
     def initialize_rigid_mass(self):
@@ -602,7 +629,7 @@ class ParticleSystem:
                     sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
 
                 if sum_Wij > 1e-12:
-                    self.m[p_i] = self.density0[p_i] / sum_Wij
+                    self.m[p_i] = 1.5*self.density0[p_i] / sum_Wij
                     self.m_V[p_i] = self.m[p_i] / self.density0[p_i]
                     # Keep inverse mass consistent (static solids keep 0 inv mass)
                     if self.is_dynamic[p_i]:
@@ -762,11 +789,16 @@ class ParticleSystem:
         d = np.array(direction_np, dtype=np.float32)
         n = np.linalg.norm(d) + 1e-12
         ex = d / n
-        up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-        if abs(np.dot(ex, up)) > 0.95:
-            up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-        ez = np.cross(ex, up); ez = ez / (np.linalg.norm(ez) + 1e-12)
-        ey = np.cross(ez, ex); ey = ey / (np.linalg.norm(ey) + 1e-12)
+        # Choose a stable reference up and project it onto the plane orthogonal to ex
+        ref_up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        if abs(np.dot(ex, ref_up)) > 0.99:
+            ref_up = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        # ey: as aligned with world-up as possible but orthogonal to ex
+        ey = ref_up - np.dot(ref_up, ex) * ex
+        ey = ey / (np.linalg.norm(ey) + 1e-12)
+        # ez completes right-handed frame
+        ez = np.cross(ex, ey)
+        ez = ez / (np.linalg.norm(ez) + 1e-12)
         # Columns: emit_dir(X), axis_h(Y), axis_w(Z)
         R = np.stack([ex, ey, ez], axis=1).astype(np.float32)
         return R

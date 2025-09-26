@@ -408,6 +408,11 @@ class SPHBase:
             self.time += dt
 
         self.ps.initialize_particle_system()
+        # Age advances once per solver step (before substep), so new particles get brief stabilization
+        try:
+            self.ps.increment_age()
+        except Exception:
+            pass
         self.compute_moving_boundary_volume()
         self.substep()
         self.enforce_boundary_3D(self.ps.material_solid)
