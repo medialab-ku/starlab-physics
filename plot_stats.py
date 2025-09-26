@@ -970,7 +970,6 @@ def plot_groups_overlay(
             os.makedirs(os.path.dirname(out_png), exist_ok=True)
             os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
             fig.tight_layout()
-<<<<<<< HEAD
             fig.savefig(out_key, dpi=150)
             print(f"Saved figure to {out_key}")
             # Print average opt_iter over the requested frame range, if applicable
@@ -992,12 +991,6 @@ def plot_groups_overlay(
                             print(f"opt_iter mean [{s_b},{e_b}): {avg_v:.6f} ({lbl_txt})")
                 except Exception:
                     pass
-=======
-            fig.savefig(out_png, dpi=150)
-            fig.savefig(out_pdf)
-            print(f"Saved figure to {out_png}")
-            print(f"Saved figure to {out_pdf}")
->>>>>>> 9485e69ffbdf52d8dfa510baa66db7c9d91c48c7
             if show:
                 plt.show()
             else:
@@ -1023,7 +1016,6 @@ def plot_groups_overlay(
     fig.tight_layout(rect=[0, 0, 1, 0.96] if title_text else None)
 
     if out_path:
-<<<<<<< HEAD
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         fig.savefig(out_path, dpi=150)
         print(f"Saved figure to {out_path}")
@@ -1045,18 +1037,6 @@ def plot_groups_overlay(
                         print(f"opt_iter mean [{s_b},{e_b}): {avg_v:.6f} ({lbl_txt})")
         except Exception:
             pass
-=======
-        base_no_ext, _ext = os.path.splitext(out_path)
-        out_png = base_no_ext + ".png"
-        os.makedirs(os.path.dirname(out_png), exist_ok=True)
-        fig.savefig(out_png, dpi=150)
-        print(f"Saved figure to {out_png}")
-        if (nrows == 1):
-            out_pdf = base_no_ext + ".pdf"
-            fig.savefig(out_pdf)
-            print(f"Saved figure to {out_pdf}")
-
->>>>>>> 9485e69ffbdf52d8dfa510baa66db7c9d91c48c7
     if show:
         plt.show()
     else:
