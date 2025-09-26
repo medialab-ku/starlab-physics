@@ -21,8 +21,8 @@
 	"FluidBlocks": [
 		{
             "objectId": 0,
-			"start": [0.5, 0.5, 0.5],
-			"end": [1.2, 1.2, 1.2], 
+			"start": [0.7, 0.3, 0.7],
+			"end": [1.0, 0.8, 1.0], 
 			"translation": [0.0, 0.1, 0.0],
 			"scale": [1, 1, 1],
 			"velocity": [0.0, 0.0, 0.0],
@@ -42,6 +42,39 @@
 			"density": 1000.0,
 			"color": [255, 255, 255, 1.0],
 			"isDynamic": false
+		},
+		{
+			"objectId": 2,
+			"geometryFile": "./data/models/rigid_cube.obj",
+			"translation": [0.85, 1.2, 0.85],
+			"rotationAxis": [0, 1, 0],
+			"rotationAngle": 0,
+			"scale": [0.3, 0.3, 0.3],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false,
+			"animation": {
+				"type": "oscillate",
+				"auto": true,
+				"axis": "z",
+				"amplitude": 1.0,
+				"period": 2.0,
+				"phase": 0.0
+			}
+		},
+		{
+			"objectId": 3,
+			"geometryFile": "./data/models/rigid_cube.obj",
+			"translation": [0.85, 1.0, 0.85],
+			"rotationAxis": [0, 1, 0],
+			"rotationAngle": 0,
+			"scale": [0.3, 0.3, 0.3],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 1000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true
 		}
+
 	]
 }
