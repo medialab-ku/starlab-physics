@@ -899,6 +899,25 @@ def plot_groups_overlay(
             fig.tight_layout()
             fig.savefig(out_key, dpi=150)
             print(f"Saved figure to {out_key}")
+            # Print average opt_iter over the requested frame range, if applicable
+            if key == "opt_iter":
+                try:
+                    s = 0 if (start is None) else max(0, int(start))
+                    # end: negative or None means till end
+                    for group, label in pairs:
+                        if "opt_iter" not in group:
+                            continue
+                        it = np.load(group["opt_iter"]).astype(float)
+                        e = it.size if (end is None or int(end) < 0) else int(end)
+                        s_b = max(0, min(s, it.size))
+                        e_b = max(s_b, min(e, it.size))
+                        sub = it[s_b:e_b]
+                        if sub.size > 0:
+                            avg_v = float(np.mean(sub))
+                            lbl_txt = _legend_text_for_label(label)
+                            print(f"opt_iter mean [{s_b},{e_b}): {avg_v:.6f} ({lbl_txt})")
+                except Exception:
+                    pass
             if show:
                 plt.show()
             else:
@@ -926,6 +945,24 @@ def plot_groups_overlay(
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         fig.savefig(out_path, dpi=150)
         print(f"Saved figure to {out_path}")
+        # Print average opt_iter over the requested frame range when plotting only opt_iter
+        try:
+            if (len(selected_keys) == 1 and selected_keys[0] == "opt_iter"):
+                s = 0 if (start is None) else max(0, int(start))
+                for group, label in pairs:
+                    if "opt_iter" not in group:
+                        continue
+                    it = np.load(group["opt_iter"]).astype(float)
+                    e = it.size if (end is None or int(end) < 0) else int(end)
+                    s_b = max(0, min(s, it.size))
+                    e_b = max(s_b, min(e, it.size))
+                    sub = it[s_b:e_b]
+                    if sub.size > 0:
+                        avg_v = float(np.mean(sub))
+                        lbl_txt = _legend_text_for_label(label)
+                        print(f"opt_iter mean [{s_b},{e_b}): {avg_v:.6f} ({lbl_txt})")
+        except Exception:
+            pass
     if show:
         plt.show()
     else:
