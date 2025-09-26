@@ -423,6 +423,10 @@ if __name__ == "__main__":
                         ps.reset_toggled_state()
                     except Exception:
                         pass
+                    try:
+                        animator.reset_toggle_activation()
+                    except Exception:
+                        pass
                     # Clear per-session stats
                     _clear_solver_stats_if_any()
                     try:
@@ -451,6 +455,10 @@ if __name__ == "__main__":
                         ps.reset_toggled_state()
                     except Exception:
                         pass
+                    try:
+                        animator.reset_toggle_activation()
+                    except Exception:
+                        pass
                     anim_auto_mode = bool(animator.has_auto())
                     runAnim = False
                     try:
@@ -469,23 +477,60 @@ if __name__ == "__main__":
                 # Manual mode: discrete press will be ignored; we handle continuous below
                 pass
 
-            # ----- Toggle dynamic rigid bodies -----
+            # ----- Toggle dynamic rigid bodies and/or gated animations -----
             if window.event.key == 't':
                 try:
-                    # Activate next isToggled rigid body in ascending object id
-                    ps.activate_next_toggled_rigid_body()
-                    # Rebuild per-object counts and masses for correctness
+                    oid = -1
                     try:
-                        ps.initialize_object_particle_num()
+                        n = len(ps.toggled_ids_sorted)
+                        idx = int(ps.toggled_index)
+                        while idx < n and (ps.toggled_ids_sorted[idx] in ps.toggled_activated):
+                            idx += 1
+                        if idx < n:
+                            oid = int(ps.toggled_ids_sorted[idx])
                     except Exception:
-                        pass
-                    try:
-                        if ps.num_rigid_bodies > 0:
-                            ps.initialize_rigid_mass()
-                    except Exception:
-                        pass
+                        oid = -1
+                    if oid != -1:
+                        # If this object has an animation, enable it; otherwise switch to dynamic
+                        try:
+                            if animator.has_animation_for(oid):
+                                # Start its animation at 0 at the moment of toggle
+                                animator.enable_animation_for_with_time(oid, anim_time)
+                                # Ensure auto animation is playing; also apply once immediately
+                                try:
+                                    animator.apply(anim_time)
+                                except Exception:
+                                    pass
+                                try:
+                                    # If any auto anims exist and at least one is enabled, turn on runAnim
+                                    anim_auto_mode = bool(animator.has_auto())
+                                    if anim_auto_mode:
+                                        runAnim = True
+                                except Exception:
+                                    pass
+                                ps.toggled_activated.add(oid)
+                                ps.toggled_index = int(ps.toggled_index) + 1
+                            else:
+                                vel = np.zeros(ps.dim, dtype=np.float32)
+                                try:
+                                    vel = ps.toggled_dynamic_velocity.get(oid, vel)
+                                except Exception:
+                                    pass
+                                ps._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
+                                ps.toggled_activated.add(oid)
+                                ps.toggled_index = int(ps.toggled_index) + 1
+                                try:
+                                    ps.initialize_object_particle_num()
+                                except Exception:
+                                    pass
+                                try:
+                                    if ps.num_rigid_bodies > 0:
+                                        ps.initialize_rigid_mass()
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                 except Exception:
-                    # Avoid UI crash on toggle
                     pass
 
         if export_ply and frame_cnt > end_frame:
@@ -495,10 +540,14 @@ if __name__ == "__main__":
         # Apply animation when paused for immediate feedback
         if not runSim and animator.has_animations():
             try:
-                # if anim_auto_mode and runAnim:
-                #     animator.apply(anim_time)
-                # else:
-                animator.apply_manual()
+                now_wall = time.perf_counter()
+                if anim_auto_mode and runAnim:
+                    # advance time by wall clock and apply auto animations
+                    anim_time += float(now_wall - prev_anim_walltime)
+                    animator.apply(anim_time)
+                else:
+                    animator.apply_manual()
+                prev_anim_walltime = now_wall
             except Exception:
                 pass
 
@@ -570,6 +619,8 @@ if __name__ == "__main__":
             # advance time only in auto-running mode
             if anim_auto_mode and runAnim:
                 anim_time += dt_frame
+            else:
+                prev_anim_walltime = time.perf_counter()
             solver.dt = dt_frame
             frame_cnt += 1
 
