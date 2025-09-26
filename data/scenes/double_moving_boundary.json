@@ -3,7 +3,7 @@
 	{
         "domainStart": [0.0, 0.0, 0.0],
         "domainEnd": [4.2, 4.2, 7.0],
-		"particleRadius": 0.02,
+		"particleRadius": 0.03,
 		"numSubstepping": 1,
 		"density0": 1000,
 		"simulationMethod": 2,
@@ -13,7 +13,7 @@
 		"exponent": 7,
 		"boundaryHandlingMethod": 0,
 		"exportFrame": false,
-		"exportPly": true,
+		"exportPly": false,
 		"exportObj": false,
 		"transparentObjects": [1,4],
 		"alpha": 0.3
@@ -60,8 +60,8 @@
 				"type": "oscillate",
 				"auto": true,
 				"axis": "z",
-				"amplitude": 2.5,
-				"period": 10.0,
+				"amplitude": 2.50,
+				"period": 5.0,
 				"phase": 0.0
 			}
 		},
@@ -80,8 +80,8 @@
 				"type": "oscillate",
 				"auto": true,
 				"axis": "z",
-				"amplitude": -2.5,
-				"period": 10.0,
+				"amplitude": -2.50,
+				"period": 5.0,
 				"phase": 0.0
 			}
 		},

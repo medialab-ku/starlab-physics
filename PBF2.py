@@ -1125,12 +1125,12 @@ class PBF2Solver(SPHBase):
                 self.compute_f_derivative(self.dfdt, self.t, self.eps)
                 coef_wise_mul(self.f, self.f, self.k)
                 self.compute_J_tr_x(g, self.f)
-                coef_wise_div(p, g, self.ps.m)
+                # coef_wise_div(p, g, self.ps.m)
 
                 # if self.smooth_max:
 
                 #     if not self.use_pcg:
-                #         p.fill(0.0)
+                p.fill(0.0)
 
                 self.PCG(x=p, b=g)
 
