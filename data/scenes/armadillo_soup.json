@@ -1,0 +1,172 @@
+{
+	"Configuration":
+	{
+        "domainStart": [0.0, 0.0, 0.0],
+        "domainEnd": [10.0, 10.0, 10.0],
+		"particleRadius": 0.03,
+		"numSubstepping": 1,
+		"density0": 1000,
+		"simulationMethod": 2,
+		"gravitation": [0.0, -9.81, 0.0],
+		"timeStepSize": 0.002,
+		"stiffness": 50000,
+		"exponent": 7, 
+		"boundaryHandlingMethod": 0,
+		"exportFrame": false,
+		"exportPly": false,
+		"exportObj": false,
+        "transparentObjects": [2],
+        "alpha": 0.2
+	},
+    "Emitter": {
+		"capacity": 300000,
+		"reuse": false,
+		"emitters": [
+			{
+				"type": "circle",
+				"width": 18,
+				"height": 18,
+				"position": [0.5, 6.0, 5.5],
+				"direction": [1.0, -0.5, 0.0],
+				"velocity": 5.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 0,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			},
+			{
+				"type": "circle",
+				"width": 18,
+				"height": 18,
+				"position": [9.5, 6.0, 4.5],
+				"direction": [-1.0, -0.5, 0.0],
+				"velocity": 5.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"endTime": 10.0,
+				"objectId": 1,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			}
+		]
+	},
+    "RigidBodies": [
+        {
+			"objectId": 2,
+			"geometryFile": "./data/models/BowlH.obj",
+			"translation": [5.0, 0.1, 5.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [3.0, 3.0, 3.0],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 10000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": false,
+            "isToggled": false
+		},
+        {
+			"objectId": 3,
+			"geometryFile": "./data/models/armadillo_small.obj",
+			"translation": [3.5, 6.5, 3.5],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.5, 0.5, 0.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 800.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 4,
+			"geometryFile": "./data/models/armadillo_small.obj",
+			"translation": [5.5, 6.5, 7.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.5, 0.5, 0.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 600.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 5,
+			"geometryFile": "./data/models/armadillo_small.obj",
+			"translation": [7.0, 6.5, 5.0],
+			"rotationAxis": [0, 0, 1],
+			"rotationAngle": 0,
+			"scale": [0.5, 0.5, 0.5],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 700.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 6,
+			"geometryFile": "./data/models/mushroom.obj",
+			"translation": [4.0, 6.5, 6.0],
+			"rotationAxis": [1, 0, 1],
+			"rotationAngle": 90,
+			"scale": [0.2, 0.2, 0.2],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 500.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 7,
+			"geometryFile": "./data/models/bread.obj",
+			"translation": [5.0, 6.5, 3.5],
+			"rotationAxis": [1, 1, 1],
+			"rotationAngle": 90,
+			"scale": [0.05, 0.05, 0.05],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 800.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 8,
+			"geometryFile": "./data/models/mushroom.obj",
+			"translation": [3.0, 6.5, 5.0],
+			"rotationAxis": [0, 1, 1],
+			"rotationAngle": 90,
+			"scale": [0.2, 0.2, 0.2],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 500.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+            "isToggled": true
+		},
+		{
+			"objectId": 9,
+			"geometryFile": "./data/models/metal_ladel_rotated.obj",
+			"translation": [7.2, 1.5, 7.2],
+			"rotationAxis": [0, 1, 0],
+			"rotationAngle": 110,
+			"scale": [0.2, 0.2, 0.2],
+			"velocity": [0.0, 0.0, 0.0],
+			"density": 10000.0,
+			"color": [255, 255, 255, 1.0],
+			"isDynamic": true,
+			"isToggled": true,
+            "animation": {
+                "type": "rotate",
+                "axisVec": [0, 1, 0],
+				"pivot": [5.0, 5.0, 5.0],
+                "period": 8.0,
+                "phase": 0.0,
+                "auto": true
+            }
+		}
+    ]
+}
+

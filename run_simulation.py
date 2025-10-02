@@ -3,6 +3,7 @@ import argparse
 import taichi as ti
 import numpy as np
 import time
+import trimesh as tm
 from config_builder import SimConfig
 from particle_system import ParticleSystem
 from animation import AnimationSystem
@@ -23,9 +24,10 @@ if __name__ == "__main__":
     scene_path = args.scene_file
     config = SimConfig(scene_file_path=scene_path)
     scene_name = scene_path.split("/")[-1].split(".")[0]
-    # Per-run PLY output directory: output/<scene>/<timestamp>
+    # Per-run PLY/OBJ output directory: output/<scene>/<timestamp>
     timestamp_str = time.strftime("%Y%m%d-%H%M%S")
     ply_out_dir = os.path.join("output", scene_name, timestamp_str)
+    obj_out_dir = os.path.join("output", scene_name, timestamp_str, "mesh_obj")
 
     substeps = config.get_cfg("numSubstepping")
     # print(substeps)
@@ -38,6 +40,8 @@ if __name__ == "__main__":
         os.makedirs(f"{scene_name}_output_img", exist_ok=True)
     if output_ply:
         os.makedirs(ply_out_dir, exist_ok=True)
+    if output_obj:
+        os.makedirs(obj_out_dir, exist_ok=True)
 
     method = config.get_cfg("simulationMethod")
     ps = ParticleSystem(config, GGUI=True)
@@ -96,6 +100,7 @@ if __name__ == "__main__":
 
     # Export options
     export_rigid_objects = False
+    export_rigid_mesh = bool(output_obj)
     export_stats = False
 
 
@@ -196,14 +201,15 @@ if __name__ == "__main__":
         global export_rigid_objects
         global export_ply
         global export_stats
+        global export_rigid_mesh
 
         with gui.sub_window("Visualization settings", 0.0, 0.4, 0.4, 0.3) as w:
 
-            export_ply = w.checkbox("export", export_ply)
+            export_ply = w.checkbox("export particles (PLY)", export_ply)
             if export_ply:
-                export_rigid_objects = w.checkbox("Export rigid objects", export_rigid_objects)
-
-            if export_ply:
+                export_rigid_objects = w.checkbox("Export rigid particles", export_rigid_objects)
+            export_rigid_mesh = w.checkbox("Export rigid mesh (OBJ)", export_rigid_mesh)
+            if export_ply or export_rigid_mesh:
                 end_frame = w.slider_int("end frame", end_frame, 0, int(3e4))
             export_stats = w.checkbox("export stats", export_stats)
 
@@ -346,6 +352,7 @@ if __name__ == "__main__":
 
     cnt = 0
     cnt_ply = 0
+    cnt_obj = 0
     runSim = False
 
     @ti.kernel
@@ -354,6 +361,37 @@ if __name__ == "__main__":
             R[i] = ti.math.mat3([[1.0, 0.0, 0.0],
                                 [0.0, 1.0, 0.0],
                                 [0.0, 0.0, 1.0]])
+
+    # --- helper: compute rigid transform (R, t) by Kabsch from particles ---
+    def compute_rigid_transform_from_particles(obj_id: int):
+        N = int(ps.particle_num[None])
+        if N <= 0:
+            R = np.eye(3, dtype=np.float32)
+            t = np.zeros(3, dtype=np.float32)
+            return R, t
+        obj_ids = ps.object_id.to_numpy()[:N]
+        mats = ps.material.to_numpy()[:N]
+        mask = (obj_ids == obj_id) & (mats == ps.material_solid)
+        if not np.any(mask):
+            R = np.eye(3, dtype=np.float32)
+            t = np.zeros(3, dtype=np.float32)
+            return R, t
+        X0 = ps.x_0.to_numpy()[:N][mask].astype(np.float32)
+        X  = ps.x.to_numpy()[:N][mask].astype(np.float32)
+        c0 = X0.mean(axis=0)
+        c  = X.mean(axis=0)
+        P = X0 - c0
+        Q = X - c
+        R = np.eye(3, dtype=np.float32)
+        if P.shape[0] >= 3:
+            H = P.T @ Q
+            U, S, Vt = np.linalg.svd(H)
+            R = Vt.T @ U.T
+            if np.linalg.det(R) < 0:
+                Vt[-1, :] *= -1
+                R = Vt.T @ U.T
+        t = c - R @ c0
+        return R.astype(np.float32), t.astype(np.float32)
 
     while window.running:
 
@@ -422,6 +460,15 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     anim_time = 0.0
+                    # Reset toggled rigid bodies to static state
+                    try:
+                        ps.reset_toggled_state()
+                    except Exception:
+                        pass
+                    try:
+                        animator.reset_toggle_activation()
+                    except Exception:
+                        pass
                     # Clear per-session stats
                     _clear_solver_stats_if_any()
                     try:
@@ -445,6 +492,15 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     anim_time = 0.0
+                    # Ensure any toggled bodies start static after full rebuild
+                    try:
+                        ps.reset_toggled_state()
+                    except Exception:
+                        pass
+                    try:
+                        animator.reset_toggle_activation()
+                    except Exception:
+                        pass
                     anim_auto_mode = bool(animator.has_auto())
                     runAnim = False
                     try:
@@ -463,17 +519,77 @@ if __name__ == "__main__":
                 # Manual mode: discrete press will be ignored; we handle continuous below
                 pass
 
-        if export_ply and frame_cnt > end_frame:
+            # ----- Toggle dynamic rigid bodies and/or gated animations -----
+            if window.event.key == 't':
+                try:
+                    oid = -1
+                    try:
+                        n = len(ps.toggled_ids_sorted)
+                        idx = int(ps.toggled_index)
+                        while idx < n and (ps.toggled_ids_sorted[idx] in ps.toggled_activated):
+                            idx += 1
+                        if idx < n:
+                            oid = int(ps.toggled_ids_sorted[idx])
+                    except Exception:
+                        oid = -1
+                    if oid != -1:
+                        # If this object has an animation, enable it; otherwise switch to dynamic
+                        try:
+                            if animator.has_animation_for(oid):
+                                # Start its animation at 0 at the moment of toggle
+                                animator.enable_animation_for_with_time(oid, anim_time)
+                                # Ensure auto animation is playing; also apply once immediately
+                                try:
+                                    animator.apply(anim_time)
+                                except Exception:
+                                    pass
+                                try:
+                                    # If any auto anims exist and at least one is enabled, turn on runAnim
+                                    anim_auto_mode = bool(animator.has_auto())
+                                    if anim_auto_mode:
+                                        runAnim = True
+                                except Exception:
+                                    pass
+                                ps.toggled_activated.add(oid)
+                                ps.toggled_index = int(ps.toggled_index) + 1
+                            else:
+                                vel = np.zeros(ps.dim, dtype=np.float32)
+                                try:
+                                    vel = ps.toggled_dynamic_velocity.get(oid, vel)
+                                except Exception:
+                                    pass
+                                ps._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
+                                ps.toggled_activated.add(oid)
+                                ps.toggled_index = int(ps.toggled_index) + 1
+                                try:
+                                    ps.initialize_object_particle_num()
+                                except Exception:
+                                    pass
+                                try:
+                                    if ps.num_rigid_bodies > 0:
+                                        ps.initialize_rigid_mass()
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+        if (export_ply or export_rigid_mesh) and frame_cnt > end_frame:
             runSim = False
             _export_solver_stats_if_any()
 
         # Apply animation when paused for immediate feedback
         if not runSim and animator.has_animations():
             try:
-                # if anim_auto_mode and runAnim:
-                #     animator.apply(anim_time)
-                # else:
-                animator.apply_manual()
+                now_wall = time.perf_counter()
+                if anim_auto_mode and runAnim:
+                    # advance time by wall clock and apply auto animations
+                    anim_time += float(now_wall - prev_anim_walltime)
+                    animator.apply(anim_time)
+                else:
+                    animator.apply_manual()
+                prev_anim_walltime = now_wall
             except Exception:
                 pass
 
@@ -545,6 +661,8 @@ if __name__ == "__main__":
             # advance time only in auto-running mode
             if anim_auto_mode and runAnim:
                 anim_time += dt_frame
+            else:
+                prev_anim_walltime = time.perf_counter()
             solver.dt = dt_frame
             frame_cnt += 1
 
@@ -646,6 +764,31 @@ if __name__ == "__main__":
 
                             writer.export_frame_ascii(cnt_ply, series_prefix.format(0))
                     cnt_ply += 1
+
+                # Export rigid meshes (OBJ) using per-frame rigid transform
+                if export_rigid_mesh and len(ps.object_id_rigid_body) > 0:
+                    try:
+                        os.makedirs(obj_out_dir, exist_ok=True)
+                    except Exception:
+                        pass
+                    for r_body_id in ps.object_id_rigid_body:
+                        try:
+                            rb = ps.object_collection.get(r_body_id, None)
+                            if rb is None:
+                                continue
+                            mesh_rest = rb.get("mesh", None)
+                            if mesh_rest is None:
+                                continue
+                            Rm, tm_vec = compute_rigid_transform_from_particles(int(r_body_id))
+                            V_rest = np.asarray(mesh_rest.vertices, dtype=np.float32)
+                            V_tr = V_rest @ Rm.T + tm_vec[None, :]
+                            F = np.asarray(mesh_rest.faces) if hasattr(mesh_rest, "faces") else None
+                            mesh_out = tm.Trimesh(vertices=V_tr, faces=F, process=False)
+                            out_path = os.path.join(obj_out_dir, f"obj_{int(r_body_id)}_{cnt_obj:06}.obj")
+                            mesh_out.export(out_path)
+                        except Exception:
+                            pass
+                    cnt_obj += 1
 
         ps.copy_to_vis_buffer(invisible_objects=invisible_objects)
         if ps.dim == 2:
@@ -791,12 +934,6 @@ if __name__ == "__main__":
         if output_frames:
             if cnt % output_interval == 0:
                 window.write_image(f"{scene_name}_output_img/{cnt:06}.png")
-        
-        if output_obj:
-            for r_body_id in ps.object_id_rigid_body:
-                with open(f"{scene_name}_output/obj_{r_body_id}_{cnt_ply:06}.obj", "w") as f:
-                    e = ps.object_collection[r_body_id]["mesh"].export(file_type='obj')
-                    f.write(e)
 
         cnt += 1
         # if cnt > 6000:
