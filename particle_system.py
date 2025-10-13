@@ -159,7 +159,6 @@ class ParticleSystem:
         # Particle num of each grid
         self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
         self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
-
         self.prefix_sum_executor = ti.algorithms.PrefixSumExecutor(self.grid_particles_num.shape[0])
 
         # Particle related properties
@@ -733,7 +732,7 @@ class ParticleSystem:
                 end = self.grid_particles_num[grid_index]
                 for p_j in range(start, end):
                 # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
-                    if p_i != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
+                    if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.support_radius:
                         if self.fluid_neighbors_num[p_i] < self.cache_size:
                             self.fluid_neighbors[p_i, self.fluid_neighbors_num[p_i]] = p_j 
                             self.fluid_neighbors_num[p_i] += 1

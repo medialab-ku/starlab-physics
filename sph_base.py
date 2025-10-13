@@ -22,6 +22,8 @@ class SPHBase:
         except Exception:
             pass
 
+
+
         self.viscosity = 0.01  # viscosity
         self.surface_tension = 0.01
         self.adhesion_coeff = self.surface_tension
@@ -31,7 +33,8 @@ class SPHBase:
         self.time = 0.0
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
         self.nablaWij = self.spiky_kernel_derivative
-
+        # self.nablaWij = self.spiky_kernel_derivative
+        self.Wij = self.cubic_kernel
 
 
     @ti.func
@@ -144,6 +147,30 @@ class SPHBase:
 
         return res
 
+    @ti.kernel
+    def initialize_boundary_neighbors(self):
+        for p_i in ti.grouped(self.ps.x):
+            sum_Wij = 0.0
+            # Condition for boundary particles
+            if self.ps.material[p_i] == self.ps.material_solid:
+
+                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    if self.ps.material[p_j] != self.ps.material_solid:
+                        continue
+
+                    if self.ps.object_id[p_j] != self.ps.object_id[p_i]:
+                        continue
+
+                    sum_Wij += self.Wij((self.ps.x[p_i] - self.ps.x[p_j]).norm())
+
+                if sum_Wij > 1e-12:
+                    self.ps.m[p_i] = 1.5 * self.ps.density0[p_i] / sum_Wij
+                    self.ps.m_V[p_i] = self.ps.m[p_i] / self.ps.density0[p_i]
+                    # Keep inverse mass consistent (static solids keep 0 inv mass)
+                    if self.ps.is_dynamic[p_i]:
+                        self.ps.m_inv[p_i] = 1.0 / (self.ps.m[p_i] + 1e-12)
+
 
     def initialize(self):
         self.ps.initialize_particle_system()
@@ -155,7 +182,7 @@ class SPHBase:
 
         self.compute_static_boundary_volume()
         self.compute_moving_boundary_volume()
-        self.ps.initialize_boundary_neighbors()
+        self.initialize_boundary_neighbors()
 
         if self.ps.num_rigid_bodies > 0:
             self.ps.initialize_rigid_mass()
@@ -393,31 +420,31 @@ class SPHBase:
                 self.ps.v[p_i] = self.ps.v_cm_rb[obj] + ti.math.cross(self.ps.omega_rb[obj], r)
 
     def step(self):
-        dt_used = self.dt
-        try:
-            if getattr(self, "cfl", False) and hasattr(self, "compute_cfl_dt"):
-                dt_used = float(self.compute_cfl_dt(dt_used))
-                self.dt = dt_used
-        except Exception:
-            dt_used = self.dt
+        # dt_used = self.dt
+        # try:
+        #     if getattr(self, "cfl", False) and hasattr(self, "compute_cfl_dt"):
+        #         dt_used = float(self.compute_cfl_dt(dt_used))
+        #         self.dt = dt_used
+        # except Exception:
+        #     dt_used = self.dt
+        #
+        #
+        # if hasattr(self.ps, 'emitter_system') and self.ps.emitter_system is not None:
+        #     dt = self.dt
+        #     self.ps.emitter_system.step(self.time, dt)
+        #     self.time += dt
 
-
-        if hasattr(self.ps, 'emitter_system') and self.ps.emitter_system is not None:
-            dt = self.dt
-            self.ps.emitter_system.step(self.time, dt)
-            self.time += dt
-
-        self.ps.initialize_particle_system()
+        # self.ps.initialize_particle_system()
         # Age advances once per solver step (before substep), so new particles get brief stabilization
-        try:
-            self.ps.increment_age()
-        except Exception:
-            pass
-        self.compute_moving_boundary_volume()
+        # try:
+        #     self.ps.increment_age()
+        # except Exception:
+        #     pass
+        # self.compute_moving_boundary_volume()
         self.substep()
-        self.enforce_boundary_3D(self.ps.material_solid)
-
-        if self.ps.dim == 2:
-            self.enforce_boundary_2D(self.ps.material_fluid)
-        elif self.ps.dim == 3:
-            self.enforce_boundary_3D(self.ps.material_fluid)
+        # self.enforce_boundary_3D(self.ps.material_solid)
+        #
+        # if self.ps.dim == 2:
+        #     self.enforce_boundary_2D(self.ps.material_fluid)
+        # elif self.ps.dim == 3:
+        #     self.enforce_boundary_3D(self.ps.material_fluid)
