@@ -578,78 +578,8 @@ class ParticleSystem:
     @ti.func
     def is_dynamic_rigid_body(self, p):
         return self.material[p] == self.material_solid and self.is_dynamic[p]
-    
-    @ti.kernel
-    def update_grid_id(self):
-        for I in ti.grouped(self.grid_particles_num):
-            self.grid_particles_num[I] = 0
-        for p in range(self.particle_num[None]):
-            grid_index = self.get_flatten_grid_index(self.x[p])
-            self.grid_ids[p] = grid_index
-            ti.atomic_add(self.grid_particles_num[grid_index], 1)
-        for I in ti.grouped(self.grid_particles_num):
-            self.grid_particles_num_temp[I] = self.grid_particles_num[I]
-    
 
-    @ti.kernel
-    def counting_sort(self):
-        n = self.particle_num[None]
 
-        for i in range(n):
-            I = n - 1 - i
-            base_offset = 0
-            if self.grid_ids[I] - 1 >= 0:
-                base_offset = self.grid_particles_num[self.grid_ids[I] - 1]
-            self.grid_ids_new[I] = ti.atomic_sub(self.grid_particles_num_temp[self.grid_ids[I]], 1) - 1 + base_offset
-
-        for I in range(n):
-            new_index = self.grid_ids_new[I]
-            self.grid_ids_buffer[new_index] = self.grid_ids[I]
-            self.object_id_buffer[new_index] = self.object_id[I]
-            self.x_0_buffer[new_index] = self.x_0[I]
-            self.x_buffer[new_index] = self.x[I]
-            self.v_buffer[new_index] = self.v[I]
-            self.acceleration_buffer[new_index] = self.acceleration[I]
-            self.m_V_buffer[new_index] = self.m_V[I]
-            self.m_buffer[new_index] = self.m[I]
-            self.m_inv_buffer[new_index] = self.m_inv[I]
-            self.density_buffer[new_index] = self.density[I]
-            self.density0_buffer[new_index] = self.density0[I]
-            self.pressure_buffer[new_index] = self.pressure[I]
-            self.material_buffer[new_index] = self.material[I]
-            self.color_buffer[new_index] = self.color[I]
-            self.is_dynamic_buffer[new_index] = self.is_dynamic[I]
-            self.n_buffer[new_index] = self.n[I]
-            if ti.static(self.simulation_method == 4):
-                self.dfsph_factor_buffer[new_index] = self.dfsph_factor[I]
-                self.density_adv_buffer[new_index] = self.density_adv[I]
-
-        for I in range(n):
-            self.grid_ids[I] = self.grid_ids_buffer[I]
-            self.object_id[I] = self.object_id_buffer[I]
-            self.x_0[I] = self.x_0_buffer[I]
-            self.x[I] = self.x_buffer[I]
-            self.v[I] = self.v_buffer[I]
-            self.acceleration[I] = self.acceleration_buffer[I]
-            self.m_V[I] = self.m_V_buffer[I]
-            self.m[I] = self.m_buffer[I]
-            self.m_inv[I] = self.m_inv_buffer[I]
-            self.density[I] = self.density_buffer[I]
-            self.density0[I] = self.density0_buffer[I]
-            self.pressure[I] = self.pressure_buffer[I]
-            self.material[I] = self.material_buffer[I]
-            self.color[I] = self.color_buffer[I]
-            self.is_dynamic[I] = self.is_dynamic_buffer[I]
-            self.n[I] = self.n_buffer[I]
-            if ti.static(self.simulation_method == 4):
-                self.dfsph_factor[I] = self.dfsph_factor_buffer[I]
-                self.density_adv[I] = self.density_adv_buffer[I]
-    
-
-    def initialize_particle_system(self):
-        self.update_grid_id()
-        self.prefix_sum_executor.run(self.grid_particles_num)
-        self.counting_sort()
 
     @ti.kernel
     def increment_age(self):

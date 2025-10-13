@@ -8,6 +8,7 @@ from config_builder import SimConfig
 from particle_system import ParticleSystem
 from framework import Framework
 from neighbour_search import NeighborSearch
+from pressure import Pressure
 from animation import AnimationSystem
 from cache_system import SimulationCache
 import matplotlib.pyplot as plt
@@ -47,7 +48,8 @@ if __name__ == "__main__":
     # method = config.get_cfg("simulationMethod")
     ps = ParticleSystem(config, GGUI=True)
     ns = NeighborSearch(config, ps)
-    fw = Framework(ps, ns)
+    pressure = Pressure(ps)
+    fw = Framework(ps, ns, pressure)
     # solver = ps.build_solver()
     fw.initialize()
 
@@ -143,29 +145,28 @@ if __name__ == "__main__":
         with gui.sub_window("Solver settings", 0., 0., 0.4, 0.3) as w:
 
             fw.dt = w.slider_float("dt", fw.dt, 0.001, 0.04)
-            fw.cfl = w.checkbox("CFL", fw.cfl)
-            fw.num_substep = w.slider_int("substepping", fw.num_substep, 1, 100)
+            # fw.cfl = w.checkbox("CFL", fw.cfl)
+            # fw.num_substep = w.slider_int("substepping", fw.num_substep, 1, 100)
 
             # if method == 2:
-            fw.tol_opt = w.slider_int("opt tol magnitude", fw.tol_opt, 1, 7)
-            fw.max_iteration_opt = w.slider_int("max opt. iter", fw.max_iteration_opt, 1, 1000)
-
-            fw.density_error = w.checkbox("density error", fw.density_error)
-            fw.iisph = w.checkbox("iisph", fw.iisph)
-
-            if fw.iisph:
-                fw.omega = w.slider_float("relaxation", fw.omega, 0.001, 2.0)
-
-            else:
-                fw.smooth_max = w.checkbox("smooth max(Ours)", fw.smooth_max)
-                if fw.smooth_max:
-                    fw.eps = w.slider_float("eps", fw.eps, 0.001, 10.0)
-                    fw.max_iteration_pcg = w.slider_int("max pcg. iter", fw.max_iteration_pcg, 1, 1000)
-                    fw.tol_pcg = w.slider_int("pcg tol magnitude", fw.tol_pcg, 1, 15)
-
-                    fw.use_pcg = w.checkbox("warm-start", fw.use_pcg)
-
-            fw.enable_DF = w.checkbox("DF solve", fw.enable_DF)
+            # fw.tol_opt = w.slider_int("opt tol magnitude", fw.tol_opt, 1, 7)
+            # fw.max_iteration_opt = w.slider_int("max opt. iter", fw.max_iteration_opt, 1, 1000)
+            #
+            # fw.density_error = w.checkbox("density error", fw.density_error)
+            # # fw.iisph = w.checkbox("iisph", fw.iisph)
+            #
+            # # if fw.iisph:
+            # #     fw.omega = w.slider_float("relaxation", fw.omega, 0.001, 2.0)
+            #
+            # # else:
+            #     # fw.smooth_max = w.checkbox("smooth max(Ours)", fw.smooth_max)
+            #     # if fw.smooth_max:
+            # fw.eps = w.slider_float("eps", fw.eps, 0.001, 10.0)
+            # fw.max_iteration_pcg = w.slider_int("max pcg. iter", fw.max_iteration_pcg, 1, 1000)
+            # fw.tol_pcg = w.slider_int("pcg tol magnitude", fw.tol_pcg, 1, 15)
+            # fw.use_pcg = w.checkbox("warm-start", fw.use_pcg)
+            #
+            # fw.enable_DF = w.checkbox("DF solve", fw.enable_DF)
 
             try:
                 N_active = int(ps.particle_num[None])
@@ -559,14 +560,14 @@ if __name__ == "__main__":
         if runSim:
 
             dt_frame = fw.dt
-            dt_sub = dt_frame / fw.num_substep
+            dt_sub = dt_frame
             try:
                 if getattr(fw, "cfl", False) and hasattr(fw, "compute_cfl_dt"):
                     dt_sub = float(fw.compute_cfl_dt(dt_sub))
             except Exception:
                 pass
             fw.dt = dt_sub
-            for i in range(fw.num_substep):
+            for i in range(1):
                 # apply animation each substep depending on mode
                 if animator.has_animations():
                     try:
@@ -579,7 +580,7 @@ if __name__ == "__main__":
                         pass
                 # provide current global substep index to solver for per-iteration frame tagging
                 try:
-                    fw.current_frame = int(frame_cnt * fw.num_substep + i)
+                    fw.current_frame = int(frame_cnt  + i)
                 except Exception:
                     pass
                 # Manual continuous input handling for smooth motion (manual mode)
@@ -619,7 +620,7 @@ if __name__ == "__main__":
                             animator.nudge_rotate_axis(2, -rot_delta)  # z-
                         except Exception:
                             pass
-                fw.step()
+                fw.forward()
 
             # advance time only in auto-running mode
             if anim_auto_mode and runAnim:
