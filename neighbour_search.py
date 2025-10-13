@@ -106,26 +106,32 @@ class NeighborSearch:
            ps.n[I]            = ps.n_buffer[I]
 
     @ti.kernel
-    def search_neighbours(self, ps: ti.template()):
-        for p_i in range(ps.particle_num[None]):
-            ps.fluid_neighbors_num[p_i] = 0
-            ps.solid_neighbors_num[p_i] = 0
-            center_cell = self.pos_to_index(ps.x[p_i])
+    def narrow_phase(self, x: ti.template()):
+        for p_i in range(self.ps.particle_num[None]):
+            self.ps.fluid_neighbors_num[p_i] = 0
+            self.ps.solid_neighbors_num[p_i] = 0
+            center_cell = self.pos_to_index(x[p_i])
             for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
                 nbr_cell = self.clamp_cell(center_cell + offset)
                 grid_index = self.flatten_grid_index(nbr_cell)
                 start = 0
                 if grid_index > 0:
-                    start = ps.grid_particles_num[grid_index - 1]
+                    start = self.ps.grid_particles_num[grid_index - 1]
 
-                end = ps.grid_particles_num[grid_index]
+                end = self.ps.grid_particles_num[grid_index]
                 for p_j in range(start, end):
                     # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
-                    if p_i != p_j and (ps.x[p_i] - ps.x[p_j]).norm() < ps.support_radius:
-                        if ps.fluid_neighbors_num[p_i] < ps.cache_size:
-                            ps.fluid_neighbors[p_i, ps.fluid_neighbors_num[p_i]] = p_j
-                            ps.fluid_neighbors_num[p_i] += 1
-                        if ps.material[p_i] == ps.material_solid and ps.material[p_j] == ps.material_solid:
-                            if ps.solid_neighbors_num[p_i] < ps.cache_size:
-                                ps.solid_neighbors[p_i, ps.solid_neighbors_num[p_i]] = p_j
-                                ps.solid_neighbors_num[p_i] += 1
+                    if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.ps.support_radius:
+                        if self.ps.fluid_neighbors_num[p_i] < self.ps.cache_size:
+                            self.ps.fluid_neighbors[p_i, self.ps.fluid_neighbors_num[p_i]] = p_j
+                            self.ps.fluid_neighbors_num[p_i] += 1
+                        if self.ps.material[p_i] == self.ps.material_solid and self.ps.material[p_j] == self.ps.material_solid:
+                            if self.ps.solid_neighbors_num[p_i] < self.ps.cache_size:
+                                self.ps.solid_neighbors[p_i, self.ps.solid_neighbors_num[p_i]] = p_j
+                                self.ps.solid_neighbors_num[p_i] += 1
+
+
+    def broad_phase(self):
+        self.update_grid_id(self.ps)
+        self.prefix_sum_executor.run(self.ps.grid_particles_num)
+        self.counting_sort(self.ps)

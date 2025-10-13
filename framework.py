@@ -15,6 +15,16 @@ class Framework(SPHBase):
         self.ns = neighbour_search
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
         self.lda = self.ps.pressure
+
+        self.g = ti.Vector([0.0, -9.81, 0.0])  # Gravity
+
+        self.viscosity = 0.01  # viscosity
+        self.surface_tension = 0.01
+        self.adhesion_coeff = self.surface_tension
+        self.time = 0.0
+        self.nablaWij = self.spiky_kernel_derivative
+        self.Wij = self.cubic_kernel
+
         self.method = 1
         self.iisph = False
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
@@ -613,7 +623,7 @@ class Framework(SPHBase):
         r_old = self.dot(r, r)
         pcg_iter = 0
         # if r_old > pow(10, -self.tol_pcg):
-        if self.smooth_max and r_old > 1e-12:
+        if r_old > 1e-12:
             p.copy_from(r)
             for _ in range(self.max_iteration_pcg):
                 # Ap.fill(0.0)
@@ -733,77 +743,37 @@ class Framework(SPHBase):
 
             self.compute_J_x(Jd, d)
             self.add(self.t, Jd, 1.0, c)
-            if self.iisph:
-                self.f.copy_from(self.t)
-                max(self.f)
+
+            err_log = 0.0
+            self.compute_f(self.f, self.t, self.eps)
+            self.compute_f_derivative(self.dfdt, self.t, self.eps)
+            coef_wise_mul(self.f, self.f, self.k)
+            self.compute_J_tr_x(g, self.f)
+
+            p.fill(0.0)
+
+            self.PCG(x=p, b=g)
+            self.add(d, d, -self.omega, p)
+
+            if self.density_error:
                 err = self.compute_avg_density_error(self.f)
-
-                err_log = self.dot(p, p)
-                # Collect optimizer error per iteration
-                self.stats_opt_error.append(float(err_log))
-                try:
-                    self.stats_opt_error_frame.append(int(self.current_frame))
-                except Exception:
-                    self.stats_opt_error_frame.append(0)
-                if self.print_opt_error:
-                    print(f"opt error: {err_log}")
-
-                # Count this iteration before break check so that opt_iter matches logged errors
-                opt_iter += 1
-                if ((err < pow(10, -self.tol_opt)) and (opt_iter > 1)) or (opt_iter >= self.max_iteration_opt):
-                    break
-
-                coef_wise_div(self.dp, self.t, self.Aii)
-                self.add(self.p, self.p, 0.5, self.dp)
-                max(self.p)
-                self.compute_J_tr_x(g, self.p)
-                coef_wise_div(g, g, self.ps.m)
-                self.add(d, d, -1.0, g)
-
             else:
-                err_log = 0.0
-                self.compute_f(self.f, self.t, self.eps)
+                err = self.dot(p, p)
+            err_log = self.dot(p, p)
 
-                # self.f.copy_from(self.t)
-                # max(self.f)
-                self.compute_f_derivative(self.dfdt, self.t, self.eps)
-                coef_wise_mul(self.f, self.f, self.k)
-                self.compute_J_tr_x(g, self.f)
-                # coef_wise_div(p, g, self.ps.m)
 
-                # if self.smooth_max:
+            self.stats_opt_error.append(float(err_log))
+            try:
+                self.stats_opt_error_frame.append(int(self.current_frame))
+            except Exception:
+                self.stats_opt_error_frame.append(0)
+            if self.print_opt_error:
+                print(f"opt error: {err_log}")
 
-                #     if not self.use_pcg:
-                p.fill(0.0)
-
-                self.PCG(x=p, b=g)
-
-                # Bender et al. 2014 (Constant density solver OF DFSPH)
-                # else:
-                #     coef_wise_div(p, g, self.ps.m)
-
-                self.add(d, d, -self.omega, p)
-                # err = inf_norm(p)
-                # err = dot2(Jd, Jd)
-                if self.density_error:
-                    err = self.compute_avg_density_error(self.f)
-                else:
-                    err = self.dot(p, p)
-                err_log = self.dot(p, p)
-
-                # Collect optimizer error per iteration
-                self.stats_opt_error.append(float(err_log))
-                try:
-                    self.stats_opt_error_frame.append(int(self.current_frame))
-                except Exception:
-                    self.stats_opt_error_frame.append(0)
-                if self.print_opt_error:
-                    print(f"opt error: {err_log}")
-
-                # Count this iteration before break check so that opt_iter matches logged errors
-                opt_iter += 1
-                if ((err < pow(10, -self.tol_opt)) and (opt_iter > 2)) or (opt_iter >= self.max_iteration_opt):
-                    break
+            # Count this iteration before break check so that opt_iter matches logged errors
+            opt_iter += 1
+            if ((err < pow(10, -self.tol_opt)) and (opt_iter > 2)) or (opt_iter >= self.max_iteration_opt):
+                break
 
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         # Collect elapsed time per outer solve
@@ -881,10 +851,8 @@ class Framework(SPHBase):
 
     def substep(self):
 
-        self.ns.update_grid_id(self.ps)
-        self.ps.prefix_sum_executor.run(self.ps.grid_particles_num)
-        self.ns.counting_sort(self.ps)
-        self.ns.search_neighbours(self.ps)
+        self.ns.broad_phase()
+        self.ns.narrow_phase(self.ps.x)
 
         self.pcg_total_iter = 0
         self.compute_normal()
