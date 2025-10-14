@@ -57,7 +57,7 @@
 	"RigidBodies" : [
 		{
 			"objectId": 1,
-			"geometryFile": "./data/models/BoxWide.obj",
+			"geometryFile": "./data/models/boxWide.obj",
 			"translation": [1.25, 0.1, 1.25],
 			"rotationAxis": [0, 0, 1],
 			"rotationAngle": 0,

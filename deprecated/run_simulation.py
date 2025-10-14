@@ -26,8 +26,8 @@ if __name__ == "__main__":
     scene_name = scene_path.split("/")[-1].split(".")[0]
     # Per-run PLY/OBJ output directory: output/<scene>/<timestamp>
     timestamp_str = time.strftime("%Y%m%d-%H%M%S")
-    ply_out_dir = os.path.join("output", scene_name, timestamp_str)
-    obj_out_dir = os.path.join("output", scene_name, timestamp_str, "mesh_obj")
+    ply_out_dir = os.path.join("../output", scene_name, timestamp_str)
+    obj_out_dir = os.path.join("../output", scene_name, timestamp_str, "mesh_obj")
 
     substeps = config.get_cfg("numSubstepping")
     # print(substeps)
@@ -282,7 +282,7 @@ if __name__ == "__main__":
             stats = solver.get_stats_numpy()
             if not isinstance(stats, dict) or len(stats) == 0:
                 return
-            os.makedirs(os.path.join("data", "stats"), exist_ok=True)
+            os.makedirs(os.path.join("../data", "stats"), exist_ok=True)
             # Build descriptive prefix instead of timestamp
             # Format: dt<dt>-tol<tol_opt>-opt<maxOptIter>(-cfl)(-warmstart)
             try:
@@ -342,7 +342,7 @@ if __name__ == "__main__":
                     variant = "2014Bender"
             for name, arr in stats.items():
                 try:
-                    out_path = os.path.join("data", "stats", f"{scene_name}-{prefix}-{variant}-{name}.npy")
+                    out_path = os.path.join("../data", "stats", f"{scene_name}-{prefix}-{variant}-{name}.npy")
                     np.save(out_path, arr)
                 except Exception:
                     pass

@@ -32,11 +32,6 @@ class ParticleSystem:
         self.padding = self.support_radius
 
         self.x_vis_buffer = None
-        # Grid related properties
-        self.grid_size = self.support_radius
-        self.grid_num = np.ceil(self.domain_size / self.grid_size).astype(int)
-        print("grid size: ", self.grid_num)
-        self.padding = self.grid_size
 
         # objects id and its particle num
         self.object_collection = dict()
@@ -123,15 +118,6 @@ class ParticleSystem:
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
-        # Grid id for each particle
-        self.grid_ids = ti.field(int, shape=self.particle_max_num)
-        self.grid_ids_buffer = ti.field(int, shape=self.particle_max_num)
-        self.grid_ids_new = ti.field(int, shape=self.particle_max_num)
-
-        # Particle num of each grid
-        self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
-        self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
-        self.prefix_sum_executor = ti.algorithms.PrefixSumExecutor(self.grid_particles_num.shape[0])
         # Special properties
         method = int(self.cfg.get_cfg("simulationMethod") or 0)
         if method == 4:
@@ -372,6 +358,31 @@ class ParticleSystem:
         for p_i in range(self.particle_num[None]):
             obj_id = self.object_id[p_i]
             ti.atomic_add(self.object_particle_num[obj_id], 1)
+
+
+    @ti.kernel
+    def initialize_boundary_neighbors(self):
+        for p_i in ti.grouped(self.x):
+            sum_Wij = 0.0
+            # Condition for boundary particles
+            if self.material[p_i] == self.material_solid:
+
+                for j in range(self.fluid_neighbors_num[p_i]):
+                    p_j = self.fluid_neighbors[p_i, j]
+                    if self.material[p_j] != self.material_solid:
+                        continue
+
+                    if self.object_id[p_j] != self.object_id[p_i]:
+                        continue
+
+                    sum_Wij += self.solver.W((self.x[p_i] - self.x[p_j]).norm())
+
+                if sum_Wij > 1e-12:
+                    self.m[p_i] = 1.5*self.density0[p_i] / sum_Wij
+                    self.m_V[p_i] = self.m[p_i] / self.density0[p_i]
+                    # Keep inverse mass consistent (static solids keep 0 inv mass)
+                    if self.is_dynamic[p_i]:
+                        self.m_inv[p_i] = 1.0 / (self.m[p_i] + 1e-12)
 
 
     @ti.kernel

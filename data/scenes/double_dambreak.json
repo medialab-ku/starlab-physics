@@ -32,7 +32,7 @@
 		},
         {
             "objectId": 2,
-            "geometryFile": "./data/models/rigid_cube.obj",
+            "geometryFile": "./data/models/cube.obj",
             "translation": [1.7, 4.6, 4.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,

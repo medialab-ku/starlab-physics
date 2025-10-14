@@ -1,5 +1,5 @@
 import taichi as ti
-from sph_base import SPHBase
+from deprecated.sph_base import SPHBase
 
 
 class WCSPHSolver(SPHBase):

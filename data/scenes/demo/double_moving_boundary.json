@@ -87,7 +87,7 @@
 		},
         {
             "objectId": 4,
-            "geometryFile": "./data/models/floorThickCenterPivot.obj",
+            "geometryFile": "./data/models/planeCenterPivot.obj",
             "translation": [2.0, 3.0, 3.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,

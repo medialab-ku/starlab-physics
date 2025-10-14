@@ -229,12 +229,7 @@ class SceneLoader:
                                 is_dynamic * np.ones(num_particles_obj, dtype=np.int32),
                                 np.stack([color for _ in range(num_particles_obj)])) # color
         
-        self._setup_emitter_system(scene_data["emitter"])
-        # self.mark_all_particles_mature()
-
-
-    def load_scene(config, scene_data):
-        pass
+        self._setup_emitter_system(ps, scene_data["emitter"])
 
 
     def load_mesh(self, obj, a=1.0):
@@ -314,6 +309,19 @@ class SceneLoader:
     
 
     #==== Emitter system setup ====
+    def reset_emitter_system(self):
+        if getattr(self, "es", None):
+            self.es.reset()
+        self.time = 0.0
+
+    def step_emitter_system(self, dt: float):
+        if getattr(self, "es", None):
+            em, ru = self.es.step(self.time, float(dt))
+            self.time += float(dt)
+            return em, ru
+        return 0, 0
+
+
     def _build_rotation_from_direction(self, direction_np: np.ndarray):
         d = np.array(direction_np, dtype=np.float32)
         n = np.linalg.norm(d) + 1e-12
@@ -333,16 +341,22 @@ class SceneLoader:
         return R
 
 
-    def _setup_emitter_system(self, emitter_info):
+    def _setup_emitter_system(self, ps, emitter_info):
         defs = list(emitter_info.get("defs", []))
         if len(defs) == 0:
+            self.es = None
+            setattr(ps, "emitter_system", None)
             return
-        self.es = EmitterSystem(self, max_reuse_per_step=self.emitter_max_reuse_per_step)
 
-        if self.emitter_reuse:
-            box_min = self.domain_start.astype(np.float32) + self.padding
-            box_max = (self.domain_start + self.domain_size).astype(np.float32) - self.padding
-            self.emitter_system.enable_reuse_particles(box_min=box_min, box_max=box_max)
+        max_reuse = int(emitter_info.get("max_reuse_per_step", 1000) or 1000)
+        reuse = bool(emitter_info.get("reuse", False))
+
+        self.es = EmitterSystem(ps, max_reuse_per_step=self.emitter_max_reuse_per_step)
+
+        if reuse:
+            box_min = ps.domain_start.astype(np.float32) + self.padding
+            box_max = (ps.domain_start + ps.domain_size).astype(np.float32) - ps.padding
+            self.es.enable_reuse_particles(box_min=box_min, box_max=box_max)
 
         for e in self.emitter_defs:
             typ = e.get("type", "square")
@@ -361,18 +375,20 @@ class SceneLoader:
             density = float(e.get("density", 1000.0))
             color = np.array(e.get("color", [0, 150, 255]), dtype=np.int32)
             # Ensure emitter object id is included for visualization copy
-            if oid not in self.object_collection:
-                self.object_collection[oid] = {"objectId": oid}
+            if oid not in ps.object_collection:
+                ps.object_collection[oid] = {"objectId": oid}
             self.es.add_emitter(width=width,
-                                            height=height,
-                                            pos=pos,
-                                            rotation=R,
-                                            velocity=vel,
-                                            type=typ_i,
-                                            start_time=st,
-                                            end_time=et,
-                                            object_id=oid,
-                                            density=density,
-                                            color=tuple(color.tolist()),
-                                            jitter=jitter,
-                                            spread_deg=spread)
+                                height=height,
+                                pos=pos,
+                                rotation=R,
+                                velocity=vel,
+                                type=typ_i,
+                                start_time=st,
+                                end_time=et,
+                                object_id=oid,
+                                density=density,
+                                color=tuple(color.tolist()),
+                                jitter=jitter,
+                                spread_deg=spread)
+
+        setattr(ps, "emitter_system", self.es)

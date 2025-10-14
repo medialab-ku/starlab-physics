@@ -1,6 +1,6 @@
 import time
-import numpy as np
 from math_utils import *
+from sph_kernel import *
 
 @ti.data_oriented
 class Pressure:
@@ -8,11 +8,9 @@ class Pressure:
         # super().__init__(particle_system)
 
         self.ps = particle_system
-        self.dt = self.ps.cfg.get_cfg("timeStepSize")
-        self.lda = self.ps.pressure
         self.time = 0.0
-        self.nablaWij = self.spiky_kernel_derivative
-        self.Wij = self.cubic_kernel
+        self.gradW = spiky_kernel_derivative
+        self.W = cubic_kernel
 
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
         self.pcg_total_iter = 0
@@ -122,75 +120,6 @@ class Pressure:
             "kinetic_energy": np.asarray(self.stats_kinetic_energy, dtype=np.float64)
         }
 
-
-    @ti.func
-    def cubic_kernel(self, r_norm):
-        res = ti.cast(0.0, ti.f32)
-        h = self.ps.support_radius
-        # value of cubic spline smoothing kernel
-        k = 1.0
-        if self.ps.dim == 1:
-            k = 4 / 3
-        elif self.ps.dim == 2:
-            k = 40 / 7 / np.pi
-        elif self.ps.dim == 3:
-            k = 8 / np.pi
-        k /= h ** self.ps.dim
-        q = r_norm / h
-        if q <= 1.0:
-            if q <= 0.5:
-                q2 = q * q
-                q3 = q2 * q
-                res = k * (6.0 * q3 - 6.0 * q2 + 1)
-            else:
-                res = k * 2 * ti.pow(1 - q, 3.0)
-        return res
-
-    @ti.func
-    def cubic_kernel_derivative(self, r):
-        h = self.ps.support_radius
-        # derivative of cubic spline smoothing kernel
-        k = 1.0
-        if self.ps.dim == 1:
-            k = 4 / 3
-        elif self.ps.dim == 2:
-            k = 40 / 7 / np.pi
-        elif self.ps.dim == 3:
-            k = 8 / np.pi
-        k = 6. * k / h ** self.ps.dim
-        r_norm = r.norm()
-        q = r_norm / h
-        res = ti.Vector([0.0 for _ in range(self.ps.dim)])
-        if r_norm > 1e-5 and q <= 1.0:
-            grad_q = r / (r_norm * h)
-            if q <= 0.5:
-                res = k * q * (3.0 * q - 2.0) * grad_q
-            else:
-                factor = 1.0 - q
-                res = k * (-factor * factor) * grad_q
-        return res
-
-    @ti.func
-    def spiky_kernel_derivative(self, r):
-        h = self.ps.support_radius
-        k = 1.0
-        if self.ps.dim == 1:
-            k = 15 / 4
-        elif self.ps.dim == 2:
-            k = 30 / (np.pi * h ** 3)
-        elif self.ps.dim == 3:
-            k = 45 / (np.pi * h ** 6)
-
-        r_norm = r.norm()
-
-        if r_norm < 1e-6:
-            r_norm = 1e-6
-        # res = ti.Vector([0.0 for _ in range(self.ps.dim)])
-        # if 1e-5 < r_norm < h:
-        grad_q = r / r_norm
-        res = -k * ((h - r_norm) ** 2) * grad_q
-        return res
-
     @ti.kernel
     def precompute_values(self):
 
@@ -199,7 +128,7 @@ class Pressure:
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
-                self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
+                self.ps.fluid_neighbors_values[p_i, j] = self.gradW(x_i - x_j, self.ps.support_radius)
 
     @ti.kernel
     def compute_density(self):
@@ -207,15 +136,15 @@ class Pressure:
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
+            self.ps.density[p_i] = self.ps.m[p_i] * self.W(0.0, self.ps.support_radius)
             den = 0.0
             x_i = self.ps.x[p_i]
             for j in range(self.ps.fluid_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
                 x_j = self.ps.x[p_j]
-                self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
-                den += self.ps.m[p_j] * self.cubic_kernel((x_i - x_j).norm())
+                self.ps.fluid_neighbors_values[p_i, j] = self.gradW(x_i - x_j, self.ps.support_radius)
+                den += self.ps.m[p_j] * self.W((x_i - x_j).norm(), self.ps.support_radius)
 
             # self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
             self.ps.density[p_i] += den
@@ -380,7 +309,7 @@ class Pressure:
         Jp = self.dp
 
         self.compute_Ax(Ap, Jp, x)
-        self.add(r, b, -1.0, Ap)
+        add(r, b, -1.0, Ap)
 
         r_old = self.dot(r, r)
         pcg_iter = 0
@@ -397,8 +326,8 @@ class Pressure:
 
                 alpha = r_old / pAp
 
-                self.add(x, x, alpha, p)
-                self.add(r, r, -alpha, Ap)
+                add(x, x, alpha, p)
+                add(r, r, -alpha, Ap)
 
                 pcg_iter += 1
                 r_new = self.dot(r, r)
@@ -411,7 +340,7 @@ class Pressure:
 
                 # rz_new = self.dot(r, z)
                 beta = r_new / r_old
-                self.add(p, r, beta, p)
+                add(p, r, beta, p)
                 r_old = r_new
 
         # Collect PCG iteration count per PCG solve
@@ -482,10 +411,10 @@ class Pressure:
                 self.ps.v[p_i] = ti.math.vec3(0.0)
 
 
-    def solve(self):
+    def solve(self, dt):
         t_start = time.perf_counter()
         self.ps.x_old.copy_from(self.ps.x)
-        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+        add(self.ps.y, self.ps.x, dt, self.ps.v)
 
         self.ps.x.copy_from(self.ps.y)
 
@@ -507,7 +436,7 @@ class Pressure:
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(Jd, d)
-            self.add(self.t, Jd, 1.0, c)
+            add(self.t, Jd, 1.0, c)
 
             err_log = 0.0
             self.compute_f(self.f, self.t, self.eps)
@@ -518,7 +447,7 @@ class Pressure:
             p.fill(0.0)
 
             self.PCG(x=p, b=g)
-            self.add(d, d, -self.omega, p)
+            add(d, d, -self.omega, p)
 
             if self.density_error:
                 err = self.compute_avg_density_error(self.f)
@@ -553,9 +482,9 @@ class Pressure:
             print(f"opt iter: {opt_iter}")
 
         # x_n+1
-        self.add(self.ps.x, self.ps.x, 1.0, self.dx)
+        add(self.ps.x, self.ps.x, 1.0, self.dx)
         # self.enforce_boundary_3D(self.ps.material_fluid)
 
         # v_n+1_tmp
-        self.update_velocities(self.dt)
+        self.update_velocities(dt)
         self.ps.x.copy_from(self.ps.x_old)
