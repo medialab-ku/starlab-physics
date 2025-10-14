@@ -26,7 +26,7 @@ Our simulator has a robust set of features, divided into the core simulation eng
 python main.py --scene_file ./data/scenes/tests/fluid_cube.json
 ```
 
-## Development Roadmap
+## Development _Roadmap_
 
 The following is a list of tasks and areas for improvement that we need to address.
 
