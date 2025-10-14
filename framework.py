@@ -267,15 +267,15 @@ class Framework:
             boundary_viscosity = 0.0
             if boundary_viscosity > 0.0:
                 k_visc = 2.0 * (self.ps.dim + 2.0)
-                f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (
-                            vxy / (rn * rn + eps2)) * gradW
+                f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (vxy / (rn * rn + eps2)) * gradW
                 ret += f_vb
-                if self.ps.is_dynamic_rigid_body(p_j):
-                    # Two-way coupling
-                    self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
 
-            if self.ps.is_dynamic_rigid_body(p_j):
-                self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
+                # if self.ps.is_dynamic_rigid_body(p_j):
+                #     # Two-way coupling
+                #     self.ps.acceleration[p_j] += -(f_vb) * self.ps.density0[p_i] / self.ps.density[p_j]
+
+            # if self.ps.is_dynamic_rigid_body(p_j):
+            #     self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
 
     @ti.kernel
     def compute_non_pressure_forces(self):
@@ -287,10 +287,55 @@ class Framework:
             acc = ti.Vector(self.g)
             self.ps.acceleration[p_i] = acc
 
-            # Stabilize freshly emitted particles by skipping strong neighbor forces for a few substeps
             if self.ps.material[p_i] == self.ps.material_fluid and self.ps.age[p_i] >= 2:
-                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
-                # Write back the accumulated non-pressure forces into acceleration
+
+                x_i = self.ps.x[p_i]
+                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    x_j = self.ps.x[p_j]
+                    r = x_i - x_j
+                    h = self.ps.support_radius
+
+                    rn = r.norm()
+                    inv_rn = 1.0 / ti.max(rn, 1e-6 * h)
+                    r_hat = r * inv_rn
+
+                    gradW = self.spiky_kernel_derivative(r)
+                    vxy = (self.ps.v[p_i] - self.ps.v[p_j]).dot(r)
+                    eps2 = (0.01 * h) * (0.01 * h)
+
+                    # ---------- Cohesion & Viscosity ----------
+                    # Akinci2012
+                    # Akinci2013
+                    if self.ps.material[p_j] == self.ps.material_fluid:
+                        # Cohesion
+                        f_coh = - self.surface_tension * self.ps.m[p_i] * self.ps.m[p_j] * self.cohesion_term(r) * r_hat
+                        # Curvature
+                        f_curv = - self.surface_tension * self.ps.m[p_i] * (self.ps.n[p_i] - self.ps.n[p_j])
+                        # Neighborhood deficiency correction K_ij
+                        K_ij = 2.0 * self.ps.density0[p_i] / (self.ps.density[p_i] + self.ps.density[p_j])
+                        # K_ij = ti.min(K_ij, 1.0)
+                        acc += K_ij * (f_coh + f_curv)
+
+                        # Viscosity (fluid-fluid)
+                        k_visc = 2.0 * (self.ps.dim + 2.0)
+                        f_v = k_visc * self.viscosity * (self.ps.m[p_j] / self.ps.density[p_j]) * (
+                                    vxy / (rn * rn + eps2)) * gradW
+                        acc += K_ij * f_v
+
+                    # ---------- Adhesion ----------
+                    elif self.ps.material[p_j] == self.ps.material_solid:
+                        f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
+                        acc += f_adh
+
+                        # (Optional) Boundary Viscosity
+                        boundary_viscosity = 0.0
+                        if boundary_viscosity > 0.0:
+                            k_visc = 2.0 * (self.ps.dim + 2.0)
+                            f_vb = k_visc * boundary_viscosity * (self.ps.m[p_j] / self.ps.density[p_i]) * (
+                                        vxy / (rn * rn + eps2)) * gradW
+                            acc += f_vb
+
                 self.ps.acceleration[p_i] = acc
 
     @ti.kernel

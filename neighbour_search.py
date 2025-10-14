@@ -21,6 +21,10 @@ class NeighborSearch:
         self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0] * self.grid_num[1] * self.grid_num[2]))
         self.prefix_sum_executor     = ti.algorithms.PrefixSumExecutor(self.grid_particles_num.shape[0])
 
+        self.grid_ids                = ti.field(int, shape=self.ps.particle_max_num)
+        self.grid_ids_buffer         = ti.field(int, shape=self.ps.particle_max_num)
+        self.grid_ids_new            = ti.field(int, shape=self.ps.particle_max_num)
+
     @ti.func
     def pos_to_index(self, pos):
         gi = (pos / self.grid_size).cast(int)
@@ -46,16 +50,16 @@ class NeighborSearch:
     @ti.kernel
     def update_grid_id(self, ps: ti.template()):
 
-        for I in ti.grouped(ps.grid_particles_num):
-            ps.grid_particles_num[I] = 0
+        for I in ti.grouped(self.grid_particles_num):
+            self.grid_particles_num[I] = 0
 
         for p in range(ps.particle_num[None]):
-            grid_index      = self.get_flatten_grid_index(ps.x[p])
-            ps.grid_ids[p]  = grid_index
-            ti.atomic_add(ps.grid_particles_num[grid_index], 1)
+            grid_index       = self.get_flatten_grid_index(ps.x[p])
+            self.grid_ids[p] = grid_index
+            ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
-        for I in ti.grouped(ps.grid_particles_num):
-            ps.grid_particles_num_temp[I] = ps.grid_particles_num[I]
+        for I in ti.grouped(self.grid_particles_num):
+            self.grid_particles_num_temp[I] = self.grid_particles_num[I]
 
     @ti.kernel
     def counting_sort(self, ps: ti.template()):
@@ -64,13 +68,13 @@ class NeighborSearch:
         for i in range(n):
             I = n - 1 - i
             base_offset = 0
-            if ps.grid_ids[I] - 1 >= 0:
-                base_offset     = ps.grid_particles_num[ps.grid_ids[I] - 1]
-            ps.grid_ids_new[I]  = ti.atomic_sub(ps.grid_particles_num_temp[ps.grid_ids[I]],1) - 1 + base_offset
+            if self.grid_ids[I] - 1 >= 0:
+                base_offset      = self.grid_particles_num[self.grid_ids[I] - 1]
+            self.grid_ids_new[I] = ti.atomic_sub(self.grid_particles_num_temp[self.grid_ids[I]],1) - 1 + base_offset
 
         for I in range(n):
-            new_index                           = ps.grid_ids_new[I]
-            ps.grid_ids_buffer[new_index]       = ps.grid_ids[I]
+            new_index                           =  self.grid_ids_new[I]
+            self.grid_ids_buffer[new_index]     =  self.grid_ids[I]
             ps.object_id_buffer[new_index]      = ps.object_id[I]
             ps.x_0_buffer[new_index]            = ps.x_0[I]
             ps.x_buffer[new_index]              = ps.x[I]
@@ -88,22 +92,22 @@ class NeighborSearch:
             ps.n_buffer[new_index]              = ps.n[I]
 
         for I in range(n):
-           ps.grid_ids[I]     = ps.grid_ids_buffer[I]
-           ps.object_id[I]    = ps.object_id_buffer[I]
-           ps.x_0[I]          = ps.x_0_buffer[I]
-           ps.x[I]            = ps.x_buffer[I]
-           ps.v[I]            = ps.v_buffer[I]
-           ps.acceleration[I] = ps.acceleration_buffer[I]
-           ps.m_V[I]          = ps.m_V_buffer[I]
-           ps.m[I]            = ps.m_buffer[I]
-           ps.m_inv[I]        = ps.m_inv_buffer[I]
-           ps.density[I]      = ps.density_buffer[I]
-           ps.density0[I]     = ps.density0_buffer[I]
-           ps.pressure[I]     = ps.pressure_buffer[I]
-           ps.material[I]     = ps.material_buffer[I]
-           ps.color[I]        = ps.color_buffer[I]
-           ps.is_dynamic[I]   = ps.is_dynamic_buffer[I]
-           ps.n[I]            = ps.n_buffer[I]
+            self.grid_ids[I]   = self.grid_ids_buffer[I]
+            ps.object_id[I]    = ps.object_id_buffer[I]
+            ps.x_0[I]          = ps.x_0_buffer[I]
+            ps.x[I]            = ps.x_buffer[I]
+            ps.v[I]            = ps.v_buffer[I]
+            ps.acceleration[I] = ps.acceleration_buffer[I]
+            ps.m_V[I]          = ps.m_V_buffer[I]
+            ps.m[I]            = ps.m_buffer[I]
+            ps.m_inv[I]        = ps.m_inv_buffer[I]
+            ps.density[I]      = ps.density_buffer[I]
+            ps.density0[I]     = ps.density0_buffer[I]
+            ps.pressure[I]     = ps.pressure_buffer[I]
+            ps.material[I]     = ps.material_buffer[I]
+            ps.color[I]        = ps.color_buffer[I]
+            ps.is_dynamic[I]   = ps.is_dynamic_buffer[I]
+            ps.n[I]            = ps.n_buffer[I]
 
     @ti.kernel
     def narrow_phase(self, x: ti.template()):
@@ -116,9 +120,9 @@ class NeighborSearch:
                 grid_index = self.flatten_grid_index(nbr_cell)
                 start = 0
                 if grid_index > 0:
-                    start = self.ps.grid_particles_num[grid_index - 1]
+                    start = self.grid_particles_num[grid_index - 1]
 
-                end = self.ps.grid_particles_num[grid_index]
+                end = self.grid_particles_num[grid_index]
                 for p_j in range(start, end):
                     # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
                     if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.ps.support_radius:
@@ -133,5 +137,5 @@ class NeighborSearch:
 
     def broad_phase(self):
         self.update_grid_id(self.ps)
-        self.prefix_sum_executor.run(self.ps.grid_particles_num)
+        self.prefix_sum_executor.run(self.grid_particles_num)
         self.counting_sort(self.ps)
