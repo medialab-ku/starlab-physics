@@ -3,11 +3,10 @@ import numpy as np
 import trimesh as tm
 from functools import reduce
 from config_builder import SimConfig
-from WCSPH import WCSPHSolver
-from DFSPH import DFSPHSolver
-from PBF2 import PBF2Solver
-from IISPH import IISPHSolver
-from scan_single_buffer import parallel_prefix_sum_inclusive_inplace
+# from WCSPH import WCSPHSolver
+# from deprecated.DFSPH import DFSPHSolver
+# from PBF2 import PBF2Solver
+# from deprecated.IISPH import IISPHSolver
 from emitter import EmitterSystem
 
 
@@ -402,23 +401,23 @@ class ParticleSystem:
         self.toggled_index = idx + 1
 
 
-    def build_solver(self):
-        solver_type = self.cfg.get_cfg("simulationMethod")
-        if solver_type == 0:
-            self.solver = WCSPHSolver(self)
-            return WCSPHSolver(self)
-        elif solver_type == 2:
-            self.solver = PBF2Solver(self)
-            return PBF2Solver(self)
-        elif solver_type == 3:
-            self.solver = IISPHSolver(self)
-            return IISPHSolver(self)
-        elif solver_type == 4:
-            self.solver = DFSPHSolver(self)
-            return DFSPHSolver(self)
-
-        else:
-            raise NotImplementedError(f"Solver type {solver_type} has not been implemented.")
+    # def build_solver(self):
+    #     solver_type = self.cfg.get_cfg("simulationMethod")
+    #     if solver_type == 0:
+    #         self.solver = WCSPHSolver(self)
+    #         return WCSPHSolver(self)
+    #     elif solver_type == 2:
+    #         self.solver = PBF2Solver(self)
+    #         return PBF2Solver(self)
+    #     elif solver_type == 3:
+    #         self.solver = IISPHSolver(self)
+    #         return IISPHSolver(self)
+    #     elif solver_type == 4:
+    #         self.solver = DFSPHSolver(self)
+    #         return DFSPHSolver(self)
+    #
+    #     else:
+    #         raise NotImplementedError(f"Solver type {solver_type} has not been implemented.")
 
     @ti.func
     def add_particle(self, p, obj_id, x, v, density, pressure, material, is_dynamic, color):
@@ -816,13 +815,16 @@ class ParticleSystem:
         return R
 
     def _setup_emitter_system(self):
+
         if len(self.emitter_defs) == 0:
             return
         self.emitter_system = EmitterSystem(self, max_reuse_per_step=self.emitter_max_reuse_per_step)
+
         if self.emitter_reuse:
             box_min = self.domain_start.astype(np.float32) + self.padding
             box_max = (self.domain_start + self.domain_size).astype(np.float32) - self.padding
             self.emitter_system.enable_reuse_particles(box_min=box_min, box_max=box_max)
+
         for e in self.emitter_defs:
             typ = e.get("type", "square")
             typ_i = 0 if (isinstance(typ, str) and typ.lower() == "square") else (1 if (isinstance(typ, str) and typ.lower() == "circle") else int(typ))

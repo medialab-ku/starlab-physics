@@ -1,9 +1,8 @@
 import taichi as ti
 import numpy as np
-import trimesh as tm
 from particle_system import ParticleSystem
 from WCSPH import WCSPHSolver
-from IISPH import IISPHSolver
+from deprecated.IISPH import IISPHSolver
 
 # ti.init(arch=ti.cpu)
 
