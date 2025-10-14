@@ -482,10 +482,10 @@ class Pressure:
                 self.ps.v[p_i] = ti.math.vec3(0.0)
 
 
-    def solve(self):
+    def solve(self, dt):
         t_start = time.perf_counter()
         self.ps.x_old.copy_from(self.ps.x)
-        add(self.ps.y, self.ps.x, self.dt, self.ps.v_adv)
+        add(self.ps.y, self.ps.x, dt, self.ps.v)
 
         self.ps.x.copy_from(self.ps.y)
 
@@ -557,5 +557,5 @@ class Pressure:
         # self.enforce_boundary_3D(self.ps.material_fluid)
 
         # v_n+1_tmp
-        self.update_velocities(self.dt)
+        self.update_velocities(dt)
         self.ps.x.copy_from(self.ps.x_old)

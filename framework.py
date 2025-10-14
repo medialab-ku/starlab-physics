@@ -278,7 +278,7 @@ class Framework:
             #     self.ps.acceleration[p_j] += -(f_adh) * self.ps.density0[p_i] / self.ps.density[p_j]
 
     @ti.kernel
-    def compute_non_pressure_forces(self):
+    def compute_non_pressure_forces(self, dt: float):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_static_rigid_body(p_i):
                 self.ps.acceleration[p_i].fill(0.0)
@@ -336,16 +336,16 @@ class Framework:
                                         vxy / (rn * rn + eps2)) * gradW
                             acc += f_vb
 
-                self.ps.acceleration[p_i] = acc
+                self.ps.v[p_i] += acc * dt
 
     @ti.kernel
     def advect_velocity(self, dt: float):
         # Symplectic Euler
         for p_i in ti.grouped(self.ps.x):
             if self.ps.is_dynamic[p_i]:
-                self.ps.v_adv[p_i] = self.ps.v[p_i] + dt * self.ps.acceleration[p_i]
+                self.ps.v[p_i] = self.ps.v[p_i] + dt * self.ps.acceleration[p_i]
             else:
-                self.ps.v_adv[p_i] = ti.math.vec3(0.0)
+                self.ps.v[p_i] = ti.math.vec3(0.0)
 
     @ti.kernel
     def advect_position(self, dt: float):
@@ -420,10 +420,9 @@ class Framework:
 
         self.pcg_total_iter = 0
         self.compute_normal()
-        self.compute_non_pressure_forces()
-        self.advect_velocity(self.dt)
 
-        self.pressure.solve()
+        self.compute_non_pressure_forces(self.dt)
+        self.pressure.solve(self.dt)
         self.advect_position(self.dt)
 
         self.enforce_boundary_3D(self.ps.material_solid)
