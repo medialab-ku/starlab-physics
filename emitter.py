@@ -167,11 +167,6 @@ class Emitter:
                     np.full(new_now, self.color[2], dtype=np.int32)
                 ], axis=1)
             )
-            # Mark freshly created particles with age=0 for stabilization in the next force pass
-            try:
-                self.ps.set_age_range(start_idx, new_now, 0)
-            except Exception:
-                pass
             emitted += new_now
 
         diam = 2.0 * self.ps.particle_radius

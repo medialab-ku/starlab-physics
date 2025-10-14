@@ -21,6 +21,10 @@ Our simulator has a robust set of features, divided into the core simulation eng
 *   **Fluid-Rigid Coupling**: Supports both one-way and two-way coupling between fluids and rigid bodies.
 *   **Boundary Conditions**: Handles boundary conditions based on the methods described in [3].
 
+---
+```
+python main.py --scene_file ./data/scenes/fluid_cube.json
+```
 
 ## Development Roadmap
 

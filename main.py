@@ -5,6 +5,7 @@ import numpy as np
 import time
 import trimesh as tm
 from config_builder import SimConfig
+from scene_loader import SceneLoader
 from particle_system import ParticleSystem
 from framework import Framework
 from neighbour_search import NeighborSearch
@@ -46,7 +47,11 @@ if __name__ == "__main__":
         os.makedirs(obj_out_dir, exist_ok=True)
 
     # method = config.get_cfg("simulationMethod")
+    loader = SceneLoader(config)
+    scene_data = loader.prepare_scene()
     ps = ParticleSystem(config, GGUI=True)
+    loader.populate_scene(ps, scene_data)
+
     ns = NeighborSearch(config, ps)
     pressure = Pressure(ps)
     fw = Framework(ps, ns, pressure)
@@ -175,7 +180,7 @@ if __name__ == "__main__":
             except Exception:
                 fluid_cnt = int(ps.fluid_particle_num)
             gui.text(f"# fluid particle: {fluid_cnt}")
-            gui.text(f"# boundary particle: {ps.solid_particle_num}")
+            gui.text(f"# boundary particle: {ps.rigid_particle_num}")
             gui.text(f"Current frame: {frame_cnt}")
 
 

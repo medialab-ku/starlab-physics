@@ -31,7 +31,6 @@ class Framework:
     # Stats helpers
     # -----------------------------
 
-
     @ti.func
     def cubic_kernel(self, r_norm):
         res = ti.cast(0.0, ti.f32)
@@ -141,6 +140,7 @@ class Framework:
 
         return res
 
+
     @ti.kernel
     def initialize_boundary_neighbors(self):
         for p_i in ti.grouped(self.ps.x):
@@ -173,8 +173,12 @@ class Framework:
             if not self.ps.is_static_rigid_body(p_i):
                 continue
             delta = self.cubic_kernel(0.0)
-            self.ps.for_all_neighbors(p_i, self.compute_boundary_volume_task, delta)
-            self.ps.m_V[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
+
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                self.compute_boundary_volume_task(p_i, p_j, delta)
+            
+            self.ps.m_V[p_i] = 1.0 / delta * 3.0
 
     @ti.func
     def compute_boundary_volume_task(self, p_i, p_j, delta: ti.template()):
@@ -190,8 +194,11 @@ class Framework:
             if not self.ps.is_dynamic_rigid_body(p_i):
                 continue
             delta = self.cubic_kernel(0.0)
-            self.ps.for_all_neighbors(p_i, self.compute_boundary_volume_task, delta)
-            self.ps.m_V[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
+            for j in range(self.ps.fluid_neighbors_num[p_i]):
+                p_j = self.ps.fluid_neighbors[p_i, j]
+                self.compute_boundary_volume_task(p_i, p_j, delta)
+            
+            self.ps.m_V[p_i] = 1.0 / delta * 3.0
 
 
 
@@ -288,10 +295,12 @@ class Framework:
             self.ps.acceleration[p_i] = acc
 
             # Stabilize freshly emitted particles by skipping strong neighbor forces for a few substeps
-            if self.ps.material[p_i] == self.ps.material_fluid and self.ps.age[p_i] >= 2:
-                self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
-                # Write back the accumulated non-pressure forces into acceleration
-                self.ps.acceleration[p_i] = acc
+            if self.ps.material[p_i] == self.ps.material_fluid:
+                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    self.compute_non_pressure_forces_task(p_i, p_j, acc)
+            
+            self.ps.acceleration[p_i] = acc
 
     @ti.kernel
     def advect_velocity(self, dt: float):

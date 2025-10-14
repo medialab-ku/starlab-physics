@@ -254,7 +254,7 @@ class PBF2Solver(SPHBase):
             self.ps.acceleration[p_i] = acc
 
             # Stabilize freshly emitted particles by skipping strong neighbor forces for a few substeps
-            if self.ps.material[p_i] == self.ps.material_fluid and self.ps.age[p_i] >= 2:
+            if self.ps.material[p_i] == self.ps.material_fluid:
                 self.ps.for_all_neighbors(p_i, self.compute_non_pressure_forces_task, acc)
                     # Write back the accumulated non-pressure forces into acceleration
                 self.ps.acceleration[p_i] = acc

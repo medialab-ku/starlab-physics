@@ -186,7 +186,7 @@ if __name__ == "__main__":
             except Exception:
                 fluid_cnt = int(ps.fluid_particle_num)
             gui.text(f"# fluid particle: {fluid_cnt}")
-            gui.text(f"# boundary particle: {ps.solid_particle_num}")
+            gui.text(f"# boundary particle: {ps.rigid_particle_num}")
             gui.text(f"Current frame: {frame_cnt}")
 
 

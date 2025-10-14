@@ -7,8 +7,6 @@ from config_builder import SimConfig
 # from deprecated.DFSPH import DFSPHSolver
 # from PBF2 import PBF2Solver
 # from deprecated.IISPH import IISPHSolver
-from emitter import EmitterSystem
-
 
 @ti.data_oriented
 class ParticleSystem:
@@ -16,18 +14,10 @@ class ParticleSystem:
         self.cfg = config
         self.GGUI = GGUI
 
-        self.domain_start = np.array([0.0, 0.0, 0.0])
-        self.domain_start = np.array(self.cfg.get_cfg("domainStart"))
-
-        self.domain_end = np.array([1.0, 1.0, 1.0])
-        self.domian_end = np.array(self.cfg.get_cfg("domainEnd"))
-        
-        self.domain_size = self.domian_end - self.domain_start
-
+        self.domain_start = np.array(self.cfg.get_cfg("domainStart"), dtype=np.float32)
+        self.domain_end   = np.array(self.cfg.get_cfg("domainEnd"), dtype=np.float32)
+        self.domain_size  = self.domain_end - self.domain_start
         self.dim = len(self.domain_size)
-        assert self.dim > 1
-        # Simulation method
-        self.simulation_method = self.cfg.get_cfg("simulationMethod")
 
         # Material
         self.material_solid = 0
@@ -39,18 +29,25 @@ class ParticleSystem:
         self.particle_diameter = 2 * self.particle_radius
         self.support_radius = self.particle_radius * 4.0  # support radius
         self.m_V0 = 0.8 * self.particle_diameter ** self.dim
+        self.padding = self.support_radius
 
-        self.particle_num = ti.field(int, shape=())
-
+        self.x_vis_buffer = None
         # Grid related properties
         self.grid_size = self.support_radius
         self.grid_num = np.ceil(self.domain_size / self.grid_size).astype(int)
         print("grid size: ", self.grid_num)
         self.padding = self.grid_size
 
-        # All objects id and its particle num
+        # objects id and its particle num
         self.object_collection = dict()
         self.object_id_rigid_body = set()
+        self.num_objects = 1
+        self.num_rigid_bodies = 0
+        self.fluid_particle_num = 0
+        self.rigid_particle_num = 0
+        self.dynamic_particle_num = 0
+        self.particle_max_num = 0
+        self.particle_num = ti.field(int, shape=())
 
         # Toggle-able rigid bodies
         self.toggled_rigid_bodies = set()
@@ -59,90 +56,13 @@ class ParticleSystem:
         self.toggled_ids_sorted = []
         self.toggled_index = 0
 
-        # Emitter timer and emitter system
-        self.emitter_system = None
-        self.time = 0.0
 
-        #========== Compute number of particles ==========#
-        #### Process Fluid Blocks ####
-        fluid_blocks = self.cfg.get_fluid_blocks()
-        fluid_particle_num = 0
-        for fluid in fluid_blocks:
-            t = np.array(fluid.get("translation", [0, 0, 0]), dtype=np.float32)
-            s = np.array(fluid.get("scale", [1, 1, 1]), dtype=np.float32)
-            start = np.array(fluid["start"], dtype=np.float32) + t
-            size  = (np.array(fluid["end"], dtype=np.float32) - np.array(fluid["start"], dtype=np.float32)) * s
-            end   = start + size
-            particle_num = self.compute_cube_particle_num(start, end)
-            fluid["particleNum"] = particle_num
-            self.object_collection[fluid["objectId"]] = fluid
-            fluid_particle_num += particle_num
-
-        #### Process Fluid Bodies ####
-        fluid_bodies = self.cfg.get_fluid_bodies()
-        for fb in fluid_bodies:
-            voxelized_points_np = self.load_rigid_body(fb)
-            fb["particleNum"] = voxelized_points_np.shape[0]
-            fb["voxelizedPoints"] = voxelized_points_np
-            self.object_collection[fb["objectId"]] = fb
-            fluid_particle_num += voxelized_points_np.shape[0]
-
-        #### Process Rigid Blocks ####
-        rigid_blocks = self.cfg.get_rigid_blocks()
-        rigid_particle_num = 0
-        rigid_dynamic_particle_num = 0
-        for rigid in rigid_blocks:
-            t = np.array(fluid.get("translation", [0, 0, 0]), dtype=np.float32)
-            s = np.array(fluid.get("scale", [1, 1, 1]), dtype=np.float32)
-            start = np.array(fluid["start"], dtype=np.float32) + t
-            size  = (np.array(fluid["end"], dtype=np.float32) - np.array(fluid["start"], dtype=np.float32)) * s
-            end   = start + size
-            particle_num = self.compute_cube_particle_num(start, end)
-            rigid["particleNum"] = particle_num
-            self.object_collection[rigid["objectId"]] = rigid
-            rigid_particle_num += particle_num
-            if rigid["isDynamic"]:
-                rigid_dynamic_particle_num += particle_num
-        
-        #### Process Rigid Bodies ####
-        rigid_bodies = self.cfg.get_rigid_bodies()
-        for rigid_body in rigid_bodies:
-            voxelized_points_np = self.load_rigid_body(rigid_body)
-            rigid_body["particleNum"] = voxelized_points_np.shape[0]
-            rigid_body["voxelizedPoints"] = voxelized_points_np
-            self.object_collection[rigid_body["objectId"]] = rigid_body
-            rigid_particle_num += voxelized_points_np.shape[0]
-            if rigid_body["isDynamic"]:
-                rigid_dynamic_particle_num += voxelized_points_np.shape[0]
-
-        object_ids = list(self.object_collection.keys())
-        self.num_objects = (max(object_ids) + 1) if len(object_ids) > 0 else 1
-        
-        self.fluid_particle_num = fluid_particle_num
-        self.solid_particle_num = rigid_particle_num
-        self.dynamic_particle_num = fluid_particle_num + rigid_dynamic_particle_num
-        self.particle_max_num = fluid_particle_num + rigid_particle_num
-        self.num_rigid_bodies = len(rigid_blocks)+len(rigid_bodies)
-        # Use max object id + 1 to avoid out-of-bounds when indexing by object_id
+    def allocate(self, particle_max_num, num_objects, num_rigid_bodies, enable_ggui:bool):
+        self.particle_max_num = int(particle_max_num)
+        self.num_objects = int(max(num_objects, 1))
+        self.num_rigid_bodies = int(num_rigid_bodies)
         self.object_particle_num = ti.field(dtype=int, shape=self.num_objects)
 
-        #========== Particle Emitter ==========#
-        emitter_cfg_raw = self.cfg.get_emitter()
-        self.emitter_capacity = 0
-        self.emitter_max_reuse_per_step = self.fluid_particle_num // 10
-        self.emitter_defs = []
-        if emitter_cfg_raw:
-            if isinstance(emitter_cfg_raw, dict):
-                self.emitter_capacity = int(emitter_cfg_raw.get("capacity", 0) or 0)
-                self.emitter_reuse = bool(emitter_cfg_raw.get("reuse", False))
-                self.emitter_max_reuse_per_step = int(emitter_cfg_raw.get("maxReusePerStep", 50000) or 50000)
-                self.emitter_defs = list(emitter_cfg_raw.get("emitters", []) or [])
-            elif isinstance(emitter_cfg_raw, list):
-                self.emitter_defs = list(emitter_cfg_raw)
-        if self.emitter_capacity > 0:
-            self.particle_max_num += self.emitter_capacity
-
-        #========== Allocate memory ==========#
         # Rigid body properties
         print(f"Number of rigid bodies: {self.num_rigid_bodies}")
         if self.num_rigid_bodies > 0:
@@ -154,12 +74,6 @@ class ParticleSystem:
             self.v_cm_rb       = ti.Vector.field(self.dim, dtype=float, shape=self.num_objects)
             self.omega_rb      = ti.Vector.field(self.dim, dtype=float, shape=self.num_objects)
             
-            
-        # Particle num of each grid
-        self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
-        self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
-        self.prefix_sum_executor = ti.algorithms.PrefixSumExecutor(self.grid_particles_num.shape[0])
-
         # Particle related properties
         self.object_id = ti.field(dtype=int, shape=self.particle_max_num)
         self.x = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
@@ -181,9 +95,8 @@ class ParticleSystem:
         self.material = ti.field(dtype=int, shape=self.particle_max_num)
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
-        # Age of particles in substeps; used to stabilize freshly emitted particles
-        self.age = ti.field(dtype=int, shape=self.particle_max_num)
 
+        # neighbor lists
         self.cache_size = 50 
         self.fluid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
         self.solid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
@@ -192,10 +105,6 @@ class ParticleSystem:
         self.fluid_neighbors_values = ti.Vector.field(n=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_JtJ    = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_JtJ_ii = ti.Matrix.field(n=3, m=3, dtype=float, shape= self.particle_max_num)
-
-        if self.cfg.get_cfg("simulationMethod") == 4:
-            self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)
-            self.density_adv = ti.field(dtype=float, shape=self.particle_max_num)
 
         # Buffer for sort
         self.object_id_buffer = ti.field(dtype=int, shape=self.particle_max_num)
@@ -214,211 +123,98 @@ class ParticleSystem:
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
-        if self.cfg.get_cfg("simulationMethod") == 4:
-            self.dfsph_factor_buffer = ti.field(dtype=float, shape=self.particle_max_num)
-            self.density_adv_buffer = ti.field(dtype=float, shape=self.particle_max_num)
-
         # Grid id for each particle
         self.grid_ids = ti.field(int, shape=self.particle_max_num)
         self.grid_ids_buffer = ti.field(int, shape=self.particle_max_num)
         self.grid_ids_new = ti.field(int, shape=self.particle_max_num)
 
-        self.x_vis_buffer = None
-        if self.GGUI:
-            self.x_vis_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+        # Particle num of each grid
+        self.grid_particles_num = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
+        self.grid_particles_num_temp = ti.field(int, shape=int(self.grid_num[0]*self.grid_num[1]*self.grid_num[2]))
+        self.prefix_sum_executor = ti.algorithms.PrefixSumExecutor(self.grid_particles_num.shape[0])
+        # Special properties
+        method = int(self.cfg.get_cfg("simulationMethod") or 0)
+        if method == 4:
+            self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)
+            self.density_adv  = ti.field(dtype=float, shape=self.particle_max_num)
+            self.dfsph_factor_buffer = ti.field(dtype=float, shape=self.particle_max_num)
+            self.density_adv_buffer  = ti.field(dtype=float, shape=self.particle_max_num)
+
+        if enable_ggui and self.GGUI:
+            self.x_vis_buffer     = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
             self.color_vis_buffer = ti.Vector.field(4, dtype=float, shape=self.particle_max_num)
-            self.color_heat_map = ti.Vector.field(4, dtype=float, shape=self.particle_max_num)
+            self.color_heat_map   = ti.Vector.field(4, dtype=float, shape=self.particle_max_num)
 
 
-        #========== Initialize particles ==========#
-
-        # Fluid block
-        for fluid in fluid_blocks:
-            obj_id = fluid["objectId"]
-            offset = np.array(fluid["translation"])
-            start = np.array(fluid["start"]) + offset
-            end = np.array(fluid["end"]) + offset
-            scale = np.array(fluid["scale"])
-            velocity = fluid["velocity"]
-            density = fluid["density"]
-            color = fluid["color"]
-
-            # print(density)
-            # print(color)
-
-            self.add_cube(object_id=obj_id,
-                          lower_corner=start,
-                          cube_size=(end-start)*scale,
-                          velocity=velocity,
-                          density=density, 
-                          is_dynamic=1, # enforce fluid dynamic
-                          color=color,
-                          material=1) # 1 indicates fluid
-
-        # Fluid bodies
-        for fluid_body in fluid_bodies:
-            obj_id = fluid_body["objectId"]
-            num_particles_obj = fluid_body["particleNum"]
-            voxelized_points_np = fluid_body["voxelizedPoints"]
-            velocity = np.array(fluid_body.get("velocity", [0.0 for _ in range(self.dim)]), dtype=np.float32)
-            density = float(fluid_body.get("density", 1000.0))
-            color = np.array(fluid_body.get("color", [10, 100, 200]), dtype=np.int32)
-            
-            self.add_particles(obj_id,
-                               num_particles_obj,
-                               np.array(voxelized_points_np, dtype=np.float32), # position
-                               np.stack([velocity for _ in range(num_particles_obj)]), # velocity
-                               density * np.ones(num_particles_obj, dtype=np.float32), # density
-                               np.zeros(num_particles_obj, dtype=np.float32), # pressure
-                               np.array([self.material_fluid for _ in range(num_particles_obj)], dtype=np.int32), # material is fluid
-                               np.ones(num_particles_obj, dtype=np.int32), # is_dynamic = 1
-                               np.stack([color for _ in range(num_particles_obj)])) # color
-
-        # Rigid block
-        for rigid in rigid_blocks:
-            obj_id = rigid["objectId"]
-            offset = np.array(rigid["translation"])
-            start = np.array(rigid["start"]) + offset
-            end = np.array(rigid["end"]) + offset
-            scale = np.array(rigid["scale"])
-            velocity = rigid["velocity"]
-            density = rigid["density"]
-            color = rigid["color"]
-            is_dynamic = rigid["isDynamic"]
-            self.add_cube(object_id=obj_id,
-                          lower_corner=start,
-                          cube_size=(end-start)*scale,
-                          velocity=velocity,
-                          density=density, 
-                          is_dynamic=is_dynamic,
-                          color=color,
-                          material=0) # 0 indicates solid
+    # @ti.kernel
+    # def _activate_object_dynamic_kernel(self, obj_id: int, vx: float, vy: float, vz: float):
+    #     for p in range(self.particle_num[None]):
+    #         if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 0:
+    #             self.is_dynamic[p] = 1
+    #             # Revert static-mass scaling (static solids used 10x mass)
+    #             self.m[p] = self.m[p] / 10.0
+    #             self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
+    #             self.m_inv[p] = 1.0 / (self.m[p] + 1e-12)
+    #             self.v[p] = ti.Vector([vx, vy, vz])
+    #             self.v_adv[p] = self.v[p]
+    #             self.v_old[p] = self.v[p]
 
 
-        # Rigid bodies
-        for rigid_body in rigid_bodies:
-            obj_id = rigid_body["objectId"]
-            self.object_id_rigid_body.add(obj_id)
-            num_particles_obj = rigid_body["particleNum"]
-            voxelized_points_np = rigid_body["voxelizedPoints"]
-            is_dynamic = rigid_body["isDynamic"]
-            is_toggled = bool(rigid_body.get("isToggled", False))
-            desired_vel = np.array(rigid_body.get("velocity", [0.0 for _ in range(self.dim)]), dtype=np.float32)
-            init_is_dynamic = bool(is_dynamic and (not is_toggled))
-            if is_dynamic and is_toggled:
-                # Register this rigid body for runtime activation
-                self.toggled_rigid_bodies.add(obj_id)
-                self.toggled_dynamic_velocity[obj_id] = desired_vel
-            if init_is_dynamic:
-                velocity = desired_vel
-            else:
-                velocity = np.array([0.0 for _ in range(self.dim)], dtype=np.float32)
-            density = rigid_body["density"]
-            color = np.array(rigid_body["color"], dtype=np.int32)
-
-            
-            self.add_particles(obj_id,
-                               num_particles_obj,
-                               np.array(voxelized_points_np, dtype=np.float32), # position
-                               np.stack([velocity for _ in range(num_particles_obj)]), # velocity
-                               density * np.ones(num_particles_obj, dtype=np.float32), # density
-                               np.zeros(num_particles_obj, dtype=np.float32), # pressure
-                               np.array([0 for _ in range(num_particles_obj)], dtype=np.int32), # material is solid
-                               init_is_dynamic * np.ones(num_particles_obj, dtype=np.int32), # is_dynamic (toggled solids start static)
-                               np.stack([color for _ in range(num_particles_obj)])) # color
-            
-        # Prepare toggle order (ascending object id)
-        if len(self.toggled_rigid_bodies) > 0:
-            self.toggled_ids_sorted = sorted(list(self.toggled_rigid_bodies))
-            self.toggled_index = 0
-
-        self._setup_emitter_system()
-        # Mark all initially created particles as mature so they fully participate in interactions
-        self.mark_all_particles_mature()
+    # def activate_toggled_rigid_bodies(self):
+    #     # Activate all registered toggle-able rigid bodies that haven't been activated yet
+    #     for oid in list(self.toggled_rigid_bodies):
+    #         if oid in self.toggled_activated:
+    #             continue
+    #         vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
+    #         self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
+    #         self.toggled_activated.add(oid)
 
 
-    @ti.kernel
-    def _activate_object_dynamic_kernel(self, obj_id: int, vx: float, vy: float, vz: float):
-        for p in range(self.particle_num[None]):
-            if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 0:
-                self.is_dynamic[p] = 1
-                # Revert static-mass scaling (static solids used 10x mass)
-                self.m[p] = self.m[p] / 10.0
-                self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
-                self.m_inv[p] = 1.0 / (self.m[p] + 1e-12)
-                self.v[p] = ti.Vector([vx, vy, vz])
-                self.v_adv[p] = self.v[p]
-                self.v_old[p] = self.v[p]
-
-    def activate_toggled_rigid_bodies(self):
-        # Activate all registered toggle-able rigid bodies that haven't been activated yet
-        for oid in list(self.toggled_rigid_bodies):
-            if oid in self.toggled_activated:
-                continue
-            vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
-            self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
-            self.toggled_activated.add(oid)
-
-    @ti.kernel
-    def _deactivate_object_to_static_kernel(self, obj_id: int):
-        for p in range(self.particle_num[None]):
-            if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 1:
-                # Switch to static: zero velocity, set large mass, zero inv mass
-                self.is_dynamic[p] = 0
-                self.v[p] = ti.Vector.zero(float, self.dim)
-                self.v_adv[p] = self.v[p]
-                self.v_old[p] = self.v[p]
-                self.m[p] = self.m[p] * 10.0
-                self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
-                self.m_inv[p] = 0.0
-
-    def reset_toggled_state(self):
-        # Deactivate all toggle-able bodies to static and reset order pointer
-        for oid in list(self.toggled_rigid_bodies):
-            self._deactivate_object_to_static_kernel(int(oid))
-        self.toggled_activated.clear()
-        if len(self.toggled_rigid_bodies) > 0:
-            self.toggled_ids_sorted = sorted(list(self.toggled_rigid_bodies))
-        else:
-            self.toggled_ids_sorted = []
-        self.toggled_index = 0
-
-    def activate_next_toggled_rigid_body(self):
-        # Activate one toggle-able rigid body at a time in ascending object id
-        n = len(self.toggled_ids_sorted)
-        if n == 0:
-            return
-        # Find next not-yet-activated id from current index forward
-        idx = self.toggled_index
-        while idx < n and (self.toggled_ids_sorted[idx] in self.toggled_activated):
-            idx += 1
-        if idx >= n:
-            return
-        oid = self.toggled_ids_sorted[idx]
-        vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
-        self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
-        self.toggled_activated.add(oid)
-        self.toggled_index = idx + 1
+    # @ti.kernel
+    # def _deactivate_object_to_static_kernel(self, obj_id: int):
+    #     for p in range(self.particle_num[None]):
+    #         if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 1:
+    #             # Switch to static: zero velocity, set large mass, zero inv mass
+    #             self.is_dynamic[p] = 0
+    #             self.v[p] = ti.Vector.zero(float, self.dim)
+    #             self.v_adv[p] = self.v[p]
+    #             self.v_old[p] = self.v[p]
+    #             self.m[p] = self.m[p] * 10.0
+    #             self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
+    #             self.m_inv[p] = 0.0
 
 
-    # def build_solver(self):
-    #     solver_type = self.cfg.get_cfg("simulationMethod")
-    #     if solver_type == 0:
-    #         self.solver = WCSPHSolver(self)
-    #         return WCSPHSolver(self)
-    #     elif solver_type == 2:
-    #         self.solver = PBF2Solver(self)
-    #         return PBF2Solver(self)
-    #     elif solver_type == 3:
-    #         self.solver = IISPHSolver(self)
-    #         return IISPHSolver(self)
-    #     elif solver_type == 4:
-    #         self.solver = DFSPHSolver(self)
-    #         return DFSPHSolver(self)
-    #
+    # def reset_toggled_state(self):
+    #     # Deactivate all toggle-able bodies to static and reset order pointer
+    #     for oid in list(self.toggled_rigid_bodies):
+    #         self._deactivate_object_to_static_kernel(int(oid))
+    #     self.toggled_activated.clear()
+    #     if len(self.toggled_rigid_bodies) > 0:
+    #         self.toggled_ids_sorted = sorted(list(self.toggled_rigid_bodies))
     #     else:
-    #         raise NotImplementedError(f"Solver type {solver_type} has not been implemented.")
+    #         self.toggled_ids_sorted = []
+    #     self.toggled_index = 0
 
+
+    # def activate_next_toggled_rigid_body(self):
+    #     # Activate one toggle-able rigid body at a time in ascending object id
+    #     n = len(self.toggled_ids_sorted)
+    #     if n == 0:
+    #         return
+    #     # Find next not-yet-activated id from current index forward
+    #     idx = self.toggled_index
+    #     while idx < n and (self.toggled_ids_sorted[idx] in self.toggled_activated):
+    #         idx += 1
+    #     if idx >= n:
+    #         return
+    #     oid = self.toggled_ids_sorted[idx]
+    #     vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
+    #     self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
+    #     self.toggled_activated.add(oid)
+    #     self.toggled_index = idx + 1
+
+
+    # Helper and util methods
     @ti.func
     def add_particle(self, p, obj_id, x, v, density, pressure, material, is_dynamic, color):
         self.object_id[p] = obj_id
@@ -437,8 +233,6 @@ class ParticleSystem:
         self.pressure[p] = pressure
         self.material[p] = material
         self.is_dynamic[p] = is_dynamic
-        # Default: consider initially created particles as mature; emitters will reset age to 0
-        self.age[p] = 2
 
         if is_dynamic:
             self.m_inv[p] = 1.0 / self.m[p]
@@ -447,6 +241,7 @@ class ParticleSystem:
             self.m[p] *= 10.0
         self.color[p] = color
     
+
     def add_particles(self,
                       object_id: int,
                       new_particles_num: int,
@@ -469,6 +264,7 @@ class ParticleSystem:
                       new_particles_is_dynamic,
                       new_particles_color
                       )
+
 
     @ti.kernel
     def _add_particles(self,
@@ -498,6 +294,18 @@ class ParticleSystem:
                                          255])
                               )
         self.particle_num[None] += new_particles_num
+    
+
+    def set_emitted_on_indices(self, count, idxs_np, P_np, V_np, object_id, density, color_np):
+        r, g, b = int(color_np[0]), int(color_np[1]), int(color_np[2])
+        self._set_emitted_on_indices(count,
+                                     idxs_np.astype(np.int32),
+                                     P_np.astype(np.float32),
+                                     V_np.astype(np.float32),
+                                     int(object_id),
+                                     float(density),
+                                     r, g, b)
+        
 
     @ti.kernel
     def _set_emitted_on_indices(self,
@@ -532,42 +340,7 @@ class ParticleSystem:
             self.material[p] = self.material_fluid
             self.is_dynamic[p] = 1
             self.color[p] = ti.Vector([color_r, color_g, color_b, 255])
-            # Freshly emitted
-            self.age[p] = 0
 
-    def set_emitted_on_indices(self, count, idxs_np, P_np, V_np, object_id, density, color_np):
-        r, g, b = int(color_np[0]), int(color_np[1]), int(color_np[2])
-        self._set_emitted_on_indices(count,
-                                     idxs_np.astype(np.int32),
-                                     P_np.astype(np.float32),
-                                     V_np.astype(np.float32),
-                                     int(object_id),
-                                     float(density),
-                                     r, g, b)
-        
-
-    @ti.func
-    def pos_to_index(self, pos):
-        gi = (pos / self.grid_size).cast(int)
-        for d in ti.static(range(self.dim)):
-            gi[d] = ti.max(0, ti.min(gi[d], self.grid_num[d] - 1))
-        return gi
-    
-    @ti.func
-    def clamp_cell(self, cell):
-        out = ti.Vector([0 for _ in range(self.dim)])
-        for d in ti.static(range(self.dim)):
-            out[d] = ti.max(0, ti.min(cell[d], self.grid_num[d] - 1))
-        return out
-
-    @ti.func
-    def flatten_grid_index(self, grid_index):
-        return grid_index[0] * self.grid_num[1] * self.grid_num[2] + grid_index[1] * self.grid_num[2] + grid_index[2]
-    
-    @ti.func
-    def get_flatten_grid_index(self, pos):
-        return self.flatten_grid_index(self.pos_to_index(pos))
-    
 
     @ti.func
     def is_static_rigid_body(self, p):
@@ -577,27 +350,6 @@ class ParticleSystem:
     @ti.func
     def is_dynamic_rigid_body(self, p):
         return self.material[p] == self.material_solid and self.is_dynamic[p]
-
-
-
-    @ti.kernel
-    def increment_age(self):
-        for p in range(self.particle_num[None]):
-            # saturate to avoid overflow
-            if self.age[p] < 1000000000:
-                self.age[p] += 1
-
-    @ti.kernel
-    def set_age_range(self, start: int, count: int, value: int):
-        for k in range(count):
-            p = start + k
-            if p < self.particle_num[None]:
-                self.age[p] = value
-
-    @ti.kernel
-    def mark_all_particles_mature(self):
-        for p in range(self.particle_num[None]):
-            self.age[p] = 2
 
 
     @ti.kernel
@@ -621,66 +373,6 @@ class ParticleSystem:
             obj_id = self.object_id[p_i]
             ti.atomic_add(self.object_particle_num[obj_id], 1)
 
-
-    @ti.kernel
-    def initialize_boundary_neighbors(self):
-        for p_i in ti.grouped(self.x):
-            sum_Wij = 0.0
-            # Condition for boundary particles
-            if self.material[p_i] == self.material_solid:
-
-                for j in range(self.fluid_neighbors_num[p_i]):
-                    p_j = self.fluid_neighbors[p_i, j]
-                    if self.material[p_j] != self.material_solid:
-                        continue
-
-                    if self.object_id[p_j] != self.object_id[p_i]:
-                        continue
-
-                    sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
-
-                if sum_Wij > 1e-12:
-                    self.m[p_i] = 1.5*self.density0[p_i] / sum_Wij
-                    self.m_V[p_i] = self.m[p_i] / self.density0[p_i]
-                    # Keep inverse mass consistent (static solids keep 0 inv mass)
-                    if self.is_dynamic[p_i]:
-                        self.m_inv[p_i] = 1.0 / (self.m[p_i] + 1e-12)
-
-    @ti.kernel
-    def search_neighbours(self, x: ti.template()):
-        for p_i in range(self.particle_num[None]):
-            self.fluid_neighbors_num[p_i] = 0
-            self.solid_neighbors_num[p_i] = 0
-            center_cell = self.pos_to_index(x[p_i])
-            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
-                nbr_cell = self.clamp_cell(center_cell + offset)
-                grid_index = self.flatten_grid_index(nbr_cell)
-                start = 0
-                if grid_index > 0:
-                    start = self.grid_particles_num[grid_index - 1]
-                end = self.grid_particles_num[grid_index]
-                for p_j in range(start, end):
-                # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
-                    if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.support_radius:
-                        if self.fluid_neighbors_num[p_i] < self.cache_size:
-                            self.fluid_neighbors[p_i, self.fluid_neighbors_num[p_i]] = p_j 
-                            self.fluid_neighbors_num[p_i] += 1
-                        if self.material[p_i] == self.material_solid and self.material[p_j] == self.material_solid:
-                            if self.solid_neighbors_num[p_i] < self.cache_size:
-                                self.solid_neighbors[p_i, self.solid_neighbors_num[p_i]] = p_j 
-                                self.solid_neighbors_num[p_i] += 1
-
-
-    @ti.func
-    def for_all_neighbors(self, p_i, task: ti.template(), ret: ti.template()):
-        center_cell = self.pos_to_index(self.x[p_i])
-        for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
-            nbr_cell = self.clamp_cell(center_cell + offset)
-            # grid_index = self.flatten_grid_index(center_cell + offset)
-            grid_index = self.flatten_grid_index(nbr_cell)
-            for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
-                if p_i[0] != p_j and (self.x[p_i] - self.x[p_j]).norm() < self.support_radius:
-                    task(p_i, p_j, ret)
 
     @ti.kernel
     def copy_to_numpy(self, np_arr: ti.types.ndarray(), src_arr: ti.template()):
@@ -719,141 +411,3 @@ class ParticleSystem:
             'position': np_x,
             'velocity': np_v
         }
-    
-    def load_rigid_body(self, rigid_body):
-        obj_id = rigid_body["objectId"]
-        mesh = tm.load(rigid_body["geometryFile"])
-        mesh.apply_scale(rigid_body["scale"])
-        offset = np.array(rigid_body["translation"])
-
-        angle = rigid_body["rotationAngle"] / 360 * 2 * 3.1415926
-        direction = rigid_body["rotationAxis"]
-        rot_matrix = tm.transformations.rotation_matrix(angle, direction, mesh.vertices.mean(axis=0))
-        mesh.apply_transform(rot_matrix)
-        mesh.vertices += offset
-        
-        # Backup the original mesh for exporting obj
-        mesh_backup = mesh.copy()
-        rigid_body["mesh"] = mesh_backup
-        rigid_body["restPosition"] = mesh_backup.vertices
-        rigid_body["restCenterOfMass"] = mesh_backup.vertices.mean(axis=0)
-        is_success = tm.repair.fill_holes(mesh)
-            # print("Is the mesh successfully repaired? ", is_success)
-
-        a = 1.0
-        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter)
-        voxelized_mesh = mesh.voxelized(pitch=a * self.particle_diameter).fill()
-        # voxelized_mesh = mesh.voxelized(pitch=self.particle_diameter).hollow()
-        # voxelized_mesh.show()
-        voxelized_points_np = voxelized_mesh.points
-        # print(f"rigid body {obj_id} num: {voxelized_points_np.shape[0]}")
-        
-        return voxelized_points_np
-
-
-    def compute_cube_particle_num(self, start, end):
-        num_dim = []
-        for i in range(self.dim):
-            num_dim.append(
-                np.arange(start[i], end[i], self.particle_diameter))
-        return reduce(lambda x, y: x * y,
-                                   [len(n) for n in num_dim])
-
-    def add_cube(self,
-                 object_id,
-                 lower_corner,
-                 cube_size,
-                 material,
-                 is_dynamic,
-                 color=(0,0,0),
-                 density=None,
-                 pressure=None,
-                 velocity=None):
-
-        num_dim = []
-        for i in range(self.dim):
-            num_dim.append(np.arange(lower_corner[i], lower_corner[i] + cube_size[i], self.particle_diameter))
-        num_new_particles = reduce(lambda x, y: x * y, [len(n) for n in num_dim])
-        # print('particle num ', num_new_particles)
-
-        new_positions = np.array(np.meshgrid(*num_dim,
-                                             sparse=False,
-                                             indexing='ij'),
-                                 dtype=np.float32)
-        new_positions = new_positions.reshape(-1,
-                                              reduce(lambda x, y: x * y, list(new_positions.shape[1:]))).transpose()
-        # print("new position shape ", new_positions.shape)
-        if velocity is None:
-            velocity_arr = np.full_like(new_positions, 0, dtype=np.float32)
-        else:
-            velocity_arr = np.array([velocity for _ in range(num_new_particles)], dtype=np.float32)
-
-        material_arr = np.full_like(np.zeros(num_new_particles, dtype=np.int32), material)
-        is_dynamic_arr = np.full_like(np.zeros(num_new_particles, dtype=np.int32), is_dynamic)
-        color_arr = np.stack([np.full_like(np.zeros(num_new_particles, dtype=np.int32), c) for c in color], axis=1)
-        density_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float32), density if density is not None else 1000.)
-        pressure_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float32), pressure if pressure is not None else 0.)
-        self.add_particles(object_id, num_new_particles, new_positions, velocity_arr, density_arr, pressure_arr, material_arr, is_dynamic_arr, color_arr)
-
-    #==== Emitter system setup ====
-    def _build_rotation_from_direction(self, direction_np: np.ndarray):
-        d = np.array(direction_np, dtype=np.float32)
-        n = np.linalg.norm(d) + 1e-12
-        ex = d / n
-        # Choose a stable reference up and project it onto the plane orthogonal to ex
-        ref_up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-        if abs(np.dot(ex, ref_up)) > 0.99:
-            ref_up = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-        # ey: as aligned with world-up as possible but orthogonal to ex
-        ey = ref_up - np.dot(ref_up, ex) * ex
-        ey = ey / (np.linalg.norm(ey) + 1e-12)
-        # ez completes right-handed frame
-        ez = np.cross(ex, ey)
-        ez = ez / (np.linalg.norm(ez) + 1e-12)
-        # Columns: emit_dir(X), axis_h(Y), axis_w(Z)
-        R = np.stack([ex, ey, ez], axis=1).astype(np.float32)
-        return R
-
-    def _setup_emitter_system(self):
-
-        if len(self.emitter_defs) == 0:
-            return
-        self.emitter_system = EmitterSystem(self, max_reuse_per_step=self.emitter_max_reuse_per_step)
-
-        if self.emitter_reuse:
-            box_min = self.domain_start.astype(np.float32) + self.padding
-            box_max = (self.domain_start + self.domain_size).astype(np.float32) - self.padding
-            self.emitter_system.enable_reuse_particles(box_min=box_min, box_max=box_max)
-
-        for e in self.emitter_defs:
-            typ = e.get("type", "square")
-            typ_i = 0 if (isinstance(typ, str) and typ.lower() == "square") else (1 if (isinstance(typ, str) and typ.lower() == "circle") else int(typ))
-            width = int(e.get("width", 1))
-            height = int(e.get("height", max(1, width)))
-            pos = np.array(e.get("position", [0.0, 0.0, 0.0]), dtype=np.float32)
-            direction = np.array(e.get("direction", [1.0, 0.0, 0.0]), dtype=np.float32)
-            R = self._build_rotation_from_direction(direction)
-            vel = float(e.get("velocity", 0.0))
-            jitter = float(e.get("jitter", 0.0))
-            spread = float(e.get("spread", 0.0))
-            st = float(e.get("startTime", 0.0))
-            et = float(e.get("endTime", 1e9))
-            oid = int(e.get("objectId", 0))
-            density = float(e.get("density", 1000.0))
-            color = np.array(e.get("color", [0, 150, 255]), dtype=np.int32)
-            # Ensure emitter object id is included for visualization copy
-            if oid not in self.object_collection:
-                self.object_collection[oid] = {"objectId": oid}
-            self.emitter_system.add_emitter(width=width,
-                                            height=height,
-                                            pos=pos,
-                                            rotation=R,
-                                            velocity=vel,
-                                            type=typ_i,
-                                            start_time=st,
-                                            end_time=et,
-                                            object_id=oid,
-                                            density=density,
-                                            color=tuple(color.tolist()),
-                                            jitter=jitter,
-                                            spread_deg=spread)
