@@ -1,10 +1,6 @@
-import taichi as ti
-import math
-import os
-import json
 import time
 import numpy as np
-from sph_base import SPHBase
+from deprecated.sph_base import SPHBase
 from math_utils import *
 
 

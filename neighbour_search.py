@@ -48,13 +48,13 @@ class NeighborSearch:
         return self.flatten_grid_index(self.pos_to_index(pos))
 
     @ti.kernel
-    def update_grid_id(self, ps: ti.template()):
+    def update_grid_id(self):
 
         for I in ti.grouped(self.grid_particles_num):
             self.grid_particles_num[I] = 0
 
-        for p in range(ps.particle_num[None]):
-            grid_index       = self.get_flatten_grid_index(ps.x[p])
+        for p in range(self.ps.particle_num[None]):
+            grid_index       = self.get_flatten_grid_index(self.ps.x[p])
             self.grid_ids[p] = grid_index
             ti.atomic_add(self.grid_particles_num[grid_index], 1)
 
@@ -62,8 +62,8 @@ class NeighborSearch:
             self.grid_particles_num_temp[I] = self.grid_particles_num[I]
 
     @ti.kernel
-    def counting_sort(self, ps: ti.template()):
-        n = ps.particle_num[None]
+    def counting_sort(self):
+        n = self.ps.particle_num[None]
 
         for i in range(n):
             I = n - 1 - i
@@ -73,41 +73,41 @@ class NeighborSearch:
             self.grid_ids_new[I] = ti.atomic_sub(self.grid_particles_num_temp[self.grid_ids[I]],1) - 1 + base_offset
 
         for I in range(n):
-            new_index                           =  self.grid_ids_new[I]
-            self.grid_ids_buffer[new_index]     =  self.grid_ids[I]
-            ps.object_id_buffer[new_index]      = ps.object_id[I]
-            ps.x_0_buffer[new_index]            = ps.x_0[I]
-            ps.x_buffer[new_index]              = ps.x[I]
-            ps.v_buffer[new_index]              = ps.v[I]
-            ps.acceleration_buffer[new_index]   = ps.acceleration[I]
-            ps.m_V_buffer[new_index]            = ps.m_V[I]
-            ps.m_buffer[new_index]              = ps.m[I]
-            ps.m_inv_buffer[new_index]          = ps.m_inv[I]
-            ps.density_buffer[new_index]        = ps.density[I]
-            ps.density0_buffer[new_index]       = ps.density0[I]
-            ps.pressure_buffer[new_index]       = ps.pressure[I]
-            ps.material_buffer[new_index]       = ps.material[I]
-            ps.color_buffer[new_index]          = ps.color[I]
-            ps.is_dynamic_buffer[new_index]     = ps.is_dynamic[I]
-            ps.n_buffer[new_index]              = ps.n[I]
+            new_index                              = self.grid_ids_new[I]
+            self.grid_ids_buffer[new_index]        = self.grid_ids[I]
+            self.ps.object_id_buffer[new_index]    = self.ps.object_id[I]
+            self.ps.x_0_buffer[new_index]          = self.ps.x_0[I]
+            self.ps.x_buffer[new_index]            = self.ps.x[I]
+            self.ps.v_buffer[new_index]            = self.ps.v[I]
+            self.ps.acceleration_buffer[new_index] = self.ps.acceleration[I]
+            self.ps.m_V_buffer[new_index]          = self.ps.m_V[I]
+            self.ps.m_buffer[new_index]            = self.ps.m[I]
+            self.ps.m_inv_buffer[new_index]        = self.ps.m_inv[I]
+            self.ps.density_buffer[new_index]      = self.ps.density[I]
+            self.ps.density0_buffer[new_index]     = self.ps.density0[I]
+            self.ps.pressure_buffer[new_index]     = self.ps.pressure[I]
+            self.ps.material_buffer[new_index]     = self.ps.material[I]
+            self.ps.color_buffer[new_index]        = self.ps.color[I]
+            self.ps.is_dynamic_buffer[new_index]   = self.ps.is_dynamic[I]
+            self.ps.n_buffer[new_index]            = self.ps.n[I]
 
         for I in range(n):
             self.grid_ids[I]   = self.grid_ids_buffer[I]
-            ps.object_id[I]    = ps.object_id_buffer[I]
-            ps.x_0[I]          = ps.x_0_buffer[I]
-            ps.x[I]            = ps.x_buffer[I]
-            ps.v[I]            = ps.v_buffer[I]
-            ps.acceleration[I] = ps.acceleration_buffer[I]
-            ps.m_V[I]          = ps.m_V_buffer[I]
-            ps.m[I]            = ps.m_buffer[I]
-            ps.m_inv[I]        = ps.m_inv_buffer[I]
-            ps.density[I]      = ps.density_buffer[I]
-            ps.density0[I]     = ps.density0_buffer[I]
-            ps.pressure[I]     = ps.pressure_buffer[I]
-            ps.material[I]     = ps.material_buffer[I]
-            ps.color[I]        = ps.color_buffer[I]
-            ps.is_dynamic[I]   = ps.is_dynamic_buffer[I]
-            ps.n[I]            = ps.n_buffer[I]
+            self.ps.object_id[I]    = self.ps.object_id_buffer[I]
+            self.ps.x_0[I]          = self.ps.x_0_buffer[I]
+            self.ps.x[I]            = self.ps.x_buffer[I]
+            self.ps.v[I]            = self.ps.v_buffer[I]
+            self.ps.acceleration[I] = self.ps.acceleration_buffer[I]
+            self.ps.m_V[I]          = self.ps.m_V_buffer[I]
+            self.ps.m[I]            = self.ps.m_buffer[I]
+            self.ps.m_inv[I]        = self.ps.m_inv_buffer[I]
+            self.ps.density[I]      = self.ps.density_buffer[I]
+            self.ps.density0[I]     = self.ps.density0_buffer[I]
+            self.ps.pressure[I]     = self.ps.pressure_buffer[I]
+            self.ps.material[I]     = self.ps.material_buffer[I]
+            self.ps.color[I]        = self.ps.color_buffer[I]
+            self.ps.is_dynamic[I]   = self.ps.is_dynamic_buffer[I]
+            self.ps.n[I]            = self.ps.n_buffer[I]
 
     @ti.kernel
     def narrow_phase(self, x: ti.template()):
@@ -134,8 +134,43 @@ class NeighborSearch:
                                 self.ps.solid_neighbors[p_i, self.ps.solid_neighbors_num[p_i]] = p_j
                                 self.ps.solid_neighbors_num[p_i] += 1
 
+    @ti.func
+    def simulate_collisions(self, p_i, vec):
+        c_f = 0.5
+        self.ps.v[p_i] -= (1.0 + c_f) * self.ps.v[p_i].dot(vec) * vec
+
+    @ti.kernel
+    def enforce_boundary_3D(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic[p_i]:
+                pos = self.ps.x[p_i]
+                collision_normal = ti.Vector([0.0, 0.0, 0.0])
+                if pos[0] > self.ps.domain_size[0] - self.ps.padding:
+                    collision_normal[0] += 1.0
+                    self.ps.x[p_i][0] = self.ps.domain_size[0] - self.ps.padding
+                if pos[0] <= self.ps.padding:
+                    collision_normal[0] += -1.0
+                    self.ps.x[p_i][0] = self.ps.padding
+
+                if pos[1] > self.ps.domain_size[1] - self.ps.padding:
+                    collision_normal[1] += 1.0
+                    self.ps.x[p_i][1] = self.ps.domain_size[1] - self.ps.padding
+                if pos[1] <= self.ps.padding:
+                    collision_normal[1] += -1.0
+                    self.ps.x[p_i][1] = self.ps.padding
+
+                if pos[2] > self.ps.domain_size[2] - self.ps.padding:
+                    collision_normal[2] += 1.0
+                    self.ps.x[p_i][2] = self.ps.domain_size[2] - self.ps.padding
+                if pos[2] <= self.ps.padding:
+                    collision_normal[2] += -1.0
+                    self.ps.x[p_i][2] = self.ps.padding
+
+                collision_normal_length = collision_normal.norm()
+                if collision_normal_length > 1e-6:
+                    self.simulate_collisions(p_i, collision_normal / collision_normal_length)
 
     def broad_phase(self):
-        self.update_grid_id(self.ps)
+        self.update_grid_id()
         self.prefix_sum_executor.run(self.grid_particles_num)
-        self.counting_sort(self.ps)
+        self.counting_sort()

@@ -3,10 +3,6 @@ import numpy as np
 import trimesh as tm
 from functools import reduce
 from config_builder import SimConfig
-# from WCSPH import WCSPHSolver
-# from deprecated.DFSPH import DFSPHSolver
-# from PBF2 import PBF2Solver
-# from deprecated.IISPH import IISPHSolver
 from emitter import EmitterSystem
 
 
@@ -637,7 +633,7 @@ class ParticleSystem:
                     if self.object_id[p_j] != self.object_id[p_i]:
                         continue
 
-                    sum_Wij += self.solver.Wij((self.x[p_i] - self.x[p_j]).norm())
+                    sum_Wij += self.solver.W((self.x[p_i] - self.x[p_j]).norm())
 
                 if sum_Wij > 1e-12:
                     self.m[p_i] = 1.5*self.density0[p_i] / sum_Wij

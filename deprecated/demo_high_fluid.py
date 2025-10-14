@@ -1,7 +1,7 @@
 import taichi as ti
 import numpy as np
 from particle_system import ParticleSystem
-from WCSPH import WCSPHSolver
+from deprecated.WCSPH import WCSPHSolver
 from deprecated.IISPH import IISPHSolver
 
 # ti.init(arch=ti.cpu)

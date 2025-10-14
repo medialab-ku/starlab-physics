@@ -9,11 +9,16 @@ from particle_system import ParticleSystem
 from framework import Framework
 from neighbour_search import NeighborSearch
 from pressure import Pressure
-from animation import AnimationSystem
+from surface_tension import SurfaceTension
+from viscosity import Viscosity
+from elasticity import Elasticity
+
+
+from deprecated.animation import AnimationSystem
 from cache_system import SimulationCache
-import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from matplotlib.colors import LinearSegmentedColormap
+
 
 ti.init(arch=ti.gpu, device_memory_fraction=0.7)
 
@@ -45,13 +50,15 @@ if __name__ == "__main__":
     if output_obj:
         os.makedirs(obj_out_dir, exist_ok=True)
 
-    # method = config.get_cfg("simulationMethod")
     ps = ParticleSystem(config, GGUI=True)
     ns = NeighborSearch(config, ps)
     pressure = Pressure(ps)
-    fw = Framework(ps, ns, pressure)
-    # solver = ps.build_solver()
-    fw.initialize()
+    viscosity = Viscosity(ps)
+    surface_tension = SurfaceTension(ps)
+    elasticity = Elasticity(ps)
+    fw = Framework(ps, ns, pressure, viscosity, surface_tension, elasticity)
+
+    # fw.initialize()
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window=True, vsync=False)
     gui = window.get_gui()
