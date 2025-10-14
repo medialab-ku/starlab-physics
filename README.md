@@ -23,7 +23,7 @@ Our simulator has a robust set of features, divided into the core simulation eng
 
 ---
 ```
-python main.py --scene_file ./data/scenes/fluid_cube.json
+python main.py --scene_file ./data/scenes/tests/fluid_cube.json
 ```
 
 ## Development Roadmap
