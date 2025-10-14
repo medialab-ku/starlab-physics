@@ -18,24 +18,32 @@
         "transparentObjects": [1],
         "alpha": 0.2
 	},
-
-	"FluidBlocks": [
-        {
-            "objectId": 0,
-            "start": [2.2, 1.0, 2.2],
-            "end": [2.8, 4.0, 2.8],
-            "translation": [-0.3, 0.0, -0.3],
-            "scale": [2, 1.5, 2],
-            "velocity": [0.0, 0.0, 0.0],
-            "density": 1000.0,
-            "color": [10, 100, 200]
-        }
-    ],
+    
+    "Emitter": {
+		"capacity": 100000,
+		"reuse": false,
+		"emitters": [
+			{
+				"type": "circle",
+				"width": 15,
+				"height": 15,
+				"position": [1.8, 1.2, 2.5],
+				"direction": [1.0, 0.0, 0.0],
+				"velocity": 1.0,
+				"jitter": 0.25,
+				"spread": 5.0,
+				"startTime": 0.0,
+				"objectId": 0,
+				"density": 1000.0,
+				"color": [0, 150, 255]
+			}
+        ]
+    },
 
     "RigidBodies" : [
         {
             "objectId": 1,
-            "geometryFile": "./data/models/BoxOpened_thick.obj",
+            "geometryFile": "./data/models/boxTallThick.obj",
             "translation": [2.5, 0.1, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
@@ -56,6 +64,18 @@
             "density": 1000.0,
             "color": [255, 255, 255, 1.0],
             "isDynamic": false
+        },
+        {
+            "objectId": 3,
+            "geometryFile": "./data/models/torus.obj",
+            "translation": [2.5, 0.75, 2.5],
+            "rotationAxis": [0, 1, 0],
+            "rotationAngle": 0,
+            "scale": [0.3, 0.3, 0.3],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 600.0,
+            "color": [255, 255, 255, 1.0],
+            "isDynamic": true
         }
     ]
 }

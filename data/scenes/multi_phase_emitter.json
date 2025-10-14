@@ -57,7 +57,7 @@
     "RigidBodies" : [
         {
             "objectId": 2,
-            "geometryFile": "./data/models/BoxOpened.obj",
+            "geometryFile": "./data/models/box.obj",
             "translation": [2.5, -2.5, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
@@ -69,7 +69,7 @@
         },
         {
             "objectId": 3,
-            "geometryFile": "./data/models/rigid_cube.obj",
+            "geometryFile": "./data/models/cube.obj",
             "translation": [2.5, 3.6, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
@@ -81,7 +81,7 @@
         },
         {
             "objectId": 4,
-            "geometryFile": "./data/models/Rubber_duck.obj",
+            "geometryFile": "./data/models/rubberDuck.obj",
             "translation": [2.5, 1.5, 2.0],
             "rotationAxis": [1, 0, 0],
             "rotationAngle": 270,
