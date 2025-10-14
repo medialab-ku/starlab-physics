@@ -199,12 +199,12 @@ class Framework:
 
 
         self.ns.broad_phase()
-        self.compute_static_boundary_volume()
-        self.compute_moving_boundary_volume()
-        self.initialize_boundary_neighbors()
+        # self.compute_static_boundary_volume()
+        # self.compute_moving_boundary_volume()
+        # self.initialize_boundary_neighbors()
 
-        if self.ps.num_rigid_bodies > 0:
-            self.ps.initialize_rigid_mass()
+        # if self.ps.num_rigid_bodies > 0:
+        #     self.ps.initialize_rigid_mass()
 
         if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
             self.ps.emitter_system.reset()
