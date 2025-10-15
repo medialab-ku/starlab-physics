@@ -211,7 +211,7 @@ class SceneLoader:
             num_particles_obj = rigid_body["particleNum"]
             voxelized_points_np = rigid_body["voxelizedPoints"]
             desired = np.array(rigid_body.get("velocity", [0.0 for _ in range(self.dim)]), dtype=np.float32)
-            velocity = np.array([desired if is_dynamic else 0.0 for _ in range(self.dim)], dtype=np.float32)
+            velocity = desired if is_dynamic else np.zeros(self.dim, dtype=np.float32)
             density = rigid_body["density"]
             color = np.array(rigid_body["color"], dtype=np.int32)
 
@@ -351,14 +351,14 @@ class SceneLoader:
         max_reuse = int(emitter_info.get("max_reuse_per_step", 1000) or 1000)
         reuse = bool(emitter_info.get("reuse", False))
 
-        self.es = EmitterSystem(ps, max_reuse_per_step=self.emitter_max_reuse_per_step)
+        self.es = EmitterSystem(ps, max_reuse_per_step=max_reuse)
 
         if reuse:
-            box_min = ps.domain_start.astype(np.float32) + self.padding
+            box_min = ps.domain_start.astype(np.float32) + ps.padding
             box_max = (ps.domain_start + ps.domain_size).astype(np.float32) - ps.padding
             self.es.enable_reuse_particles(box_min=box_min, box_max=box_max)
 
-        for e in self.emitter_defs:
+        for e in defs:
             typ = e.get("type", "square")
             typ_i = 0 if (isinstance(typ, str) and typ.lower() == "square") else (1 if (isinstance(typ, str) and typ.lower() == "circle") else int(typ))
             width = int(e.get("width", 1))

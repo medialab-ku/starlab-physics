@@ -3,10 +3,7 @@ import numpy as np
 import trimesh as tm
 from functools import reduce
 from config_builder import SimConfig
-# from WCSPH import WCSPHSolver
-# from deprecated.DFSPH import DFSPHSolver
-# from PBF2 import PBF2Solver
-# from deprecated.IISPH import IISPHSolver
+
 
 @ti.data_oriented
 class ParticleSystem:

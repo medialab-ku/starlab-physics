@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Optional
 
 
 class SimulationCache:
@@ -34,13 +35,12 @@ class SimulationCache:
         while len(self._cache) > self.max_steps:
             self._cache.pop(0)
 
-    def _snapshot(self, frame_cnt: int, anim_time: float):
+    def _snapshot(self, frame_cnt: int, anim_time: float | None = None):
         try:
             N = int(self.ps.particle_num[None])
             snap = {
                 "frame": int(frame_cnt),
                 "particle_num": N,
-                "anim_time": float(anim_time),
             }
 
             # Per-particle arrays (sorted order)
@@ -98,6 +98,10 @@ class SimulationCache:
 
             # RNG state
             snap["np_random_state"] = np.random.get_state()
+
+            if anim_time is not None:
+                snap["anim_time"] = float(anim_time)
+
             return snap
         except Exception:
             return None
@@ -105,7 +109,7 @@ class SimulationCache:
     # -----------------------------
     # Baseline helpers
     # -----------------------------
-    def snapshot_baseline(self, anim_time: float = 0.0):
+    def snapshot_baseline(self, anim_time: float | None = None):
         """Capture a baseline snapshot after solver.initialize()."""
         self._baseline = self._snapshot(frame_cnt=0, anim_time=anim_time)
 
@@ -118,7 +122,7 @@ class SimulationCache:
             return False, None, None
         return self._restore(self._baseline)
 
-    def push(self, frame_cnt: int, anim_time: float):
+    def push(self, frame_cnt: int, anim_time: float | None = None):
         if not self.enabled:
             return
         snap = self._snapshot(frame_cnt, anim_time)
@@ -219,7 +223,7 @@ class SimulationCache:
             except Exception:
                 pass
 
-            return True, int(snap.get("frame", 0)), float(snap.get("anim_time", 0.0))
+            return True, int(snap.get("frame", 0)), float(snap.get("anim_time", None))
         except Exception:
             return False, None, None
 
