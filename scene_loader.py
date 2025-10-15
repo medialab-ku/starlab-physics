@@ -20,6 +20,11 @@ class SceneLoader:
 
     # ===================================================================== #
 
+    def get_scene_name(self, scene_file_path: str):
+        p = scene_file_path or ""
+        return p.split("/")[-1].split(".")[0] if p else "scene"
+
+
     def prepare_scene(self):
         fluid_blocks = list(self.cfg.get_fluid_blocks() or [])
         fluid_bodies = list(self.cfg.get_fluid_bodies() or [])

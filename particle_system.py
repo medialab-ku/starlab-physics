@@ -129,74 +129,6 @@ class ParticleSystem:
             self.color_heat_map   = ti.Vector.field(4, dtype=float, shape=self.particle_max_num)
 
 
-    # @ti.kernel
-    # def _activate_object_dynamic_kernel(self, obj_id: int, vx: float, vy: float, vz: float):
-    #     for p in range(self.particle_num[None]):
-    #         if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 0:
-    #             self.is_dynamic[p] = 1
-    #             # Revert static-mass scaling (static solids used 10x mass)
-    #             self.m[p] = self.m[p] / 10.0
-    #             self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
-    #             self.m_inv[p] = 1.0 / (self.m[p] + 1e-12)
-    #             self.v[p] = ti.Vector([vx, vy, vz])
-    #             self.v_adv[p] = self.v[p]
-    #             self.v_old[p] = self.v[p]
-
-
-    # def activate_toggled_rigid_bodies(self):
-    #     # Activate all registered toggle-able rigid bodies that haven't been activated yet
-    #     for oid in list(self.toggled_rigid_bodies):
-    #         if oid in self.toggled_activated:
-    #             continue
-    #         vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
-    #         self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
-    #         self.toggled_activated.add(oid)
-
-
-    # @ti.kernel
-    # def _deactivate_object_to_static_kernel(self, obj_id: int):
-    #     for p in range(self.particle_num[None]):
-    #         if self.object_id[p] == obj_id and self.material[p] == self.material_solid and self.is_dynamic[p] == 1:
-    #             # Switch to static: zero velocity, set large mass, zero inv mass
-    #             self.is_dynamic[p] = 0
-    #             self.v[p] = ti.Vector.zero(float, self.dim)
-    #             self.v_adv[p] = self.v[p]
-    #             self.v_old[p] = self.v[p]
-    #             self.m[p] = self.m[p] * 10.0
-    #             self.m_V[p] = self.m[p] / (self.density0[p] + 1e-12)
-    #             self.m_inv[p] = 0.0
-
-
-    # def reset_toggled_state(self):
-    #     # Deactivate all toggle-able bodies to static and reset order pointer
-    #     for oid in list(self.toggled_rigid_bodies):
-    #         self._deactivate_object_to_static_kernel(int(oid))
-    #     self.toggled_activated.clear()
-    #     if len(self.toggled_rigid_bodies) > 0:
-    #         self.toggled_ids_sorted = sorted(list(self.toggled_rigid_bodies))
-    #     else:
-    #         self.toggled_ids_sorted = []
-    #     self.toggled_index = 0
-
-
-    # def activate_next_toggled_rigid_body(self):
-    #     # Activate one toggle-able rigid body at a time in ascending object id
-    #     n = len(self.toggled_ids_sorted)
-    #     if n == 0:
-    #         return
-    #     # Find next not-yet-activated id from current index forward
-    #     idx = self.toggled_index
-    #     while idx < n and (self.toggled_ids_sorted[idx] in self.toggled_activated):
-    #         idx += 1
-    #     if idx >= n:
-    #         return
-    #     oid = self.toggled_ids_sorted[idx]
-    #     vel = self.toggled_dynamic_velocity.get(oid, np.zeros(self.dim, dtype=np.float32))
-    #     self._activate_object_dynamic_kernel(int(oid), float(vel[0]), float(vel[1]), float(vel[2]))
-    #     self.toggled_activated.add(oid)
-    #     self.toggled_index = idx + 1
-
-
     # Helper and util methods
     @ti.func
     def add_particle(self, p, obj_id, x, v, density, pressure, material, is_dynamic, color):
@@ -387,25 +319,6 @@ class ParticleSystem:
         for i in range(self.particle_num[None]):
             for d in ti.static(range(self.dim)):
                 np_arr[i, d] = src_arr[i][d]
-    
-
-    def copy_to_vis_buffer(self, invisible_objects=[]):
-        # Always clear buffers to avoid rendering inactive/emitted stale particles
-        self.x_vis_buffer.fill(1000.0)  # move non-active far away
-        self.color_vis_buffer.fill(0.0)
-        for obj_id in self.object_collection:
-            if obj_id not in invisible_objects:
-                self._copy_to_vis_buffer(obj_id)
-
-
-    @ti.kernel
-    def _copy_to_vis_buffer(self, obj_id: int):
-        assert self.GGUI
-        # Only copy active particles
-        for i in range(self.particle_num[None]):
-            if self.object_id[i] == obj_id:
-                self.x_vis_buffer[i] = self.x[i]
-                self.color_vis_buffer[i] = self.color[i] / 255.0
 
 
     def dump(self, obj_id):

@@ -80,7 +80,9 @@ class VisualizationEngine:
 
     def update_buffers(self):
         self.copy_to_vis_buffer(invisible_objects=(self.settings.invisible_objects or []))
-
+        
+        N_active = int(self.ps.particle_num[None])
+           
         v_np = self.ps.v.to_numpy()
         density_np = self.ps.density.to_numpy()
         density0_np = self.ps.density0.to_numpy()
@@ -92,22 +94,19 @@ class VisualizationEngine:
         density_diff = density_np - density0_np
 
         if self.settings.heatmap_field == HeatmapField.velocity:
-            scalar_raw = v_norm
             scalar_norm = self.norm_v(v_norm)
             rgba = self.cmap_vel(scalar_norm)
         elif self.settings.heatmap_field == HeatmapField.divergence:
-            scalar_raw = div_np
             scalar_norm = self.norm_div(div_np)
             rgba = self.cmap_div(scalar_norm)
         else:  # density
-            scalar_raw = density_diff
             scalar_norm = self.norm_density(density_diff)
             rgba = self.cmap_den(scalar_norm)
 
         default_colors = self.ps.color_vis_buffer.to_numpy()
 
         # TODO: fix redundant logic for heatmap & original color mode
-        if self.settings.color_mode == ColorMode.heatmap:
+        if self.settings.color_mode == ColorMode.heatmap: 
             heat_map_colors = default_colors.copy()
             fluid_mask = (material_np == self.ps.material_fluid)
             show_mask = np.logical_or(fluid_mask, dynamic_mask)
@@ -162,9 +161,10 @@ class VisualizationEngine:
 
         # Cache for export
         self.last_rgba = rgba
-        self.last_scalar_raw = scalar_raw
-        self.last_scalar_norm = scalar_norm
-        self.last_field = self.settings.heatmap_field
+        self._N_active = N_active
+        self._object_id_np = object_id_np[:N_active]
+        self._material_np = material_np[:N_active]
+        self._default_colors_np = default_colors[:N_active]  # 0~1
         # Render handle
         self._render_colors = render_colors
 
@@ -201,3 +201,16 @@ class VisualizationEngine:
             gui.text(f"Current alpha: {self.settings.color_alpha:.2f}")
         else:
             gui.text("No transparent objects configured")
+
+    
+    # visualization.py - VisualizationEngine 클래스 내부
+    def get_heatmap_attributes(self):
+        if self.last_rgba is None:
+            self.update_buffers()
+        return {
+            "N": self._N_active,
+            "object_id": self._object_id_np,
+            "material": self._material_np,
+            "default_colors": self._default_colors_np,
+            "rgba": self.last_rgba,
+        }
