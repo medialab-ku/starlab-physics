@@ -67,8 +67,8 @@ class Elasticity:
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
-                Dm += xji0.outer_product(xji0)
-                # Dm -= self.gradW(xij0, self.ps.support_radius).outer_product(xij0)
+                # Dm += xji0.outer_product(xji0)
+                Dm -= self.gradW(xji0, self.ps.support_radius).outer_product(xji0)
             
             # print(f"Dm: {ti.math.determinant(Dm)}")
             self.L[p_i0] = Dm.inverse()
@@ -91,7 +91,8 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 xji = x[p_j] - x[p_i]
-                Ds_i += xji.outer_product(xji0)
+                # Ds_i += xji.outer_product(xji0)
+                Ds_i -= xji.outer_product(self.gradW(xji0, self.ps.support_radius))
 
             self.F[p_i] = Ds_i @ self.L[p_i0]
             # print(f"F: {self.F[p_i]}")
@@ -152,8 +153,8 @@ class Elasticity:
 
                 xji0 = self.ps.x0[p_j] -self.ps.x0[p_i]
                 PL_j = self.P[p_j] @ self.L[p_j0]
-                # f_s += (PL_i + PL_j) @ self.gradW(xij0, self.ps.support_radius)
-                f_s += (PL_i + PL_j) @ xji0
+                f_s += (PL_i + PL_j) @ self.gradW(xji0, self.ps.support_radius)
+                # f_s += (PL_i + PL_j) @ xji0
 
             self.grad[p_i] = dt * f_s
 
@@ -179,6 +180,6 @@ class Elasticity:
         # TODO: v +=  M^-1 * (grad)
         self.v_tmp.copy_from(self.ps.v)
         coef_wise_mul(self.a, self.ps.m_inv, self.grad)
-        add(self.v_tmp, self.v_tmp, 1.0, self.a)
+        add(self.v_tmp, self.v_tmp, -1.0, self.a)
         self.ps.v.copy_from(self.v_tmp)
         # self.PCG(x=None, b=None)
