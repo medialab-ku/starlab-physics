@@ -41,7 +41,7 @@ class OutputManager:
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        if ExportFormat.ply in self.cfg.selected_format:
+        if self.cfg.export_particles and ExportFormat.ply in self.cfg.selected_format:
             os.makedirs(self.ply_dir, exist_ok=True)
         if self.cfg.export_mesh_obj:
             os.makedirs(self.obj_dir, exist_ok=True)
@@ -56,6 +56,8 @@ class OutputManager:
 
 
     def on_step(self, frame_idx: int, ps, viz_engine):
+        if not self.cfg.export_particles and not self.cfg.export_rigid_mesh:
+            return
         if frame_idx % self.cfg.frame_interval != 0:
             return
 
