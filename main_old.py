@@ -13,7 +13,6 @@ from pressure import Pressure
 from surface_tension import SurfaceTension
 from viscosity import Viscosity
 from elasticity import Elasticity
-from viewer import Viewer
 
 from deprecated.animation import AnimationSystem
 from cache_system import SimulationCache
