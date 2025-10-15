@@ -136,7 +136,7 @@ class NeighborSearch:
                     # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
                     if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.ps.support_radius:
                         if self.ps.particle_neighbors_num[p_i] < self.ps.cache_size:
-                            self.ps.fluid_neighbors[p_i, self.ps.particle_neighbors_num[p_i]] = p_j
+                            self.ps.particle_neighbors[p_i, self.ps.particle_neighbors_num[p_i]] = p_j
                             self.ps.particle_neighbors_num[p_i] += 1
                         # if self.ps.material[p_i] == self.ps.material_solid and self.ps.material[p_j] == self.ps.material_solid:
                         #     if self.ps.solid_neighbors_num[p_i] < self.ps.cache_size:

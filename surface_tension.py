@@ -52,7 +52,7 @@ class SurfaceTension:
                 continue
             n = ti.Vector.zero(float, self.ps.dim)
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 if self.ps.material[p_j] != self.ps.material_fluid:
                     continue
                 n += (self.ps.m[p_j] / (self.ps.density[p_j] + 1e-12)) * self.gradW(self.ps.x[p_i] - self.ps.x[p_j], self.ps.support_radius)
@@ -69,7 +69,7 @@ class SurfaceTension:
 
                 x_i = self.ps.x[p_i]
                 for j in range(self.ps.particle_neighbors_num[p_i]):
-                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    p_j = self.ps.particle_neighbors[p_i, j]
                     x_j = self.ps.x[p_j]
                     r = x_i - x_j
                     h = self.ps.support_radius

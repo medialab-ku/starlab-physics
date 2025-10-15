@@ -28,7 +28,7 @@ class Elasticity:
             p_i0 = self.ps.cur2ori[p_i]
             self.ps.solid_neighbors_num[p_i0] = self.ps.particle_neighbors_num[p_i]
             for j in range(self.ps.solid_neighbors_num[p_i0]):
-                self.ps.solid_neighbors_num[p_i0, j] = self.ps.fluid_neighbors[p_i, j]
+                self.ps.solid_neighbors[p_i0, j] = self.ps.particle_neighbors[p_i, j]
 
         #TODO: set rest volume
         for p_i in ti.grouped(self.ps.x):
@@ -102,6 +102,9 @@ class Elasticity:
         # stretch term, volume term
         mu = YM / 2.0 * (1.0 + PR)
 
+
+        print("TODO: volume expansion")
+
         for p_i in ti.grouped(self.ps.x):
             if not self.ps.is_solid[p_i]:
                 continue
@@ -113,7 +116,7 @@ class Elasticity:
             self.P[p_i] = 2 * mu * (F_i - R_i)
 
     @ti.kernel
-    def compute_gradient(self, dt):
+    def compute_gradient(self, dt: float):
 
         # dtSq = dt ** 2
         for p_i in ti.grouped(self.ps.x):

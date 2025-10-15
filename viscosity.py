@@ -25,7 +25,7 @@ class Viscosity:
 
                 x_i = self.ps.x[p_i]
                 for j in range(self.ps.particle_neighbors_num[p_i]):
-                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    p_j = self.ps.particle_neighbors[p_i, j]
                     x_j = self.ps.x[p_j]
                     r = x_i - x_j
 

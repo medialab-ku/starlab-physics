@@ -20,6 +20,10 @@ class Framework:
         self.time = 0.0
 
 
+        self.YM = 1e4 # Young Modulus
+        self.PR = 0.3 # Poisson Ratio
+
+
     def initialize(self):
 
         self.ns.broad_phase()
@@ -75,7 +79,7 @@ class Framework:
 
         self.viscosity.solve(self.viscosity_coeff, self.dt)
 
-        self.elasticity.solve(self.dt)
+        self.elasticity.solve(self.YM, self.PR, self.dt)
 
         self.pressure.solve(self.dt)
 

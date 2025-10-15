@@ -155,7 +155,7 @@ class SPHBase:
             if self.ps.material[p_i] == self.ps.material_solid:
 
                 for j in range(self.ps.particle_neighbors_num[p_i]):
-                    p_j = self.ps.fluid_neighbors[p_i, j]
+                    p_j = self.ps.particle_neighbors[p_i, j]
                     if self.ps.material[p_j] != self.ps.material_solid:
                         continue
 
@@ -359,7 +359,7 @@ class SPHBase:
                 continue
             for j in range(self.ps.particle_neighbors_num[p_i]):
                 f_b = ti.math.vec3(0.0)
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 body = self.ps.object_id[p_j]
                 if self.ps.is_dynamic_rigid_body(p_j):
                     grad = self.ps.fluid_neighbors_values[p_i, j]

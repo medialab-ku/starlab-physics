@@ -33,13 +33,13 @@ class IISPHSolver(SPHBase):
             self.a_ii[p_i] = 0.0
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 sum_neighbor_inner = ti.Vector([0.0 for _ in range(self.ps.dim)])
                 for k in range(self.ps.particle_neighbors_num[p_i]):
                     density_k = self.ps.density[k]
                     density_k2 = density_k * density_k
-                    p_k = self.ps.fluid_neighbors[p_i, j]
+                    p_k = self.ps.particle_neighbors[p_i, j]
                     x_k = self.ps.x[p_k]
                     sum_neighbor_inner += self.ps.m_V[p_k] * self.cubic_kernel_derivative(x_i - x_k) / density_k2
 
@@ -82,7 +82,7 @@ class IISPHSolver(SPHBase):
             divergence = 0.0
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 divergence += self.ps.m_V[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
 
@@ -128,7 +128,7 @@ class IISPHSolver(SPHBase):
             dpi = self.last_pressure[p_i] / self.ps.density[p_i] ** 2
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 dpj = self.last_pressure[p_j] / self.ps.density[p_j] ** 2
                 # Compute the pressure force contribution, Symmetric Formula
@@ -153,7 +153,7 @@ class IISPHSolver(SPHBase):
             accel_p_i = self.pressure_accel[p_i]
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 Ap += self.ps.m_V[p_j] * (accel_p_i - self.pressure_accel[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
             # Boundary neighbors
@@ -190,7 +190,7 @@ class IISPHSolver(SPHBase):
             self.ps.density[p_i] = self.ps.m_V[p_i] * self.cubic_kernel(0.0)
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 self.ps.density[p_i] += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
             # Boundary neighbors
@@ -214,7 +214,7 @@ class IISPHSolver(SPHBase):
             dpi = self.ps.pressure[p_i] / self.ps.density[p_i] ** 2
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 dpj = self.ps.pressure[p_j] / self.ps.density[p_j] ** 2
                 # Compute the pressure force contribution, Symmetric Formula
@@ -243,7 +243,7 @@ class IISPHSolver(SPHBase):
             d_v = ti.Vector(self.g)
             # d_v[1] = self.g[1]
             for j in range(self.ps.particle_neighbors_num[p_i]):
-                p_j = self.ps.fluid_neighbors[p_i, j]
+                p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 d_v += self.viscosity_force(p_i, p_j, x_i - x_j)
             self.ps.acceleration[p_i] = d_v

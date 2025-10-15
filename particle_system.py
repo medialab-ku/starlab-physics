@@ -98,12 +98,11 @@ class ParticleSystem:
         self.cache_size = 50 
         self.particle_neighbors_num = ti.field(dtype=int, shape=self.particle_max_num)
         self.solid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
-        self.fluid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
+        self.particle_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.solid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_values = ti.Vector.field(n=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_JtJ    = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_JtJ_ii = ti.Matrix.field(n=3, m=3, dtype=float, shape= self.particle_max_num)
-
 
 
         # Buffer for sort
@@ -375,7 +374,7 @@ class ParticleSystem:
             if self.material[p_i] == self.material_solid:
 
                 for j in range(self.particle_neighbors_num[p_i]):
-                    p_j = self.fluid_neighbors[p_i, j]
+                    p_j = self.particle_neighbors[p_i, j]
                     if self.material[p_j] != self.material_solid:
                         continue
 
