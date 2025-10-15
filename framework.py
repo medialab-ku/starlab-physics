@@ -41,7 +41,7 @@ class Framework:
     @ti.kernel
     def apply_gravity(self, dt: float):
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.is_static_rigid_body(p_i):
+            if self.ps.is_static_rigid(p_i):
                 self.ps.acceleration[p_i].fill(0.0)
                 continue
 
@@ -79,7 +79,7 @@ class Framework:
 
         self.viscosity.solve(self.viscosity_coeff, self.dt)
 
-        # self.elasticity.solve(self.YM, self.PR, self.dt)
+        self.elasticity.solve(self.YM, self.PR, self.dt)
 
         self.pressure.solve(self.dt)
 

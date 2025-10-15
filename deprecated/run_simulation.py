@@ -371,7 +371,7 @@ if __name__ == "__main__":
             return R, t
         obj_ids = ps.object_id.to_numpy()[:N]
         mats = ps.material.to_numpy()[:N]
-        mask = (obj_ids == obj_id) & (mats == ps.material_solid)
+        mask = (obj_ids == obj_id) & (mats == ps.material_rigid)
         if not np.any(mask):
             R = np.eye(3, dtype=np.float32)
             t = np.zeros(3, dtype=np.float32)

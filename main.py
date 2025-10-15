@@ -85,7 +85,7 @@ if __name__ == "__main__":
     viz = VisualizationEngine(ps, config, viz_settings)
 
     output_cfg = OutputConfig(
-        export_particles=True,
+        export_particles=False,
         selected_format=ExportFormat.ply,
         export_fluid_particles=True,
         export_rigid_particles=False,

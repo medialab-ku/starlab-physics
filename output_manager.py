@@ -56,7 +56,7 @@ class OutputManager:
 
 
     def on_step(self, frame_idx: int, ps, viz_engine):
-        if not self.cfg.export_particles and not self.cfg.export_rigid_mesh:
+        if not self.cfg.export_particles and not self.cfg.export_mesh_obj:
             return
         if frame_idx % self.cfg.frame_interval != 0:
             return

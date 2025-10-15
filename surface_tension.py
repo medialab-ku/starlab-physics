@@ -59,7 +59,7 @@ class SurfaceTension:
             self.ps.n[p_i] = self.ps.support_radius * n
 
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.is_static_rigid_body(p_i):
+            if self.ps.is_static_rigid(p_i):
                 # self.ps.acceleration[p_i].fill(0.0)
                 continue
 
@@ -97,7 +97,7 @@ class SurfaceTension:
 
 
                     # ---------- Adhesion ----------
-                    elif self.ps.material[p_j] == self.ps.material_solid:
+                    elif self.ps.material[p_j] == self.ps.material_rigid:
                         f_adh = - coeff_adh * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
                         acc += f_adh
 

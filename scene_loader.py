@@ -28,14 +28,15 @@ class SceneLoader:
     def prepare_scene(self):
         fluid_blocks = list(self.cfg.get_fluid_blocks() or [])
         fluid_bodies = list(self.cfg.get_fluid_bodies() or [])
-        rigid_blocks = list(self.cfg.get_rigid_blocks() or [])
         rigid_bodies = list(self.cfg.get_rigid_bodies() or [])
+        solid_bodies = list(self.cfg.get_solid_bodies() or [])
 
         object_ids = []
         object_map ={}
 
         fluid_cnt = 0
         rigid_cnt = 0
+        solid_cnt = 0
         rb_dynamic_cnt = 0
 
         # Process Fluid Blocks
@@ -62,23 +63,6 @@ class SceneLoader:
             fb["voxelizedPoints"] = voxelized_points_np
             fluid_cnt += voxelized_points_np.shape[0]
 
-        # Process Rigid Blocks
-        for rigid in rigid_blocks:
-            object_ids.append(int(rigid["objectId"]))
-            object_map[rigid["objectId"]] = rigid
-            t = np.array(fluid.get("translation", [0, 0, 0]), dtype=np.float32)
-            s = np.array(fluid.get("scale", [1, 1, 1]), dtype=np.float32)
-            start = np.array(fluid["start"], dtype=np.float32) + t
-            size  = (np.array(fluid["end"], dtype=np.float32) - np.array(fluid["start"], dtype=np.float32)) * s
-            end   = start + size
-            particle_num = self.compute_cube_particle_num(start, end)
-            rigid["worldStart"] = start
-            rigid["worldEnd"] = end
-            rigid["particleNum"] = particle_num
-            rigid_cnt += particle_num
-            if rigid["isDynamic"]:
-                rb_dynamic_cnt += particle_num
-
         # Process Rigid Bodies
         for rigid_body in rigid_bodies:
             object_ids.append(int(rigid_body["objectId"]))
@@ -89,6 +73,15 @@ class SceneLoader:
             rigid_cnt += voxelized_points_np.shape[0]
             if rigid_body["isDynamic"]:
                 rb_dynamic_cnt += voxelized_points_np.shape[0]
+
+        # Process Deformable Bodies
+        for sb in solid_bodies:
+            object_ids.append(int(sb["objectId"]))
+            object_map[sb["objectId"]] = sb
+            voxelized_points_np = self.load_mesh(sb)
+            sb["particleNum"] = voxelized_points_np.shape[0]
+            sb["voxelizedPoints"] = voxelized_points_np
+            solid_cnt += voxelized_points_np.shape[0]
 
         num_objects = (max(object_ids) + 1) if object_ids else 1
 
@@ -107,19 +100,21 @@ class SceneLoader:
         elif isinstance(emitter_cfg_raw, list):
             emitter_defs = list(emitter_cfg_raw)
 
-        particle_max_num = fluid_cnt + rigid_cnt + int(emitter_capacity)
+        particle_max_num = fluid_cnt + rigid_cnt + solid_cnt + int(emitter_capacity)
 
         return {
             "fluid_blocks": fluid_blocks,
             "fluid_bodies": fluid_bodies,
-            "rigid_blocks": rigid_blocks,
             "rigid_bodies": rigid_bodies,
+            "solid_bodies": solid_bodies,
             "particle_max_num": int(particle_max_num),
             "fluid_particle_num": int(fluid_cnt),
             "rigid_particle_num": int(rigid_cnt),
-            "dynamic_particle_num": int(rb_dynamic_cnt),
+            "solid_particle_num": int(solid_cnt),
+            "dynamic_particle_num": int(rb_dynamic_cnt + solid_cnt),
             "num_objects": int(num_objects),
-            "num_rigid_bodies": int(len(rigid_blocks) + len(rigid_bodies)),
+            "num_rigid_bodies": int(len(rigid_bodies)),
+            "num_solid_bodies": int(len(solid_bodies)),
             "object_map": object_map,
             "object_ids": object_ids,
             "emitter": {
@@ -141,6 +136,7 @@ class SceneLoader:
 
         ps.fluid_particle_num   = int(scene_data["fluid_particle_num"])
         ps.rigid_particle_num   = int(scene_data["rigid_particle_num"])
+        ps.solid_particle_num   = int(scene_data["solid_particle_num"])
         ps.dynamic_particle_num = int(scene_data["dynamic_particle_num"])
 
         ps.object_collection.clear()
@@ -183,29 +179,6 @@ class SceneLoader:
                                np.ones(num_particles_obj, dtype=np.int32), # material is fluid
                                np.ones(num_particles_obj, dtype=np.int32), # is_dynamic = 1
                                np.stack([color for _ in range(num_particles_obj)])) # color
-        
-        for rigid in scene_data["rigid_blocks"]:
-            obj_id = int(rigid["objectId"])
-            is_dynamic = int(bool(rigid_body.get("isDynamic")))
-
-            start, end = rigid["worldStart"], rigid["worldEnd"]
-            scale = np.array(rigid["scale"])
-            velocity = rigid["velocity"]
-            density = rigid["density"]
-            color = rigid["color"]
-
-
-            self.add_cube(
-                particle_system=ps,
-                object_id=obj_id,
-                lower_corner=start,
-                cube_size=(end-start)*scale,
-                velocity=velocity,
-                density=density,
-                color=color,
-                material=0,
-                is_dynamic=is_dynamic
-            )
 
         for rigid_body in scene_data["rigid_bodies"]:
             obj_id = int(rigid_body["objectId"])
@@ -233,6 +206,25 @@ class SceneLoader:
                                 np.zeros(num_particles_obj, dtype=np.int32), # material is solid
                                 is_dynamic * np.ones(num_particles_obj, dtype=np.int32),
                                 np.stack([color for _ in range(num_particles_obj)])) # color
+
+        for solid_body in scene_data["solid_bodies"]:
+            obj_id = int(solid_body["objectId"])
+            num_particles_obj = solid_body["particleNum"]
+            voxelized_points_np = solid_body["voxelizedPoints"]
+            velocity = np.array(solid_body.get("velocity", [0.0 for _ in range(self.dim)]), dtype=np.float32)
+            density = float(solid_body.get("density", 1000.0))
+            color = np.array(solid_body.get("color", [200, 80, 80]), dtype=np.int32)
+            is_dynamic = int(bool(solid_body.get("isDynamic", True)))
+
+            ps.add_particles(obj_id,
+                            num_particles_obj,
+                            np.array(voxelized_points_np, dtype=np.float32),  # position
+                            np.stack([velocity for _ in range(num_particles_obj)]),  # velocity
+                            density * np.ones(num_particles_obj, dtype=np.float32),  # density
+                            np.zeros(num_particles_obj, dtype=np.float32),  # pressure
+                            (2 * np.ones(num_particles_obj, dtype=np.int32)),  # material = deformable
+                            np.ones(num_particles_obj, dtype=np.int32),  # always is_dynamic
+                            np.stack([color for _ in range(num_particles_obj)]))  # color
         
         self._setup_emitter_system(ps, scene_data["emitter"])
 

@@ -222,7 +222,7 @@ class PBF2Solver(SPHBase):
             ret += K_ij * f_v
 
         # ---------- Adhesion ----------
-        elif self.ps.material[p_j] == self.ps.material_solid:
+        elif self.ps.material[p_j] == self.ps.material_rigid:
             f_adh = - self.adhesion_coeff * self.ps.m[p_i] * self.ps.m[p_j] * self.adhesion_term(r) * r_hat
             ret += f_adh
 

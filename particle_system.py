@@ -17,8 +17,9 @@ class ParticleSystem:
         self.dim = len(self.domain_size)
 
         # Material
-        self.material_solid = 0
+        self.material_rigid = 0
         self.material_fluid = 1
+        self.material_solid = 2
 
         self.particle_radius = 0.01  # particle radius
         self.particle_radius = self.cfg.get_cfg("particleRadius")
@@ -37,16 +38,10 @@ class ParticleSystem:
         self.num_rigid_bodies = 0
         self.fluid_particle_num = 0
         self.rigid_particle_num = 0
+        self.solid_particle_num = 0
         self.dynamic_particle_num = 0
         self.particle_max_num = 0
         self.particle_num = ti.field(int, shape=())
-
-        # Toggle-able rigid bodies
-        self.toggled_rigid_bodies = set()
-        self.toggled_dynamic_velocity = {}
-        self.toggled_activated = set()
-        self.toggled_ids_sorted = []
-        self.toggled_index = 0
 
 
     def allocate(self, particle_max_num, num_objects, num_rigid_bodies, enable_ggui:bool):
@@ -265,13 +260,20 @@ class ParticleSystem:
 
 
     @ti.func
-    def is_static_rigid_body(self, p):
-        return self.material[p] == self.material_solid and (not self.is_dynamic[p])
-
+    def is_static_rigid(self, p):
+        return self.material[p] == self.material_rigid and (not self.is_dynamic[p])
 
     @ti.func
-    def is_dynamic_rigid_body(self, p):
-        return self.material[p] == self.material_solid and self.is_dynamic[p]
+    def is_rigid(self, p):
+        return self.material[p] == self.material_rigid
+        
+    @ti.func
+    def is_dynamic_rigid(self, p):
+        return self.material[p] == self.material_rigid and self.is_dynamic[p]
+
+    @ti.func
+    def is_solid(self, p):
+        return self.material[p] == self.material_solid
 
 
     @ti.kernel
@@ -279,7 +281,7 @@ class ParticleSystem:
         self.mass_rb.fill(0.0)
         for p_i in ti.grouped(self.x):
             # Condition for boundary particles
-            if self.is_dynamic_rigid_body(p_i):
+            if self.is_dynamic_rigid(p_i):
                 
                 object_id = self.object_id[p_i]
                 self.mass_rb[object_id] += self.m[p_i]
@@ -301,11 +303,11 @@ class ParticleSystem:
         for p_i in ti.grouped(self.x):
             sum_Wij = 0.0
             # Condition for boundary particles
-            if self.material[p_i] == self.material_solid:
+            if self.material[p_i] == self.material_rigid:
 
                 for j in range(self.particle_neighbors_num[p_i]):
                     p_j = self.particle_neighbors[p_i, j]
-                    if self.material[p_j] != self.material_solid:
+                    if self.material[p_j] != self.material_rigid:
                         continue
 
                     if self.object_id[p_j] != self.object_id[p_i]:

@@ -23,9 +23,9 @@ class SimConfig:
         else:
             return []
     
-    def get_rigid_blocks(self):
-        if "RigidBlocks" in self.config:
-            return self.config["RigidBlocks"]
+    def get_solid_bodies(self):
+        if "SolidBodies" in self.config:
+            return self.config["SolidBodies"]
         else:
             return []
     

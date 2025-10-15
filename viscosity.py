@@ -16,7 +16,7 @@ class Viscosity:
 
         h = self.ps.support_radius
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.is_static_rigid_body(p_i):
+            if self.ps.is_static_rigid(p_i):
                 self.ps.acceleration[p_i].fill(0.0)
                 continue
 

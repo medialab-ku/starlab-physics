@@ -15,10 +15,16 @@ class Elasticity:
 
         self.grad  = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.x_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        self.a = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.d2EdF2 = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.ps.particle_max_num, 4, 4))
         self.gradW = spiky_kernel_derivative
+        self.W = cubic_kernel
 
+        # neighbour search comes first 
         self.initialize()
+
+
 
     @ti.kernel
     def initialize(self):
@@ -34,6 +40,16 @@ class Elasticity:
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
+            
+            p_i0 = self.ps.cur2ori[p_i]
+            sum_Wij = self.W(0.0, self.ps.support_radius)
+            for j in range(self.ps.solid_neighbors_num[p_i0]):
+                p_j0 = self.ps.solid_neighbors[p_i0, j]
+                p_j = self.ps.ori2cur[p_j0]
+                sum_Wij += self.W((self.ps.x[p_i] - self.ps.x[p_j]).norm(), self.ps.support_radius)
+                
+            self.ps.m_V0[p_i] = 1.0 / sum_Wij
+                
 
         # compute L
         for p_i in ti.grouped(self.ps.x):
@@ -118,7 +134,7 @@ class Elasticity:
 
                 xij0 = self.ps.x0[p_i0] - self.ps.x0[p_j0]
                 PL_j = self.P[p_j] @ self.L[p_j]
-                f_s += self.ps.m_V0[p_j] * (PL_i - PL_j) * self.gradW(xij0, self.ps.support_radius)
+                f_s += self.ps.m_V0[p_j] * (PL_i - PL_j) @ self.gradW(xij0, self.ps.support_radius)
 
             self.grad[p_i] = self.ps.m_V0[p_i] * dt * f_s
 
@@ -140,10 +156,9 @@ class Elasticity:
         self.compute_P(YM, PR)
         self.compute_gradient(dt)
 
-        # TODO: v += dt * M^-1 * (-grad)
-        # add(self.x_tmp, self.ps.x, dt, self.ps.v)
+        # TODO: v +=  M^-1 * (grad)
+        self.v_tmp.copy_from(self.ps.v)
+        coef_wise_mul(self.a, self.ps.m_inv, self.grad)
+        add(self.v_tmp, self.v_tmp, -1.0, self.a)
+        self.ps.v.copy_from(self.v_tmp)
         # self.PCG(x=None, b=None)
-
-
-
-        pass

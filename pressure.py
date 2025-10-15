@@ -165,7 +165,7 @@ class Pressure:
                 J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 self.ps.fluid_neighbors_JtJ[p_i, j] = J_ij.outer_product(J_ij)
 
-                # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                # if self.ps.is_dynamic_rigid(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
                 if self.ps.is_dynamic[p_j]:
                     Aii += J_ij.dot(J_ij) * self.ps.m_inv[p_j]
@@ -188,7 +188,7 @@ class Pressure:
                 continue
             for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.particle_neighbors[p_i, j]
-                # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                # if self.ps.is_dynamic_rigid(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
 
                 if self.ps.is_dynamic[p_j]:
@@ -208,7 +208,7 @@ class Pressure:
 
             for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.particle_neighbors[p_i, j]
-                # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
+                # if self.ps.is_dynamic_rigid(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
 
                 if self.ps.is_dynamic[p_j]:
