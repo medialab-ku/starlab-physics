@@ -13,15 +13,15 @@ class Framework:
         self.elasticity = elasticity
 
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
-        self.g = ti.Vector([0.0, -9.81, 0.0])  # Gravity
+        self.g = self.ps.cfg.get_cfg("gravitation")  # Gravity
         self.viscosity_coeff = 0.01            # viscosity
         self.surface_tension_coeff = 0.01
         self.adhesion_coeff = self.surface_tension_coeff
         self.time = 0.0
 
 
-        self.YM = 1e4 # Young Modulus
-        self.PR = 0.3 # Poisson Ratio
+        self.YM = 1e1 # Young Modulus
+        self.PR = 0.0 # Poisson Ratio
 
 
     def initialize(self):
@@ -72,18 +72,18 @@ class Framework:
 
     def forward(self):
 
-        self.ns.broad_phase()
-        self.ns.narrow_phase(self.ps.x)
+        # self.ns.broad_phase()
+        # self.ns.narrow_phase(self.ps.x)
 
         self.apply_gravity(self.dt)
 
-        self.surface_tension.solve(self.surface_tension_coeff, self.adhesion_coeff, self.dt)
+        # self.surface_tension.solve(self.surface_tension_coeff, self.adhesion_coeff, self.dt)
 
-        self.viscosity.solve(self.viscosity_coeff, self.dt)
+        # self.viscosity.solve(self.viscosity_coeff, self.dt)
 
         self.elasticity.solve(self.YM, self.PR, self.dt)
 
-        self.pressure.solve(self.dt)
+        # self.pressure.solve(self.dt)
 
         self.advect_position(self.dt)
 
