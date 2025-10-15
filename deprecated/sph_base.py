@@ -166,7 +166,7 @@ class SPHBase:
 
                 if sum_Wij > 1e-12:
                     self.ps.m[p_i] = 1.5 * self.ps.density0[p_i] / sum_Wij
-                    self.ps.m_V[p_i] = self.ps.m[p_i] / self.ps.density0[p_i]
+                    self.ps.m_V0[p_i] = self.ps.m[p_i] / self.ps.density0[p_i]
                     # Keep inverse mass consistent (static solids keep 0 inv mass)
                     if self.ps.is_dynamic[p_i]:
                         self.ps.m_inv[p_i] = 1.0 / (self.ps.m[p_i] + 1e-12)
@@ -202,7 +202,7 @@ class SPHBase:
                 continue
             delta = self.cubic_kernel(0.0)
             self.ps.for_all_neighbors(p_i, self.compute_boundary_volume_task, delta)
-            self.ps.m_V[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
+            self.ps.m_V0[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
 
     @ti.func
     def compute_boundary_volume_task(self, p_i, p_j, delta: ti.template()):
@@ -219,7 +219,7 @@ class SPHBase:
                 continue
             delta = self.cubic_kernel(0.0)
             self.ps.for_all_neighbors(p_i, self.compute_boundary_volume_task, delta)
-            self.ps.m_V[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
+            self.ps.m_V0[p_i] = 1.0 / delta * 3.0  # TODO: the 3.0 here is a coefficient for missing particles by trail and error... need to figure out how to determine it sophisticatedly
 
 
     def substep(self):
@@ -296,7 +296,7 @@ class SPHBase:
         cm = ti.Vector([0.0, 0.0, 0.0])
         for p_i in range(self.ps.particle_num[None]):
             if self.ps.material[p_i] == self.ps.material_solid and self.ps.object_id[p_i] == object_id:
-                mass = self.ps.m_V[p_i] * self.ps.density0[p_i]
+                mass = self.ps.m_V0[p_i] * self.ps.density0[p_i]
                 cm += mass * self.ps.x[p_i]
                 sum_m += mass
 
@@ -326,7 +326,7 @@ class SPHBase:
         for p_i in range(self.ps.particle_num[None]):
             object_id = self.ps.object_id[p_i]
             if self.ps.is_dynamic_rigid_body(p_i):
-                q = self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id]
+                q = self.ps.x0[p_i] - self.ps.rigid_rest_cm[object_id]
                 p = self.ps.x[p_i] - self.ps.cm[object_id]
                 self.ps.R[object_id] += self.ps.m[p_i] * p.outer_product(q)
 
@@ -340,7 +340,7 @@ class SPHBase:
         for p_i in range(self.ps.particle_num[None]):
             object_id = self.ps.object_id[p_i]
             if self.ps.is_dynamic_rigid_body(p_i):
-                goal = self.ps.cm[object_id] + self.ps.R[object_id] @ (self.ps.x_0[p_i] - self.ps.rigid_rest_cm[object_id])
+                goal = self.ps.cm[object_id] + self.ps.R[object_id] @ (self.ps.x0[p_i] - self.ps.rigid_rest_cm[object_id])
                 corr = (goal - self.ps.x[p_i])
 
                 self.ps.x[p_i] += corr

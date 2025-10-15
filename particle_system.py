@@ -25,7 +25,7 @@ class ParticleSystem:
 
         self.particle_diameter = 2 * self.particle_radius
         self.support_radius = self.particle_radius * 4.0  # support radius
-        self.m_V0 = 0.8 * self.particle_diameter ** self.dim
+        self.m_V0_init = 0.8 * self.particle_diameter ** self.dim
         self.padding = self.support_radius
 
         self.x_vis_buffer = None
@@ -70,13 +70,13 @@ class ParticleSystem:
         self.object_id = ti.field(dtype=int, shape=self.particle_max_num)
         self.x = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.x_old = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
-        self.x_0 = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+        self.x0 = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.v = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.v_adv = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.v_old = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.y = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
         self.acceleration = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
-        self.m_V = ti.field(dtype=float, shape=self.particle_max_num)
+        self.m_V0 = ti.field(dtype=float, shape=self.particle_max_num)
         self.m = ti.field(dtype=float, shape=self.particle_max_num)
         self.m_inv = ti.field(dtype=float, shape=self.particle_max_num)
         self.n = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
@@ -87,9 +87,10 @@ class ParticleSystem:
         self.material = ti.field(dtype=int, shape=self.particle_max_num)
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
+        # self.is_solid   = ti.field(dtype=int, shape=self.particle_max_num)
 
-        self.cur2ori = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
-        self.ori2cur = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+        self.cur2ori = ti.field(dtype=int, shape=self.particle_max_num)
+        self.ori2cur = ti.field(dtype=int, shape=self.particle_max_num)
 
         # neighbor lists
         self.cache_size = 50 
@@ -119,7 +120,7 @@ class ParticleSystem:
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
-        self.cur2ori_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+        self.cur2ori_buffer = ti.field(dtype=int, shape=self.particle_max_num)
 
         # Special properties
         method = int(self.cfg.get_cfg("simulationMethod") or 0)
@@ -141,15 +142,15 @@ class ParticleSystem:
         self.object_id[p] = obj_id
         self.x[p] = x
         self.x_old[p] = x
-        self.x_0[p] = x
+        self.x0[p] = x
         self.v[p] = v
         self.v_adv[p] = v
         self.v_old[p] = v
         self.acceleration[p] = ti.Vector.zero(float, self.dim)
         self.n[p] = ti.Vector.zero(float, self.dim)
         self.density0[p] = self.density[p] = density
-        self.m_V[p] = self.m_V0
-        self.m[p] = self.m_V0 * self.density0[p]
+        self.m_V0[p] = self.m_V0_init
+        self.m[p] = self.m_V0_init * self.density0[p]
 
         self.pressure[p] = pressure
         self.material[p] = material
@@ -247,7 +248,7 @@ class ParticleSystem:
             self.object_id[p] = object_id
             self.x[p] = x
             self.x_old[p] = x
-            self.x_0[p] = x
+            self.x0[p] = x
             self.v[p] = v
             self.v_adv[p] = v
             self.v_old[p] = v
@@ -255,8 +256,8 @@ class ParticleSystem:
             self.n[p] = ti.Vector.zero(float, self.dim)
             self.density0[p] = self.density[p] = density
             self.pressure[p] = 0.0
-            self.m_V[p] = self.m_V0
-            self.m[p] = self.m_V0 * self.density0[p]
+            self.m_V0[p] = self.m_V0_init
+            self.m[p] = self.m_V0_init * self.density0[p]
             self.m_inv[p] = 1.0 / (self.m[p] + 1e-12)
             self.material[p] = self.material_fluid
             self.is_dynamic[p] = 1
@@ -314,7 +315,7 @@ class ParticleSystem:
 
                 if sum_Wij > 1e-12:
                     self.m[p_i] = 1.5*self.density0[p_i] / sum_Wij
-                    self.m_V[p_i] = self.m[p_i] / self.density0[p_i]
+                    self.m_V0[p_i] = self.m[p_i] / self.density0[p_i]
                     # Keep inverse mass consistent (static solids keep 0 inv mass)
                     if self.is_dynamic[p_i]:
                         self.m_inv[p_i] = 1.0 / (self.m[p_i] + 1e-12)

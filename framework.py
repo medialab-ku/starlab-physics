@@ -79,7 +79,7 @@ class Framework:
 
         self.viscosity.solve(self.viscosity_coeff, self.dt)
 
-        self.elasticity.solve(self.YM, self.PR, self.dt)
+        # self.elasticity.solve(self.YM, self.PR, self.dt)
 
         self.pressure.solve(self.dt)
 

@@ -199,10 +199,10 @@ class AnimationSystem:
             axis = int(a["axis"])
             if int(a["type"]) == 0:
                 offset = float(self._translate_offset.get((obj, axis), 0.0))
-                self._apply_translate_manual(obj, axis, offset, self.ps.x, self.ps.x_0, self.ps.object_id)
+                self._apply_translate_manual(obj, axis, offset, self.ps.x, self.ps.x0, self.ps.object_id)
             else:
                 angle = float(self._rotate_angle.get((obj, axis), 0.0))
-                self._apply_rotate_manual(obj, axis, angle, self.ps.x, self.ps.x_0, self.ps.object_id, self.ps.rigid_rest_cm)
+                self._apply_rotate_manual(obj, axis, angle, self.ps.x, self.ps.x0, self.ps.object_id, self.ps.rigid_rest_cm)
 
     def apply(self, t_now: float):
         # Apply AUTO animations only
@@ -223,7 +223,7 @@ class AnimationSystem:
                 t_eval = float(t_now)
             if int(a["type"]) == 0:
                 self._animate_translate_axis(int(a["obj"]), int(a["axis"]), float(a["amp"]), float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_eval),
-                                             self.ps.x, self.ps.x_0, self.ps.object_id)
+                                             self.ps.x, self.ps.x0, self.ps.object_id)
             else:
                 # Prefer arbitrary axis and pivot if provided
                 axis_vec = a.get("axisVec", None)
@@ -238,10 +238,10 @@ class AnimationSystem:
                 if isinstance(pivot, list) and len(pivot) == 3:
                     px, py, pz = float(pivot[0]), float(pivot[1]), float(pivot[2])
                     self._animate_rotate_axis_with_pivot(int(a["obj"]), ax, ay, az, px, py, pz, float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_eval),
-                                                         self.ps.x, self.ps.x_0, self.ps.object_id)
+                                                         self.ps.x, self.ps.x0, self.ps.object_id)
                 else:
                     self._animate_rotate_axis(int(a["obj"]), ax, ay, az, float(a["omega"]), float(a["phase"]), float(a["base"]), float(t_eval),
-                                              self.ps.x, self.ps.x_0, self.ps.object_id, self.ps.rigid_rest_cm)
+                                              self.ps.x, self.ps.x0, self.ps.object_id, self.ps.rigid_rest_cm)
 
     def has_auto(self) -> bool:
         for a in self.anims:

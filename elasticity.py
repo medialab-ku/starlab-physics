@@ -32,33 +32,16 @@ class Elasticity:
 
         #TODO: set rest volume
         for p_i in ti.grouped(self.ps.x):
-            if not self.ps.is_solid[p_i]:
+            if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
         # compute L
         for p_i in ti.grouped(self.ps.x):
-            if not self.ps.is_solid[p_i]:
+            if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
             p_i0 = self.ps.cur2ori[p_i]
-            Dm = ti.math.vec3(0.0)
-            for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j = self.ps.ori2cur[p_j0]
-                xij0 = self.ps.x0[p_i0] - self.ps.x0[p_j0]
-                Dm -= self.ps.m_V0[p_j] * self.gradW(xij0, self.ps.support_radius).outer_product(xij0)
-
-            self.L[p_i] = Dm.inverse()
-
-    @ti.kernel
-    def compute_L(self):
-
-        for p_i in ti.grouped(self.ps.x):
-            if not self.ps.is_solid[p_i]:
-                continue
-
-            p_i0 = self.ps.cur2ori[p_i]
-            Dm = ti.math.vec3(0.0)
+            Dm = ti.math.mat3(0.0)
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
@@ -71,11 +54,11 @@ class Elasticity:
     def compute_F(self, x: ti.template()):
 
         for p_i in ti.grouped(self.ps.x):
-            if not self.ps.is_solid[p_i]:
+            if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
             p_i0 = self.ps.cur2ori[p_i]
-            Ds_i = ti.math.vec3(0.0)
+            Ds_i = ti.math.mat3(0.0)
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
@@ -106,7 +89,7 @@ class Elasticity:
         print("TODO: volume expansion")
 
         for p_i in ti.grouped(self.ps.x):
-            if not self.ps.is_solid[p_i]:
+            if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
             F_i = self.F[p_i]
@@ -122,7 +105,7 @@ class Elasticity:
         for p_i in ti.grouped(self.ps.x):
 
             self.grad[p_i] = ti.math.vec3(0.0)
-            if not self.ps.is_solid[p_i]:
+            if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
             PL_i = self.P[p_i] @ self.L[p_i]

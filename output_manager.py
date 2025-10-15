@@ -155,7 +155,7 @@ class OutputManager:
         mask = (obj_ids == obj_id) & (mats == ps.material_solid)
         if not np.any(mask):
             return np.eye(3, dtype=np.float32), np.zeros(3, dtype=np.float32)
-        X0 = ps.x_0.to_numpy()[:N][mask].astype(np.float32)
+        X0 = ps.x0.to_numpy()[:N][mask].astype(np.float32)
         X = ps.x.to_numpy()[:N][mask].astype(np.float32)
         c0 = X0.mean(axis=0)
         c = X.mean(axis=0)

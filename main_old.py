@@ -380,7 +380,7 @@ if __name__ == "__main__":
             R = np.eye(3, dtype=np.float32)
             t = np.zeros(3, dtype=np.float32)
             return R, t
-        X0 = ps.x_0.to_numpy()[:N][mask].astype(np.float32)
+        X0 = ps.x0.to_numpy()[:N][mask].astype(np.float32)
         X = ps.x.to_numpy()[:N][mask].astype(np.float32)
         c0 = X0.mean(axis=0)
         c = X.mean(axis=0)

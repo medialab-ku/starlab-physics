@@ -22,12 +22,12 @@ class WCSPHSolver(SPHBase):
         if self.ps.material[p_j] == self.ps.material_fluid:
             # Fluid neighbors
             x_j = self.ps.x[p_j]
-            ret += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
+            ret += self.ps.m_V0[p_j] * self.cubic_kernel((x_i - x_j).norm())
         elif self.ps.material[p_j] == self.ps.material_solid:
             # Boundary neighbors
             ## Akinci2012
             x_j = self.ps.x[p_j]
-            ret += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
+            ret += self.ps.m_V0[p_j] * self.cubic_kernel((x_i - x_j).norm())
 
 
     @ti.kernel
@@ -36,7 +36,7 @@ class WCSPHSolver(SPHBase):
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-            self.ps.density[p_i] = self.ps.m_V[p_i] * self.cubic_kernel(0.0)
+            self.ps.density[p_i] = self.ps.m_V0[p_i] * self.cubic_kernel(0.0)
             den = 0.0
             self.ps.for_all_neighbors(p_i, self.compute_densities_task, den)
             self.ps.density[p_i] += den
@@ -53,16 +53,16 @@ class WCSPHSolver(SPHBase):
             density_j = self.ps.density[p_j] * self.density_0 / self.density_0  # TODO: The density_0 of the neighbor may be different when the fluid density is different
             dpj = self.ps.pressure[p_j] / (density_j * density_j)
             # Compute the pressure force contribution, Symmetric Formula
-            ret += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) \
-                * self.cubic_kernel_derivative(x_i-x_j)
+            ret += -self.density_0 * self.ps.m_V0[p_j] * (dpi + dpj) \
+                   * self.cubic_kernel_derivative(x_i-x_j)
         elif self.ps.material[p_j] == self.ps.material_solid:
             # Boundary neighbors
             dpj = self.ps.pressure[p_i] / self.density_0 ** 2
             ## Akinci2012
             x_j = self.ps.x[p_j]
             # Compute the pressure force contribution, Symmetric Formula
-            f_p = -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) \
-                * self.cubic_kernel_derivative(x_i-x_j)
+            f_p = -self.density_0 * self.ps.m_V0[p_j] * (dpi + dpj) \
+                  * self.cubic_kernel_derivative(x_i-x_j)
             ret += f_p
             if self.ps.is_dynamic_rigid_body(p_j):
                 self.ps.acceleration[p_j] += -f_p * self.density_0 / self.ps.density[p_j]
@@ -118,7 +118,7 @@ class WCSPHSolver(SPHBase):
             boundary_viscosity = 0.0
             # Boundary neighbors
             ## Akinci2012
-            f_v = d * boundary_viscosity * (self.density_0 * self.ps.m_V[p_j] / (self.ps.density[p_i])) * v_xy / (
+            f_v = d * boundary_viscosity * (self.density_0 * self.ps.m_V0[p_j] / (self.ps.density[p_i])) * v_xy / (
                 r.norm()**2 + 0.01 * self.ps.support_radius**2) * self.cubic_kernel_derivative(r)
             ret += f_v
             if self.ps.is_dynamic_rigid_body(p_j):

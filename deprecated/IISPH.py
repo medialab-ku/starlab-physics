@@ -26,7 +26,7 @@ class IISPHSolver(SPHBase):
             x_i = self.ps.x[p_i]
             sum_neighbor = 0.0
             sum_neighbor_of_neighbor = 0.0
-            m_Vi = self.ps.m_V[p_i]
+            m_Vi = self.ps.m_V0[p_i]
             density_i = self.ps.density[p_i]
             density_i2 = density_i * density_i
             density_02 = self.density_0 * self.density_0
@@ -41,12 +41,12 @@ class IISPHSolver(SPHBase):
                     density_k2 = density_k * density_k
                     p_k = self.ps.particle_neighbors[p_i, j]
                     x_k = self.ps.x[p_k]
-                    sum_neighbor_inner += self.ps.m_V[p_k] * self.cubic_kernel_derivative(x_i - x_k) / density_k2
+                    sum_neighbor_inner += self.ps.m_V0[p_k] * self.cubic_kernel_derivative(x_i - x_k) / density_k2
 
                 kernel_grad_ij = self.cubic_kernel_derivative(x_i - x_j)
-                sum_neighbor -= (self.ps.m_V[p_j] * sum_neighbor_inner).dot(kernel_grad_ij)
+                sum_neighbor -= (self.ps.m_V0[p_j] * sum_neighbor_inner).dot(kernel_grad_ij)
 
-                sum_neighbor_of_neighbor -= (self.ps.m_V[p_j] * kernel_grad_ij).dot(kernel_grad_ij)
+                sum_neighbor_of_neighbor -= (self.ps.m_V0[p_j] * kernel_grad_ij).dot(kernel_grad_ij)
             sum_neighbor_of_neighbor *= m_Vi / density_i2
             self.a_ii[p_i] += (sum_neighbor + sum_neighbor_of_neighbor) * self.dt[None] * self.dt[None] * density_02
 
@@ -84,7 +84,7 @@ class IISPHSolver(SPHBase):
             for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
-                divergence += self.ps.m_V[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
+                divergence += self.ps.m_V0[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
 
             # Boundary neighbors
             ## Akinci2012
@@ -132,7 +132,7 @@ class IISPHSolver(SPHBase):
                 x_j = self.ps.x[p_j]
                 dpj = self.last_pressure[p_j] / self.ps.density[p_j] ** 2
                 # Compute the pressure force contribution, Symmetric Formula
-                d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
+                d_v += -self.density_0 * self.ps.m_V0[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
 
             # Boundary neighbors
             dpj = self.last_pressure[p_i] / self.density_0 ** 2
@@ -155,7 +155,7 @@ class IISPHSolver(SPHBase):
             for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
-                Ap += self.ps.m_V[p_j] * (accel_p_i - self.pressure_accel[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
+                Ap += self.ps.m_V0[p_j] * (accel_p_i - self.pressure_accel[p_j]).dot(self.cubic_kernel_derivative(x_i - x_j))
             # Boundary neighbors
             ## Akinci2012
             # for j in range(self.ps.solid_neighbors_num[p_i]):
@@ -187,12 +187,12 @@ class IISPHSolver(SPHBase):
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
             x_i = self.ps.x[p_i]
-            self.ps.density[p_i] = self.ps.m_V[p_i] * self.cubic_kernel(0.0)
+            self.ps.density[p_i] = self.ps.m_V0[p_i] * self.cubic_kernel(0.0)
             # Fluid neighbors
             for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.particle_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
-                self.ps.density[p_i] += self.ps.m_V[p_j] * self.cubic_kernel((x_i - x_j).norm())
+                self.ps.density[p_i] += self.ps.m_V0[p_j] * self.cubic_kernel((x_i - x_j).norm())
             # Boundary neighbors
             ## Akinci2012
             # for j in range(self.ps.solid_neighbors_num[p_i]):
@@ -218,7 +218,7 @@ class IISPHSolver(SPHBase):
                 x_j = self.ps.x[p_j]
                 dpj = self.ps.pressure[p_j] / self.ps.density[p_j] ** 2
                 # Compute the pressure force contribution, Symmetric Formula
-                d_v += -self.density_0 * self.ps.m_V[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
+                d_v += -self.density_0 * self.ps.m_V0[p_j] * (dpi + dpj) * self.cubic_kernel_derivative(x_i - x_j)
 
             # Boundary neighbors
             dpj = self.ps.pressure[p_i] / self.density_0 ** 2
