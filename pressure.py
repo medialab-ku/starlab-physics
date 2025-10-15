@@ -5,7 +5,6 @@ from sph_kernel import *
 @ti.data_oriented
 class Pressure:
     def __init__(self, particle_system):
-        # super().__init__(particle_system)
 
         self.ps = particle_system
         self.time = 0.0
@@ -15,19 +14,19 @@ class Pressure:
         self.num_substep = self.ps.cfg.get_cfg("numSubstepping")
         self.pcg_total_iter = 0
 
-        self.adaptive_step_size = False
-        self.use_pcg = True
-        self.enable_DF = False
-        self.pressure_boundary = False
-        self.smooth_max = False
-        self.density_error = False
-        self.print_info = True
+        self.adaptive_step_size   = False
+        self.use_pcg              = True
+        self.enable_DF            = False
+        self.pressure_boundary    = False
+        self.smooth_max           = False
+        self.density_error        = False
+        self.print_info           = True
 
-        self.print_pcg_iter = False
-        self.print_opt_iter = True
-        self.print_pcg_error = False
-        self.print_opt_error = False
-        self.print_elapsed_time = False
+        self.print_pcg_iter       = False
+        self.print_opt_iter       = True
+        self.print_pcg_error      = False
+        self.print_opt_error      = False
+        self.print_elapsed_time   = False
         self.print_kinetic_energy = False
 
         self.volume_constraint = False

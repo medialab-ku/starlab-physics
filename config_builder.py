@@ -1,6 +1,5 @@
 import json
 
-
 class SimConfig:
     def __init__(self, scene_file_path) -> None:
         self.config = None
