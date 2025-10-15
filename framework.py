@@ -20,7 +20,7 @@ class Framework:
         self.time = 0.0
 
 
-        self.YM = 1e1 # Young Modulus
+        self.YM = 2e5 # Young Modulus
         self.PR = 0.0 # Poisson Ratio
 
 
