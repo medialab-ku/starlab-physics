@@ -91,15 +91,20 @@ class ParticleSystem:
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
 
+        self.cur2ori = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+        self.ori2cur = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+
         # neighbor lists
         self.cache_size = 50 
-        self.fluid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
+        self.particle_neighbors_num = ti.field(dtype=int, shape=self.particle_max_num)
         self.solid_neighbors_num    = ti.field(dtype=int, shape=self.particle_max_num)
         self.fluid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.solid_neighbors        = ti.field(dtype=int, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_values = ti.Vector.field(n=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_JtJ    = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.particle_max_num, self.cache_size))
         self.fluid_neighbors_JtJ_ii = ti.Matrix.field(n=3, m=3, dtype=float, shape= self.particle_max_num)
+
+
 
         # Buffer for sort
         self.object_id_buffer = ti.field(dtype=int, shape=self.particle_max_num)
@@ -117,6 +122,8 @@ class ParticleSystem:
         self.color_buffer = ti.Vector.field(4, dtype=int, shape=self.particle_max_num)
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
+
+        self.cur2ori_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
         # Special properties
         method = int(self.cfg.get_cfg("simulationMethod") or 0)
@@ -367,7 +374,7 @@ class ParticleSystem:
             # Condition for boundary particles
             if self.material[p_i] == self.material_solid:
 
-                for j in range(self.fluid_neighbors_num[p_i]):
+                for j in range(self.particle_neighbors_num[p_i]):
                     p_j = self.fluid_neighbors[p_i, j]
                     if self.material[p_j] != self.material_solid:
                         continue

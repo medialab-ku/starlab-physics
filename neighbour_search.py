@@ -50,6 +50,9 @@ class NeighborSearch:
     @ti.kernel
     def update_grid_id(self):
 
+        for i in range(self.ps.particle_num[None]):
+            self.ps.cur2ori[i] = i
+
         for I in ti.grouped(self.grid_particles_num):
             self.grid_particles_num[I] = 0
 
@@ -75,6 +78,7 @@ class NeighborSearch:
         for I in range(n):
             new_index                              = self.grid_ids_new[I]
             self.grid_ids_buffer[new_index]        = self.grid_ids[I]
+            self.ps.cur2ori_buffer[new_index]      = self.ps.cur2ori[I]
             self.ps.object_id_buffer[new_index]    = self.ps.object_id[I]
             self.ps.x_0_buffer[new_index]          = self.ps.x_0[I]
             self.ps.x_buffer[new_index]            = self.ps.x[I]
@@ -92,7 +96,8 @@ class NeighborSearch:
             self.ps.n_buffer[new_index]            = self.ps.n[I]
 
         for I in range(n):
-            self.grid_ids[I]   = self.grid_ids_buffer[I]
+            self.grid_ids[I]        = self.grid_ids_buffer[I]
+            self.ps.cur2ori[I]      = self.ps.cur2ori_buffer[I]
             self.ps.object_id[I]    = self.ps.object_id_buffer[I]
             self.ps.x_0[I]          = self.ps.x_0_buffer[I]
             self.ps.x[I]            = self.ps.x_buffer[I]
@@ -109,11 +114,15 @@ class NeighborSearch:
             self.ps.is_dynamic[I]   = self.ps.is_dynamic_buffer[I]
             self.ps.n[I]            = self.ps.n_buffer[I]
 
+        for I in range(n):
+            original_idx = self.ps.cur2ori[I]
+            self.ps.ori2cur[original_idx] = I
+
     @ti.kernel
     def narrow_phase(self, x: ti.template()):
         for p_i in range(self.ps.particle_num[None]):
-            self.ps.fluid_neighbors_num[p_i] = 0
-            self.ps.solid_neighbors_num[p_i] = 0
+            self.ps.particle_neighbors_num[p_i] = 0
+            # self.ps.solid_neighbors_num[p_i] = 0
             center_cell = self.pos_to_index(x[p_i])
             for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
                 nbr_cell = self.clamp_cell(center_cell + offset)
@@ -126,13 +135,13 @@ class NeighborSearch:
                 for p_j in range(start, end):
                     # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
                     if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.ps.support_radius:
-                        if self.ps.fluid_neighbors_num[p_i] < self.ps.cache_size:
-                            self.ps.fluid_neighbors[p_i, self.ps.fluid_neighbors_num[p_i]] = p_j
-                            self.ps.fluid_neighbors_num[p_i] += 1
-                        if self.ps.material[p_i] == self.ps.material_solid and self.ps.material[p_j] == self.ps.material_solid:
-                            if self.ps.solid_neighbors_num[p_i] < self.ps.cache_size:
-                                self.ps.solid_neighbors[p_i, self.ps.solid_neighbors_num[p_i]] = p_j
-                                self.ps.solid_neighbors_num[p_i] += 1
+                        if self.ps.particle_neighbors_num[p_i] < self.ps.cache_size:
+                            self.ps.fluid_neighbors[p_i, self.ps.particle_neighbors_num[p_i]] = p_j
+                            self.ps.particle_neighbors_num[p_i] += 1
+                        # if self.ps.material[p_i] == self.ps.material_solid and self.ps.material[p_j] == self.ps.material_solid:
+                        #     if self.ps.solid_neighbors_num[p_i] < self.ps.cache_size:
+                        #         self.ps.solid_neighbors[p_i, self.ps.solid_neighbors_num[p_i]] = p_j
+                        #         self.ps.solid_neighbors_num[p_i] += 1
 
     @ti.func
     def simulate_collisions(self, p_i, vec):

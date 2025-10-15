@@ -51,7 +51,7 @@ class SurfaceTension:
                 self.ps.n[p_i] = ti.Vector.zero(float, self.ps.dim)
                 continue
             n = ti.Vector.zero(float, self.ps.dim)
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] != self.ps.material_fluid:
                     continue
@@ -68,7 +68,7 @@ class SurfaceTension:
             if self.ps.material[p_i] == self.ps.material_fluid:
 
                 x_i = self.ps.x[p_i]
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     x_j = self.ps.x[p_j]
                     r = x_i - x_j

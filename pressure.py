@@ -124,7 +124,7 @@ class Pressure:
 
         for p_i in ti.grouped(self.ps.x):
             x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 self.ps.fluid_neighbors_values[p_i, j] = self.gradW(x_i - x_j, self.ps.support_radius)
@@ -138,7 +138,7 @@ class Pressure:
             self.ps.density[p_i] = self.ps.m[p_i] * self.W(0.0, self.ps.support_radius)
             den = 0.0
             x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
                 x_j = self.ps.x[p_j]
@@ -159,7 +159,7 @@ class Pressure:
 
             Aii = 0.0
             J_ii = ti.math.vec3(0.0)
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
 
                 J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
@@ -186,7 +186,7 @@ class Pressure:
             ret_i = 0.0
             if not self.ps.is_dynamic[p_i]:
                 continue
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
@@ -206,7 +206,7 @@ class Pressure:
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
@@ -226,7 +226,7 @@ class Pressure:
             div_i = 0.0
             if not self.ps.is_dynamic[p_i]:
                 continue
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.is_dynamic[p_j]:
                     div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(
@@ -249,7 +249,7 @@ class Pressure:
                 continue
 
             if self.dfdt[p_i] >= 0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                     if self.ps.is_dynamic[p_j]:
@@ -270,7 +270,7 @@ class Pressure:
                 continue
 
             if self.dfdt[p_i] >= 0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                     Ax[p_i] += Jx[p_i] * val_ij

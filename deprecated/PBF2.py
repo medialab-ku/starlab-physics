@@ -149,7 +149,7 @@ class PBF2Solver(SPHBase):
 
         for p_i in ti.grouped(self.ps.x):
             x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 x_j = self.ps.x[p_j]
                 self.ps.fluid_neighbors_values[p_i, j] = self.nablaWij(x_i - x_j)
@@ -163,7 +163,7 @@ class PBF2Solver(SPHBase):
             self.ps.density[p_i] = self.ps.m[p_i] * self.cubic_kernel(0.0)
             den = 0.0
             x_i = self.ps.x[p_i]
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # Fluid neighbors
                 x_j = self.ps.x[p_j]
@@ -180,7 +180,7 @@ class PBF2Solver(SPHBase):
                 self.ps.n[p_i] = ti.Vector.zero(float, self.ps.dim)
                 continue
             n = ti.Vector.zero(float, self.ps.dim)
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] != self.ps.material_fluid:
                     continue
@@ -282,7 +282,7 @@ class PBF2Solver(SPHBase):
 
             Aii = 0.0
             J_ii = ti.math.vec3(0.0)
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
 
                 J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
@@ -331,7 +331,7 @@ class PBF2Solver(SPHBase):
 
             denom = Gii
             cnt = 0
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                     continue
@@ -343,7 +343,7 @@ class PBF2Solver(SPHBase):
                 J_ji = - self.ps.m[p_i] * grad_ij
 
                 J_jj = ti.math.vec3(0.0)
-                for ll in range(self.ps.fluid_neighbors_num[p_j]):
+                for ll in range(self.ps.particle_neighbors_num[p_j]):
                     p_l = self.ps.fluid_neighbors[p_j, ll]
                     grad_jl = self.ps.fluid_neighbors_values[p_j, ll]
                     J_jl = self.ps.m[p_l] * grad_jl
@@ -371,7 +371,7 @@ class PBF2Solver(SPHBase):
             if self.ps.density[p_i] <= self.ps.density0[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # grad_ij = self.ps.fluid_neighbors_values[p_i, j]
                 JtJ_ij = self.ps.fluid_neighbors_JtJ[p_i, j]
@@ -401,7 +401,7 @@ class PBF2Solver(SPHBase):
             ret_i = 0.0
             if not self.ps.is_dynamic[p_i]:
                 continue
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
@@ -430,7 +430,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 # if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                 #     continue
@@ -450,7 +450,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.is_dynamic_rigid_body(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
                     continue
@@ -471,7 +471,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
 
                 if self.ps.is_dynamic[p_j]:
@@ -490,7 +490,7 @@ class PBF2Solver(SPHBase):
             div_i = 0.0
             if not self.ps.is_dynamic[p_i]:
                 continue
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.is_dynamic[p_j]:
                     div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -509,7 +509,7 @@ class PBF2Solver(SPHBase):
             div_i = 0.0
             if self.ps.material[p_i] != self.ps.material_fluid:
                 continue
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] == self.ps.material_fluid:
                     div_i += self.ps.m[p_j] * (self.ps.v[p_i] - self.ps.v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -638,7 +638,7 @@ class PBF2Solver(SPHBase):
                 continue
 
             if self.dfdt[p_i] >= 0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                     if self.ps.is_dynamic[p_j]:
@@ -659,7 +659,7 @@ class PBF2Solver(SPHBase):
                 continue
 
             if self.dfdt[p_i] >= 0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                     Ax[p_i] += Jx[p_i] * val_ij
@@ -676,7 +676,7 @@ class PBF2Solver(SPHBase):
 
             Ax[p_i] = 0.0
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 if self.ps.is_dynamic[p_j]:
@@ -691,7 +691,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 val_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 Ax[p_i] += Jx[p_i] * val_ij
@@ -936,7 +936,7 @@ class PBF2Solver(SPHBase):
             ret_l[p_i] = x_l[p_i]
 
             if self.dfdt[p_i] > 0.0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     # val = ti.cast(self.ps.material[p_i], float)
                     if self.ps.is_dynamic[p_i]:
@@ -967,7 +967,7 @@ class PBF2Solver(SPHBase):
             # num_f += 1
 
             if self.dfdt[p_i] > 0.0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     # val = ti.cast(self.ps.material[p_i], float)
                     if self.ps.is_dynamic[p_i]:
@@ -995,7 +995,7 @@ class PBF2Solver(SPHBase):
             ret_v[p_i] = self.ps.m[p_i] * x_v[p_i]
 
             if self.dfdt[p_i] > 0.0:
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     if self.ps.is_dynamic[p_i]:
                         if self.ps.is_dynamic[p_j]:
@@ -1003,7 +1003,7 @@ class PBF2Solver(SPHBase):
                         else:
                             ret_v[p_i] += (self.ps.m[p_j] * x_l[p_i]) * self.ps.fluid_neighbors_values[p_i, j]
 
-                for j in range(self.ps.fluid_neighbors_num[p_i]):
+                for j in range(self.ps.particle_neighbors_num[p_i]):
                     p_j = self.ps.fluid_neighbors[p_i, j]
                     if self.ps.is_dynamic[p_j]:
                         ret_l[p_i] += self.ps.m[p_j] * (x_v[p_i] - x_v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -1020,7 +1020,7 @@ class PBF2Solver(SPHBase):
             if not self.ps.is_dynamic[p_i]:
                 continue
 
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.is_dynamic[p_j]:
                     self.Jx[p_i] += self.ps.m[p_j] * (x_v[p_i] - x_v[p_j]).dot(self.ps.fluid_neighbors_values[p_i, j])
@@ -1251,7 +1251,7 @@ class PBF2Solver(SPHBase):
                 self.var[p_i] = 0.0
                 continue
             sum_i = 0.0
-            for j in range(self.ps.fluid_neighbors_num[p_i]):
+            for j in range(self.ps.particle_neighbors_num[p_i]):
                 p_j = self.ps.fluid_neighbors[p_i, j]
                 if self.ps.material[p_j] != self.ps.material_fluid:
                     continue
