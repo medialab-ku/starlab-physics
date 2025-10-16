@@ -11,7 +11,8 @@ class Elasticity:
         #TODO: allocate F, L for deformable particles only
         self.L = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.F = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
-        self.P = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
+        self.P_s = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
+        self.P_v = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
 
         self.grad  = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.x_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -54,9 +55,7 @@ class Elasticity:
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 sum_Wij0 += self.W(xji0.norm(), self.ps.support_radius)
         
-            self.ps.m_V0[p_i0] = 1.0 / sum_Wij0
-            # self.ps.m[p_i] = self.ps.m_V0[p_i] * self.ps.density0[p_i]
-            # self.ps.m_inv[p_i] = 1.0 / (self.ps.m[p_i] + 1e-12)
+            self.ps.m_V0[p_i] = 1.0 / sum_Wij0
                 
         # compute L
         for p_i in ti.grouped(self.ps.x):
@@ -70,7 +69,7 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 # Dm += xji0.outer_product(xji0)
-                Dm -= self.ps.m_V0[p_j0] * self.gradW(xji0, self.ps.support_radius).outer_product(xji0)
+                Dm -= self.ps.m_V0[p_j] * self.gradW(xji0, self.ps.support_radius).outer_product(xji0)
             
             # print(f"Dm: {ti.math.determinant(Dm)}")
             self.L[p_i0] = Dm.inverse()
@@ -94,7 +93,7 @@ class Elasticity:
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 xji = x[p_j] - x[p_i]
                 # Ds_i += xji.outer_product(xji0)
-                Ds_i -= self.ps.m_V0[p_j0] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
+                Ds_i -= self.ps.m_V0[p_j] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
 
             self.F[p_i] = Ds_i @ self.L[p_i0]
             # print(f"F: {self.F[p_i]}")
@@ -117,22 +116,22 @@ class Elasticity:
 
         # stretch term, volume term
         mu = YM / (2.0 * (1.0 + PR))
-        # mu = 0.0
-
-
-        # print("TODO: volume expansion")
+        lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
             F_i = self.F[p_i]
-
+            J_i = ti.math.determinant(F_i)
             # F_i = ti.Matrix.identity(float, 3)
             U, sig, V = self.ssvd(F_i)
             R_i = U @ V.transpose()
 
-            self.P[p_i] = 2.0 * mu * (F_i - R_i)
+            self.P_s[p_i] = 2.0 * mu * (F_i - R_i)
+            self.P_v[p_i] = ti.Matrix.identity(float, 3)
+            if J_i > 1.0:
+                self.P_v[p_i] = lamb * (J_i - 1.0) * ti.Matrix.identity(float, 3) @ R_i
 
 
     @ti.kernel
@@ -145,20 +144,25 @@ class Elasticity:
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-
             p_i0 = self.ps.cur2ori[p_i]
-            PL_i = self.P[p_i] @ self.L[p_i0]
+            PLs_i = self.P_s[p_i] @ self.L[p_i0]
+            PLv_i = self.P_v[p_i] @ self.L[p_i0]
+
             f_s = ti.math.vec3(0.0)
+            f_ve = ti.math.vec3(0.0)
+
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
 
                 xji0 = self.ps.x0[p_j] -self.ps.x0[p_i]
-                PL_j = self.P[p_j] @ self.L[p_j0]
-                f_s += self.ps.m_V0[p_j0] * (PL_i + PL_j) @ self.gradW(xji0, self.ps.support_radius)
+                PLs_j = self.P_s[p_j] @ self.L[p_j0]
+                PLv_j = self.P_v[p_j] @ self.L[p_j0]
+                f_s += self.ps.m_V0[p_j] * (PLs_i + PLs_j) @ self.gradW(xji0, self.ps.support_radius)
                 # f_s += (PL_i + PL_j) @ xji0
+                f_ve += self.ps.m_V0[p_j] * (PLv_i + PLv_j) @ self.gradW(xji0, self.ps.support_radius)
 
-            self.grad[p_i] = self.ps.m_V0[p_i0] * dt * f_s
+            self.grad[p_i] = self.ps.m_V0[p_i] * dt * (f_s + f_ve)
 
 
     def PCG(self, x, b):

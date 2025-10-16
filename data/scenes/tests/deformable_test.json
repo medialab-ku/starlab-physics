@@ -29,7 +29,18 @@
             "scale": [1.5, 1.5, 1.5],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
-            "color": [200, 100, 0, 1.0]
+            "color": [250, 100, 0, 1.0]
+        },
+        {
+            "objectId": 1,
+            "geometryFile": "./data/models/cube.obj",
+            "translation": [2.5, 2.5, 2.5],
+            "rotationAxis": [0, 0, 1],
+            "rotationAngle": 0,
+            "scale": [1.5, 1.5, 1.5],
+            "velocity": [0.0, 0.0, 0.0],
+            "density": 1000.0,
+            "color": [0, 100, 250, 1.0]
         }
     ]
 }

@@ -20,8 +20,8 @@ class Framework:
         self.time = 0.0
 
 
-        self.YM = 2e5 # Young Modulus
-        self.PR = 0.0 # Poisson Ratio
+        self.YM = 3e5 # Young Modulus
+        self.PR = 0.1 # Poisson Ratio
 
 
     def initialize(self):
@@ -30,7 +30,7 @@ class Framework:
         self.ns.narrow_phase(self.ps.x)
 
         self.elasticity.initialize()
-        self.elasticity.compute_F(self.ps.x)
+        # self.elasticity.compute_F(self.ps.x)
         # print(self.elasticity.F)
         # self.compute_static_boundary_volume()
         # self.compute_moving_boundary_volume()
@@ -75,8 +75,8 @@ class Framework:
 
     def forward(self):
 
-        # self.ns.broad_phase()
-        # self.ns.narrow_phase(self.ps.x)
+        self.ns.broad_phase()
+        self.ns.narrow_phase(self.ps.x)
 
         self.apply_gravity(self.dt)
 
@@ -86,7 +86,7 @@ class Framework:
 
         self.elasticity.solve(self.YM, self.PR, self.dt)
 
-        # self.pressure.solve(self.dt)
+        self.pressure.solve(self.dt)
 
         self.advect_position(self.dt)
 

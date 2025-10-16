@@ -25,6 +25,8 @@ class NeighborSearch:
         self.grid_ids_buffer         = ti.field(int, shape=self.ps.particle_max_num)
         self.grid_ids_new            = ti.field(int, shape=self.ps.particle_max_num)
 
+        self.is_cur2ori = ti.field(bool, shape=())
+
     @ti.func
     def pos_to_index(self, pos):
         gi = (pos / self.grid_size).cast(int)
@@ -50,8 +52,8 @@ class NeighborSearch:
     @ti.kernel
     def update_grid_id(self):
 
-        for i in range(self.ps.particle_num[None]):
-            self.ps.cur2ori[i] = i
+        # for i in range(self.ps.particle_num[None]):
+        #     self.ps.cur2ori[i] = i
 
         for I in ti.grouped(self.grid_particles_num):
             self.grid_particles_num[I] = 0
@@ -67,6 +69,11 @@ class NeighborSearch:
     @ti.kernel
     def counting_sort(self):
         n = self.ps.particle_num[None]
+
+        if not self.is_cur2ori[None]:
+            for i in range(n):
+                self.ps.cur2ori[i] = i
+            self.is_cur2ori[None] = True
 
         for i in range(n):
             I = n - 1 - i
