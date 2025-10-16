@@ -27,7 +27,7 @@ class Framework:
     def initialize(self):
 
         self.ns.broad_phase()
-
+        self.ns.narrow_phase(self.ps.x)
         self.elasticity.initialize()
         # self.compute_static_boundary_volume()
         # self.compute_moving_boundary_volume()
