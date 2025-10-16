@@ -21,9 +21,6 @@ class Elasticity:
         self.gradW = spiky_kernel_derivative
         self.W = cubic_kernel
 
-        # neighbour search comes first 
-        self.initialize()
-
 
 
     @ti.kernel
@@ -102,7 +99,7 @@ class Elasticity:
         mu = YM / 2.0 * (1.0 + PR)
 
 
-        print("TODO: volume expansion")
+        # print("TODO: volume expansion")
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
@@ -127,6 +124,7 @@ class Elasticity:
             PL_i = self.P[p_i] @ self.L[p_i]
             f_s = ti.math.vec3(0.0)
 
+
             p_i0 = self.ps.cur2ori[p_i]
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
@@ -148,8 +146,6 @@ class Elasticity:
         pass
 
     def solve(self, YM, PR, dt):
-
-        print("Not implemented yet....")
 
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
         self.compute_F(self.x_tmp)

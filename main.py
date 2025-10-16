@@ -32,16 +32,20 @@ if __name__ == "__main__":
     loader = SceneLoader(config)
     scene_name = loader.get_scene_name(scene_path)
     scene_data = loader.prepare_scene()
+
+
     ps = ParticleSystem(config, GGUI=True)
     loader.populate_scene(ps, scene_data)
     loader.reset_emitter_system()
 
-    ns = NeighborSearch(config, ps)
+    neighbor_search = NeighborSearch(config, ps)
     pressure = Pressure(ps)
     viscosity = Viscosity(ps)
     surface_tension = SurfaceTension(ps)
     elasticity = Elasticity(ps)
-    fw = Framework(ps, ns, pressure, viscosity, surface_tension, elasticity)
+
+
+    fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
 
     # fw.initialize()
 
