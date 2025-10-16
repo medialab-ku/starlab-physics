@@ -21,7 +21,7 @@ class Framework:
 
 
         self.YM = 3e5 # Young Modulus
-        self.PR = 0.1 # Poisson Ratio
+        self.PR = 0.2 # Poisson Ratio
 
 
     def initialize(self):
