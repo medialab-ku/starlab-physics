@@ -166,6 +166,7 @@ if __name__ == "__main__":
                 result = cache.rewind_one(frame_cnt)
                 if result.get("restored", False):
                     frame_cnt = int(result.get("frame", frame_cnt))
+                    fw.initialize()
                     print(f"rewind: {result.get('rewind_steps', 0)} frames")
 
             if window.event.key == 'r':
@@ -179,6 +180,7 @@ if __name__ == "__main__":
                     cnt_ply = 0
                     runSim = False
                     loader.reset_emitter_system()
+                    fw.initialize()
 
         output_cfg = output_manager.get_config()
         if (output_cfg.export_particles or output_cfg.export_mesh_obj) and frame_cnt > int(output_cfg.end_frame):

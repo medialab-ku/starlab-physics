@@ -46,10 +46,10 @@ class SimulationCache:
             # Per-particle arrays (sorted order)
             field_names = [
                 "object_id",
-                "x", "x_old", "x_0",
+                "x", "x_old", "x0",
                 "v", "v_adv",
                 "acceleration",
-                "m_V", "m", "m_inv",
+                "m_V", "m", "m_inv", "m_V0",
                 "density", "density0",
                 "pressure", "divergence",
                 "material", "color", "is_dynamic",
@@ -170,6 +170,7 @@ class SimulationCache:
                     _fill_tail("material", -1)   # mark as non-fluid/solid
                     _fill_tail("is_dynamic", 0)
                     _fill_tail("object_id", -1)
+                    _fill_tail("m_V0", 0.0)
                     _fill_tail("m_V", 0.0)
                     _fill_tail("m", 0.0)
                     _fill_tail("m_inv", 0.0)
@@ -184,7 +185,7 @@ class SimulationCache:
                     # Vectors/Matrices
                     _fill_tail("x", 1000.0)
                     _fill_tail("x_old", 1000.0)
-                    _fill_tail("x_0", 1000.0)
+                    _fill_tail("x0", 1000.0)
                     _fill_tail("v", 0.0)
                     _fill_tail("v_adv", 0.0)
                     _fill_tail("acceleration", 0.0)
