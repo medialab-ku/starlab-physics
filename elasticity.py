@@ -42,20 +42,19 @@ class Elasticity:
 
             # print(self.ps.solid_neighbors_num[p_i0])
 
-        for p_i in ti.grouped(self.ps.x):
-            if self.ps.material[p_i] != self.ps.material_solid:
-                continue
-            
-            p_i0 = self.ps.cur2ori[p_i]
-            sum_Wij0 = self.W(0.0, self.ps.support_radius)
-            for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j = self.ps.ori2cur[p_j0]
-                sum_Wij0 += self.W((self.ps.x0[p_i0] - self.ps.x0[p_j0]).norm(), self.ps.support_radius)
-                
-            self.ps.m_V0[p_i] = 1.0 / sum_Wij0
-            self.ps.m[p_i] = self.ps.m_V0[p_i] * self.ps.density0[p_i]
-            self.ps.m_inv[p_i] = 1.0 / (self.ps.m[p_i] + 1e-12)
+        # for p_i in ti.grouped(self.ps.x):
+        #     if self.ps.material[p_i] != self.ps.material_solid:
+        #         continue
+        #
+        #     p_i0 = self.ps.cur2ori[p_i]
+        #     sum_Wij0 = self.W(0.0, self.ps.support_radius)
+        #     for j in range(self.ps.solid_neighbors_num[p_i0]):
+        #         p_j0 = self.ps.solid_neighbors[p_i0, j]
+        #         sum_Wij0 += self.W((self.ps.x0[p_i0] - self.ps.x0[p_j0]).norm(), self.ps.support_radius)
+        #
+        #     self.ps.m_V0[p_i] = 1.0 / sum_Wij0
+        #     self.ps.m[p_i] = self.ps.m_V0[p_i] * self.ps.density0[p_i]
+        #     self.ps.m_inv[p_i] = 1.0 / (self.ps.m[p_i] + 1e-12)
                 
         # compute L
         for p_i in ti.grouped(self.ps.x):
@@ -67,14 +66,14 @@ class Elasticity:
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
-                xji0 =  self.ps.x0[p_j0] - self.ps.x0[p_i0]
+                xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 Dm += xji0.outer_product(xji0)
                 # Dm -= self.gradW(xij0, self.ps.support_radius).outer_product(xij0)
             
             # print(f"Dm: {ti.math.determinant(Dm)}")
             self.L[p_i0] = Dm.inverse()
-            self.F[p_i] = Dm @ self.L[p_i0].transpose()
-            print(f"F: {self.F[p_i]}")
+            # self.F[p_i] = Dm @ self.L[p_i0].transpose()
+            # print(f"F: {self.F[p_i]}")
 
 
     @ti.kernel 
@@ -86,15 +85,16 @@ class Elasticity:
 
             p_i0 = self.ps.cur2ori[p_i]
             Ds_i = ti.math.mat3(0.0)
+            # Dm = ti.math.mat3(0.0)
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
+                xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 xji = x[p_j] - x[p_i]
-                xij0 = self.ps.x0[p_j0] - self.ps.x0[p_i0]
-                Ds_i += xji.outer_product(xij0)
-                # Ds_i += xji.outer_product(self.gradW(xij0, self.ps.support_radius))
+                Ds_i += xji.outer_product(xji0)
 
             self.F[p_i] = Ds_i @ self.L[p_i0]
+            # print(f"F: {self.F[p_i]}")
 
 
     @ti.func
@@ -129,7 +129,7 @@ class Elasticity:
             U, sig, V = self.ssvd(F_i)
             R_i = U @ V.transpose()
 
-            self.P[p_i] = (F_i - R_i)
+            self.P[p_i] = 2.0 * mu * (F_i - R_i)
 
 
     @ti.kernel
@@ -150,7 +150,7 @@ class Elasticity:
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
 
-                xji0 = self.ps.x0[p_j0] -self.ps.x0[p_i0]
+                xji0 = self.ps.x0[p_j] -self.ps.x0[p_i]
                 PL_j = self.P[p_j] @ self.L[p_j0]
                 # f_s += (PL_i + PL_j) @ self.gradW(xij0, self.ps.support_radius)
                 f_s += (PL_i + PL_j) @ xji0
@@ -167,7 +167,6 @@ class Elasticity:
     def compute_Ax(self, Ax: ti.template(), x: ti.template()):
 
         pass
-
 
     def solve(self, YM, PR, dt):
 
