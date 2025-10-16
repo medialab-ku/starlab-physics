@@ -46,8 +46,7 @@ if __name__ == "__main__":
 
 
     fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
-
-    # fw.initialize()
+    fw.initialize()
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window=True, vsync=False)
     gui = window.get_gui()
