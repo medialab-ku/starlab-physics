@@ -54,6 +54,7 @@ class SimulationCache:
                 "pressure", "divergence",
                 "material", "color", "is_dynamic",
                 "n",
+                "cur2ori", "ori2cur",
             ]
             arr = {}
             for name in field_names:
@@ -147,82 +148,66 @@ class SimulationCache:
             # arrays
             if "arr" in snap and isinstance(snap["arr"], dict):
                 for name, val in snap["arr"].items():
-                    try:
-                        buf = getattr(self.ps, name).to_numpy()
-                        buf[:N] = val
-                        getattr(self.ps, name).from_numpy(buf)
-                    except Exception:
-                        pass
+                    buf = getattr(self.ps, name).to_numpy()
+                    buf[:N] = val
+                    getattr(self.ps, name).from_numpy(buf)
 
             # Deactivate tail (>N) to avoid stray active particles in ti.grouped loops
-            try:
-                M = int(self.ps.particle_max_num)
-                if N < M:
-                    def _fill_tail(field_name, fill_value):
-                        try:
-                            buf = getattr(self.ps, field_name).to_numpy()
-                            buf[N:] = fill_value
-                            getattr(self.ps, field_name).from_numpy(buf)
-                        except Exception:
-                            pass
+            M = int(self.ps.particle_max_num)
+            if N < M:
+                def _fill_tail(field_name, fill_value):
+                    buf = getattr(self.ps, field_name).to_numpy()
+                    buf[N:] = fill_value
+                    getattr(self.ps, field_name).from_numpy(buf)
 
-                    # Scalars
-                    _fill_tail("material", -1)   # mark as non-fluid/solid
-                    _fill_tail("is_dynamic", 0)
-                    _fill_tail("object_id", -1)
-                    _fill_tail("m_V0", 0.0)
-                    _fill_tail("m_V", 0.0)
-                    _fill_tail("m", 0.0)
-                    _fill_tail("m_inv", 0.0)
-                    _fill_tail("density", 0.0)
-                    _fill_tail("density0", 0.0)
-                    _fill_tail("pressure", 0.0)
-                    _fill_tail("divergence", 0.0)
-                    # Optional DFSPH fields
-                    _fill_tail("dfsph_factor", 0.0)
-                    _fill_tail("density_adv", 0.0)
+                # Scalars
+                _fill_tail("material", -1)   # mark as non-fluid/solid
+                _fill_tail("is_dynamic", 0)
+                _fill_tail("object_id", -1)
+                _fill_tail("m_V0", 0.0)
+                _fill_tail("m_V", 0.0)
+                _fill_tail("m", 0.0)
+                _fill_tail("m_inv", 0.0)
+                _fill_tail("density", 0.0)
+                _fill_tail("density0", 0.0)
+                _fill_tail("pressure", 0.0)
+                _fill_tail("divergence", 0.0)
+                # Optional DFSPH fields
+                _fill_tail("dfsph_factor", 0.0)
+                _fill_tail("density_adv", 0.0)
 
-                    # Vectors/Matrices
-                    _fill_tail("x", 1000.0)
-                    _fill_tail("x_old", 1000.0)
-                    _fill_tail("x0", 1000.0)
-                    _fill_tail("v", 0.0)
-                    _fill_tail("v_adv", 0.0)
-                    _fill_tail("acceleration", 0.0)
-                    _fill_tail("n", 0.0)
-                    _fill_tail("color", 0)
-            except Exception:
-                pass
+                # Vectors/Matrices
+                _fill_tail("x", 1000.0)
+                _fill_tail("x_old", 1000.0)
+                _fill_tail("x0", 1000.0)
+                _fill_tail("v", 0.0)
+                _fill_tail("v_adv", 0.0)
+                _fill_tail("acceleration", 0.0)
+                _fill_tail("n", 0.0)
+                _fill_tail("color", 0)
 
             # solver time
-            try:
-                self.solver.time = float(snap.get("solver_time", 0.0))
-            except Exception:
-                pass
+            self.solver.time = float(snap.get("solver_time", 0.0))
 
             # emitters
             if hasattr(self.ps, "emitter_system") and self.ps.emitter_system and snap.get("emitter_states") is not None:
                 e_sys = self.ps.emitter_system
-                try:
-                    for e, st in zip(e_sys.emitters, snap["emitter_states"]):
-                        e.x = st["x"].astype(np.float32)
-                        e.next_emit_time = float(st["next_emit_time"]) 
-                        e.emit_counter = int(st["emit_counter"]) 
-                    e_sys.suppress_steps = int(snap.get("emitter_suppress", 0))
-                except Exception:
-                    pass
+                for e, st in zip(e_sys.emitters, snap["emitter_states"]):
+                    e.x = st["x"].astype(np.float32)
+                    e.next_emit_time = float(st["next_emit_time"]) 
+                    e.emit_counter = int(st["emit_counter"]) 
+                e_sys.suppress_steps = int(snap.get("emitter_suppress", 0))
 
             # RNG
-            try:
-                np.random.set_state(snap["np_random_state"]) 
-            except Exception:
-                pass
+            np.random.set_state(snap["np_random_state"]) 
 
             # rebuild grid and neighbors
-            try:
-                self.ps.initialize_particle_system()
-            except Exception:
-                pass
+            self.ps.initialize_particle_system()
+
+            if hasattr(self.solver, "ns"):
+                self.solver.ns.is_cur2ori[None] = True
+                self.solver.ns.broad_phase()
+                self.solver.ns.narrow_phase(self.ps.x)
 
             return True, int(snap.get("frame", 0)), float(snap.get("anim_time", None))
         except Exception:

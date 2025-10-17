@@ -84,7 +84,6 @@ class Pressure:
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
 
-
     # -----------------------------
     # Stats helpers
     # -----------------------------
@@ -118,6 +117,7 @@ class Pressure:
             "pcg_error_frame": np.asarray(self.stats_pcg_error_frame, dtype=np.int32),
             "kinetic_energy": np.asarray(self.stats_kinetic_energy, dtype=np.float64)
         }
+
 
     @ti.kernel
     def precompute_values(self):
@@ -239,7 +239,6 @@ class Pressure:
         return avg_error
 
 
-
     @ti.kernel
     def compute_Ax(self, Ax: ti.template(), Jx: ti.template(), x: ti.template()):
 
@@ -292,6 +291,7 @@ class Pressure:
 
         return ret
 
+
     @ti.kernel
     def add(self, ret: ti.template(), v0: ti.template(), scale: float, v1: ti.template()):
         for p_i in ti.grouped(self.ps.x):
@@ -299,6 +299,7 @@ class Pressure:
                 continue
 
             ret[p_i] = v0[p_i] + scale * v1[p_i]
+
 
     def PCG(self, x, b):
 
@@ -344,6 +345,7 @@ class Pressure:
 
         # Collect PCG iteration count per PCG solve
         self.pcg_total_iter += pcg_iter
+
 
     @ti.kernel
     def compute_f(self, ret: ti.template(), x: ti.template(), eps: float):
@@ -399,6 +401,7 @@ class Pressure:
         value /= self.ps.dynamic_particle_num
 
         return value
+
 
     @ti.kernel
     def update_velocities(self, dt: float):

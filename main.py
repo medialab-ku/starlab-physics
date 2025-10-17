@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
 
     def show_options_solver():
-        with gui.sub_window("Solver settings", 0., 0., 0.4, 0.3) as w:
+        with gui.sub_window("Solver settings", 0., 0., 0.4, 0.4) as w:
             fw.dt = w.slider_float("dt", fw.dt, 0.001, 0.04)
             try:
                 N_active = int(ps.particle_num[None])
@@ -134,6 +134,8 @@ if __name__ == "__main__":
             gui.text("")
             gui.text("Export settings:")
             output_manager.render_ui(w, gui, ps)
+    def show_options_cache():
+        return cache.show_ui(gui, current_frame=frame_cnt, pos=(0.0, 0.9), size=(0.4, 0.25))
 
     cnt = 0
     cnt_ply = 0
@@ -147,7 +149,7 @@ if __name__ == "__main__":
         show_options_export()
         # show_options_stats()
         # Cache UI
-        res_cache = cache.show_ui(gui, current_frame=frame_cnt, pos=(0.4, 0.0), size=(0.3, 0.25))
+        res_cache = show_options_cache()
         if res_cache.get("restored", False):
             runSim = False
             frame_cnt = int(res_cache.get("frame", frame_cnt))
@@ -215,7 +217,7 @@ if __name__ == "__main__":
         else:
             camera.track_user_inputs(window, movement_speed=movement_speed, hold_key=ti.ui.LMB)
             scene.set_camera(camera)
-            scene.point_light((2.0, 2.0, 2.0), color=(1.0, 1.0, 1.0))
+            scene.point_light((2.5, 6.0, 2.5), color=(1.0, 1.0, 1.0))
             viz.draw(scene, canvas, background_color=background_color)
 
         cnt += 1

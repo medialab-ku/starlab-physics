@@ -170,8 +170,10 @@ class VisualizationEngine:
 
 
     def draw(self, scene, canvas, background_color=(0, 0, 0)):
-        scene.particles(self.ps.x_vis_buffer, radius=self.ps.particle_radius, per_vertex_color=self._render_colors)
+        bg = tuple(c / 255.0 for c in background_color) if max(background_color) > 1 else background_color
+        canvas.set_background_color(bg)
 
+        scene.particles(self.ps.x_vis_buffer, radius=self.ps.particle_radius, per_vertex_color=self._render_colors)
         scene.lines(self.box_anchors, indices=self.box_lines_indices, color=(0.99, 0.68, 0.28, 1.0), width=1.0)
         canvas.scene(scene)
 

@@ -22,6 +22,7 @@ class Framework:
 
         self.YM = 3e5 # Young Modulus
         self.PR = 0.0 # Poisson Ratio
+        self.alpha = 0 # Zero Energy Mode coefficient
 
 
     def initialize(self):
@@ -84,9 +85,9 @@ class Framework:
 
         # self.viscosity.solve(self.viscosity_coeff, self.dt)
 
-        self.elasticity.solve(self.YM, self.PR, self.dt)
+        self.elasticity.solve(self.alpha, self.YM, self.PR, self.dt)
 
-        self.pressure.solve(self.dt)
+        # self.pressure.solve(self.dt)
 
         self.advect_position(self.dt)
 
