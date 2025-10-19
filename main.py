@@ -6,7 +6,7 @@ import time
 import trimesh as tm
 from config_builder import SimConfig
 from scene_loader import SceneLoader
-from particle_system import ParticleSystem
+from simulation_data import SimulationData
 from framework import Framework
 from neighbour_search import NeighborSearch
 from pressure import Pressure
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     scene_data = loader.prepare_scene()
 
 
-    ps = ParticleSystem(config, GGUI=True)
+    ps = SimulationData(config, GGUI=True)
     loader.populate_scene(ps, scene_data)
     loader.reset_emitter_system()
 

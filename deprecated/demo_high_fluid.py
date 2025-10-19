@@ -1,6 +1,6 @@
 import taichi as ti
 import numpy as np
-from particle_system import ParticleSystem
+from simulation_data import SimulationData
 from deprecated.WCSPH import WCSPHSolver
 from deprecated.IISPH import IISPHSolver
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     output_ply = False
     # solver_type = "WCSPH"
     solver_type = "IISPH"
-    ps = ParticleSystem(domain_size, GGUI=True)
+    ps = SimulationData(domain_size, GGUI=True)
 
     x_offset = 0.2
     y_offset = 0.2

@@ -6,7 +6,7 @@ from config_builder import SimConfig
 
 
 @ti.data_oriented
-class ParticleSystem:
+class SimulationData:
     def __init__(self, config: SimConfig, GGUI=False):
         self.cfg = config
         self.GGUI = GGUI

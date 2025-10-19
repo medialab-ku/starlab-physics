@@ -5,7 +5,7 @@ import numpy as np
 import time
 import trimesh as tm
 from config_builder import SimConfig
-from particle_system import ParticleSystem
+from simulation_data import SimulationData
 from animation import AnimationSystem
 from cache_system import SimulationCache
 import matplotlib.pyplot as plt
@@ -44,7 +44,7 @@ if __name__ == "__main__":
         os.makedirs(obj_out_dir, exist_ok=True)
 
     method = config.get_cfg("simulationMethod")
-    ps = ParticleSystem(config, GGUI=True)
+    ps = SimulationData(config, GGUI=True)
     solver = ps.build_solver()
     solver.initialize()
 
@@ -480,7 +480,7 @@ if __name__ == "__main__":
 
                 else:
                     # Fallback: full rebuild if baseline missing
-                    ps = ParticleSystem(config, GGUI=True)
+                    ps = SimulationData(config, GGUI=True)
                     solver = ps.build_solver()
                     solver.initialize()
                     animator = AnimationSystem(ps, config)

@@ -59,14 +59,14 @@ class Pressure:
         self.a = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.error = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.s = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-        self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
+        # self.v_tmp = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
         self.dp = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.c = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.p = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.k = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.Aii = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.Zii = ti.field(dtype=float, shape=self.ps.particle_max_num)
+        # self.Zii = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.dfdt = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.t = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.f = ti.field(dtype=float, shape=self.ps.particle_max_num)
@@ -76,7 +76,7 @@ class Pressure:
 
         self.var = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
-        self.Hii = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
+        # self.Hii = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.Ap = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.b_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.z_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)

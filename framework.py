@@ -20,8 +20,8 @@ class Framework:
         self.time = 0.0
 
 
-        self.YM = 3e5 # Young Modulus
-        self.PR = 0.0 # Poisson Ratio
+        self.YM = 3e6 # Young Modulus
+        self.PR = 0.1 # Poisson Ratio
         self.alpha = 0 # Zero Energy Mode coefficient
 
 
@@ -29,19 +29,7 @@ class Framework:
 
         self.ns.broad_phase()
         self.ns.narrow_phase(self.ps.x)
-
         self.elasticity.initialize()
-        # self.elasticity.compute_F(self.ps.x)
-        # print(self.elasticity.F)
-        # self.compute_static_boundary_volume()
-        # self.compute_moving_boundary_volume()
-        # self.ps.initialize_boundary_neighbors()
-
-        # if self.ps.num_rigid_bodies > 0:
-        #     self.ps.initialize_rigid_mass()
-
-        # if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
-        #     self.ps.emitter_system.reset()
 
 
     @ti.kernel
@@ -81,13 +69,13 @@ class Framework:
 
         self.apply_gravity(self.dt)
 
-        # self.surface_tension.solve(self.surface_tension_coeff, self.adhesion_coeff, self.dt)
+        self.surface_tension.solve(self.surface_tension_coeff, self.adhesion_coeff, self.dt)
 
-        # self.viscosity.solve(self.viscosity_coeff, self.dt)
+        self.viscosity.solve(self.viscosity_coeff, self.dt)
 
         self.elasticity.solve(self.alpha, self.YM, self.PR, self.dt)
 
-        # self.pressure.solve(self.dt)
+        self.pressure.solve(self.dt)
 
         self.advect_position(self.dt)
 
