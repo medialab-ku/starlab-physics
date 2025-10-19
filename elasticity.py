@@ -333,12 +333,8 @@ class Elasticity:
         mu = YM / (2.0 * (1.0 + PR))
         lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
 
-        # for p_i in ti.grouped(self.ps.x):
-        #     if self.ps.material[p_i] != self.ps.material_solid:
-        #         continue
-        #
-        #     Ax[p_i] = self.ps.m[p_i] * x[p_i]
 
+        #step 1 KDx
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
@@ -354,6 +350,9 @@ class Elasticity:
 
             self.P[p_i] = 2.0 * mu * Ds_i @ self.L[p_i0]
 
+        #TODO: ZE
+
+        # step 2 Mx + dt ** 2 * D^TKDx
         for p_i in ti.grouped(self.ps.x):
 
             # self.grad[p_i] = ti.math.vec3(0.0)
@@ -374,7 +373,6 @@ class Elasticity:
                 PL_j = self.P[p_j] @ self.L[p_j0]
 
                 f_i += self.ps.m_V0[p_j] * (PL_i + PL_j) @ self.gradW(xji0, self.ps.support_radius)
-                # f_ve += self.ps.m_V0[p_j] * (PLv_i + PLv_j) @ self.gradW(xji0, self.ps.support_radius)
             Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * f_i
 
 
