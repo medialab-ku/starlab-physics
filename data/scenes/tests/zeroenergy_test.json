@@ -7,7 +7,7 @@
        "numSubstepping": 1,
        "density0": 1000,
        "simulationMethod": 2,
-       "gravitation": [0.0, -9.81, 0.0],
+       "gravitation": [0.0, 0.0, 0.0],
        "timeStepSize": 0.001,
        "stiffness": 50000,
        "exponent": 7,
@@ -22,11 +22,11 @@
     "SolidBodies" : [
         {
             "objectId": 0,
-            "geometryFile": "./data/models/cube.obj",
+            "geometryFile": "./data/models/armadillo_small.obj",
             "translation": [2.5, 1.5, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [1.8, 1.8, 1.8],
+            "scale": [0.5, 0.5, 0.5],
             "velocity": [0.0, 0.0, 0.0],
             "density": 500.0,
             "color": [0, 100, 250, 1.0]

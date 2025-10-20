@@ -16,6 +16,7 @@ from elasticity import Elasticity
 from visualization import VisualizationEngine, VisualizationSettings, ColorMode, HeatmapField
 from output_manager import OutputManager, OutputConfig, ExportFormat
 from cache_system import SimulationCache
+from randomizer import ParticleRandomizer
 
 ti.init(arch=ti.gpu, device_memory_fraction=0.7)
 
@@ -47,6 +48,7 @@ if __name__ == "__main__":
 
     fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
     fw.initialize()
+    randomizer = ParticleRandomizer(ps, neighbor_search)
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window=True, vsync=False)
     gui = window.get_gui()
@@ -141,6 +143,10 @@ if __name__ == "__main__":
     cnt_ply = 0
     cnt_obj = 0
     runSim = False
+    expand_mode = False
+    expand_factor = 4.0
+    rand_step_alpha = 0.01
+    random_seed = 1337
 
     while window.running:
 
@@ -156,6 +162,8 @@ if __name__ == "__main__":
 
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
+                if expand_mode:
+                    expand_mode = False
                 # Toggle run state
                 runSim = not runSim
                 if runSim:
@@ -170,6 +178,12 @@ if __name__ == "__main__":
                     frame_cnt = int(result.get("frame", frame_cnt))
                     fw.initialize()
                     print(f"rewind: {result.get('rewind_steps', 0)} frames")
+
+            if window.event.key == 'p':
+                expand_mode = True
+                randomizer.begin(expand=expand_factor, seed=random_seed)
+                runSim = True
+                print("Randomize...")
 
             if window.event.key == 'r':
                 print("reset simulation...")
@@ -197,16 +211,21 @@ if __name__ == "__main__":
             except Exception:
                 pass
             fw.dt = dt_sub
-            for i in range(1):
-                fw.current_frame = int(frame_cnt  + i)
-                loader.step_emitter_system(fw.dt)
+
+            if expand_mode:
+                randomizer.step(alpha=rand_step_alpha)
+                if not randomizer.active:
+                    expand_mode = False
+                    runSim = False
+                    print("Randomize completed. Press SPACE to resume physics.")
+            else:
                 fw.forward()
 
             fw.dt = dt_frame
-            frame_cnt += 1
 
-            # After completing a frame, cache the end-of-frame state
-            cache.push(frame_cnt=frame_cnt)
+            if not expand_mode:
+                frame_cnt += 1
+                cache.push(frame_cnt=frame_cnt)
 
         viz.update_buffers()
         output_manager.on_step(frame_cnt, ps, viz)
@@ -224,4 +243,3 @@ if __name__ == "__main__":
         # if cnt > 6000:
         #     break
         window.show()
-
