@@ -58,7 +58,19 @@ class VisualizationEngine:
         self.cmap_vel = LinearSegmentedColormap.from_list("heat_vel", ["blue", "white"])
         self.cmap_div = LinearSegmentedColormap.from_list("heat_div", ["blue", "white", "red"])
         self.cmap_den = LinearSegmentedColormap.from_list("heat_den", ["blue", "white", "red"])
+        
+        self.pin_vertices = None
+        self.pin_indices = None
 
+    def set_pin_lines(self, vertices_np, indices_np):
+        if vertices_np is None or indices_np is None or len(vertices_np) == 0:
+            self.pin_vertices, self.pin_indices = None, None
+            return
+        nV = int(vertices_np.shape[0]); nI = int(indices_np.shape[0])
+        self.pin_vertices = ti.Vector.field(3, dtype=ti.f32, shape=nV)
+        self.pin_indices = ti.field(int, shape=nI)
+        self.pin_vertices.from_numpy(vertices_np.astype(np.float32))
+        self.pin_indices.from_numpy(indices_np.astype(np.int32))
 
     def copy_to_vis_buffer(self, invisible_objects=[]):
         # Always clear buffers to avoid rendering inactive/emitted stale particles
@@ -77,6 +89,7 @@ class VisualizationEngine:
             if self.ps.object_id[i] == obj_id:
                 self.ps.x_vis_buffer[i] = self.ps.x[i]
                 self.ps.color_vis_buffer[i] = self.ps.color[i] / 255.0
+
 
     def update_buffers(self):
         self.copy_to_vis_buffer(invisible_objects=(self.settings.invisible_objects or []))
@@ -175,6 +188,8 @@ class VisualizationEngine:
 
         scene.particles(self.ps.x_vis_buffer, radius=self.ps.particle_radius, per_vertex_color=self._render_colors)
         scene.lines(self.box_anchors, indices=self.box_lines_indices, color=(0.99, 0.68, 0.28, 1.0), width=1.0)
+        if self.pin_vertices is not None and self.pin_indices is not None:
+            scene.lines(self.pin_vertices, indices=self.pin_indices, color=(1.0, 0.2, 0.2, 1.0), width=1.5)
         canvas.scene(scene)
 
     def render_ui(self, w, gui) -> None:

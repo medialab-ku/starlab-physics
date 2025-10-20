@@ -17,6 +17,7 @@ from visualization import VisualizationEngine, VisualizationSettings, ColorMode,
 from output_manager import OutputManager, OutputConfig, ExportFormat
 from cache_system import SimulationCache
 from randomizer import ParticleRandomizer
+from pinning import ParticlePinning
 
 ti.init(arch=ti.gpu, device_memory_fraction=0.7)
 
@@ -44,7 +45,8 @@ if __name__ == "__main__":
     viscosity = Viscosity(ps)
     surface_tension = SurfaceTension(ps)
     elasticity = Elasticity(ps)
-
+    pin_util = ParticlePinning(ps)
+    pin_geom = pin_util.apply(scene_data) # guide lines
 
     fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
     fw.initialize()
@@ -104,6 +106,9 @@ if __name__ == "__main__":
     frame_cnt = 0
     # export_ply = output_ply
     end_frame = 8000
+
+    if pin_geom and pin_geom.get("vertices") is not None:
+        viz.set_pin_lines(pin_geom["vertices"], pin_geom["indices"])
 
     # Caching system
     cache = SimulationCache(ps, fw, max_steps=10)
