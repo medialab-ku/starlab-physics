@@ -44,7 +44,7 @@ class SimulationData:
         self.particle_num = ti.field(int, shape=())
 
 
-    def allocate(self, particle_max_num, num_objects, num_rigid_bodies, enable_ggui:bool):
+    def allocate(self, particle_max_num, num_objects, num_rigid_bodies, enable_ggui:bool, surface_vertex_capacity: int = 0, surface_face_capacity: int = 0):
         self.particle_max_num = int(particle_max_num)
         self.num_objects = int(max(num_objects, 1))
         self.num_rigid_bodies = int(num_rigid_bodies)
@@ -116,13 +116,19 @@ class SimulationData:
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
         self.cur2ori_buffer = ti.field(dtype=int, shape=self.particle_max_num)
-        self.surface_vertex_num = 100
+        self.surface_vertex_num = max(1, int(surface_vertex_capacity) or int(getattr(self, "surface_vertex_num", 100)))
         self.x_s   = ti.Vector.field(self.dim, dtype=float, shape=self.surface_vertex_num)
         self.x_0_s = ti.Vector.field(self.dim, dtype=float, shape=self.surface_vertex_num)
         self.skinning_weight = ti.field(dtype=float, shape= self.surface_vertex_num)
         self.surface_neighbor_num = ti.field(dtype=int, shape=self.surface_vertex_num)
         self.surface_neighbor_idx = ti.field(dtype=int, shape=(self.surface_vertex_num, self.cache_size))
 
+        if int(surface_face_capacity) > 0:
+            self.surface_face_num = int(surface_face_capacity)
+        self.surface_faces = ti.field(dtype=int, shape=(self.surface_face_num, 3))
+        self.surface_faces = ti.field(dtype=int, shape=(self.surface_face_num, 3))  # (Nf, 3)
+        self.surface_vertex_object_id = ti.field(dtype=int, shape=self.surface_vertex_num)
+        self.surface_face_object_id = ti.field(dtype=int, shape=self.surface_face_num)
         # # Special properties
         # method = int(self.cfg.get_cfg("simulationMethod") or 0)
         # if method == 4:

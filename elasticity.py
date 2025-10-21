@@ -454,6 +454,8 @@ class Elasticity:
 
             self.ps.x_s[k] = x_k
 
+
+    # Example usage: three vertex coord of ith triangle: tri_pos = obj["meshVertices"][obj["meshFaces"][i]]  # (3, 3)
     def apply_mesh_skinning(self):
 
         self.compute_F(self.ps.x)
