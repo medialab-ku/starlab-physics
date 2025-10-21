@@ -71,6 +71,19 @@ class Elasticity:
             self.ps.m_V0[p_i] = 1.0 / sum_Wij0
             self.ps.m[p_i] = self.ps.density0[p_i] * self.ps.m_V0[p_i]
             self.ps.m_inv[p_i] = 1.0 / self.ps.m[p_i]
+
+        for k in ti.grouped(self.ps.x_s):
+
+            tmp = 0.0
+            X_k = self.ps.x_0_s[k]
+            for j in range(self.ps.surface_neighbor_num[k]):
+                p_j = self.ps.surface_neighbor_idx[k, j]
+                p_j0 = self.ps.cur2ori[p_j]
+                X_kj = X_k - self.ps.x0[p_j]
+                tmp += self.ps.m_V0[p_j] * self.W(X_kj.norm(), self.ps.support_radius)
+                self.ps.surface_neighbor_idx[k, j] = p_j0
+
+            self.ps.skinning_weight[k] = 1.0 / tmp
                 
         # compute L
         for p_i in ti.grouped(self.ps.x):
@@ -113,19 +126,6 @@ class Elasticity:
                 r = xji0.norm()
                 self.K[p_i0][j] = self.ps.m_V0[p_j] * self.W(r, self.ps.support_radius) / (r*r + eps)
 
-
-
-        for k in ti.grouped(self.ps.x_s):
-        
-            tmp = 0.0
-            X_k = self.ps.x_0_s[k]
-            for j in range(self.ps.surface_neighbor_num[k]):
-                j0 = self.ps.surface_neighbor_idx[k, j]
-                p_j = self.ps.ori2cur[j0]
-                X_kj = X_k - self.ps.x0[p_j]
-                tmp += self.ps.m_V0[p_j] * self.W(X_kj.norm(),self.ps.support_radius)
-        
-            self.ps.skinning_weight[k] = 1.0 / tmp
 
     @ti.kernel
     def compute_F(self, x: ti.template()):
@@ -413,7 +413,6 @@ class Elasticity:
     def solve(self, alpha, YM, PR, dt):
 
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
-        # self.compute_F(self.x_tmp)
         self.compute_P(self.x_tmp, YM, PR)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
         self.compute_gradient(dt)
@@ -435,11 +434,11 @@ class Elasticity:
             for j in range(self.ps.surface_neighbor_num[k]):
                 j0 = self.ps.surface_neighbor_idx[k, j]
                 p_j = self.ps.ori2cur[j0]
+                X_kj = X_k - self.ps.x0[j0]
                 X_kj = X_k - self.ps.x0[p_j]
                 x_k += s_k * self.ps.m_V0[p_j] * (self.F[p_j] @ X_kj + self.ps.x[p_j]) * self.W(X_kj.norm(), self.ps.support_radius)
 
             self.ps.x_s[k] = x_k
-
 
     # Example usage: three vertex coord of ith triangle: tri_pos = obj["meshVertices"][obj["meshFaces"][i]]  # (3, 3)
     def apply_mesh_skinning(self):

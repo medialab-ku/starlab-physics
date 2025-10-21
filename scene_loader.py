@@ -83,6 +83,8 @@ class SceneLoader:
             sb["voxelizedPoints"] = voxelized_points_np
             solid_cnt += voxelized_points_np.shape[0]
 
+        solid_surface_vertex_capacity = sum(int(obj.get("meshVertexNum", 0)) for obj in solid_bodies)
+        solid_surface_face_capacity   = sum(int(obj.get("meshFaceNum", 0)) for obj in solid_bodies)
         num_objects = (max(object_ids) + 1) if object_ids else 1
 
         # Process Emitter
@@ -111,6 +113,8 @@ class SceneLoader:
             "fluid_particle_num": int(fluid_cnt),
             "rigid_particle_num": int(rigid_cnt),
             "solid_particle_num": int(solid_cnt),
+            "solid_surface_vertex_capacity": int(solid_surface_vertex_capacity),
+            "solid_surface_face_capacity": int(solid_surface_face_capacity),
             "dynamic_particle_num": int(rb_dynamic_cnt + solid_cnt),
             "num_objects": int(num_objects),
             "num_rigid_bodies": int(len(rigid_bodies)),
@@ -131,7 +135,9 @@ class SceneLoader:
             particle_max_num=scene_data["particle_max_num"],
             num_objects=scene_data["num_objects"],
             num_rigid_bodies=scene_data["num_rigid_bodies"],
-            enable_ggui=True
+            enable_ggui=True,
+            surface_vertex_capacity=scene_data.get("solid_surface_vertex_capacity", 0),
+            surface_face_capacity=scene_data.get("solid_surface_face_capacity", 0),
         )
 
         ps.fluid_particle_num   = int(scene_data["fluid_particle_num"])
@@ -227,6 +233,7 @@ class SceneLoader:
                             np.stack([color for _ in range(num_particles_obj)]))  # color
         
         self._setup_emitter_system(ps, scene_data["emitter"])
+        self.populate_surface_vertices(ps, scene_data["solid_bodies"])
 
 
     def load_mesh(self, obj, a=1.0):
@@ -235,7 +242,7 @@ class SceneLoader:
         mesh.apply_scale(obj["scale"])
         offset = np.array(obj["translation"])
 
-        angle = obj["rotationAngle"] / 360 * 2 * 3.1415926
+        angle = obj["rotationAngle"] / 360 * 2 * np.pi
         direction = obj["rotationAxis"]
         rot_matrix = tm.transformations.rotation_matrix(angle, direction, mesh.vertices.mean(axis=0))
         mesh.apply_transform(rot_matrix)
@@ -244,8 +251,18 @@ class SceneLoader:
         # Backup the original mesh for exporting obj
         mesh_backup = mesh.copy()
         obj["mesh"] = mesh_backup
+
+        verts_np = np.asarray(mesh_backup.vertices, dtype=np.float32)
+        faces_np = np.asarray(mesh_backup.faces, dtype=np.int32)
+
         obj["restPosition"] = mesh_backup.vertices
         obj["restCenterOfMass"] = mesh_backup.vertices.mean(axis=0)
+
+        obj["restVertices"] = verts_np
+        obj["restFaces"] = faces_np
+        obj["meshVertexNum"] = int(verts_np.shape[0])
+        obj["meshFaceNum"] = int(faces_np.shape[0])
+
         is_success = tm.repair.fill_holes(mesh)
             # print("Is the mesh successfully repaired? ", is_success)
 
@@ -304,6 +321,33 @@ class SceneLoader:
         pressure_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float32), pressure if pressure is not None else 0.)
         ps.add_particles(object_id, num_new_particles, new_positions, velocity_arr, density_arr, pressure_arr, material_arr, is_dynamic_arr, color_arr)
     
+
+    #==== Mesh Skinning setup ====
+    def populate_surface_vertices(self, ps, solid_bodies):
+        M = int(ps.surface_vertex_num)
+        vertex_buffer = np.zeros((M, self.dim), dtype=np.float32)
+
+        N = int(ps.surface_face_num)
+        faces_accum = []
+        cur = 0
+
+        for sb in solid_bodies:
+            rv = np.asarray(sb.get("restVertices", []), dtype=np.float32)
+            rf = np.asarray(sb.get("restFaces", []), dtype=np.int32)
+            n = rv.shape[0]
+
+            if n > 0:
+                vertex_buffer[cur:cur+n] = rv
+                if rf.size > 0:
+                    faces_accum.append(rf + cur)
+                cur += n
+
+        ps.x_0_s.from_numpy(vertex_buffer)  # initial
+        ps.x_s.from_numpy(vertex_buffer)    # after deformation
+
+        if N > 0 and len(faces_accum) > 0:
+            all_faces = np.concatenate(faces_accum, axis=0).astype(np.int32).reshape(-1)
+            ps.surface_faces.from_numpy(all_faces)
 
     #==== Emitter system setup ====
     def reset_emitter_system(self):

@@ -126,9 +126,10 @@ class NeighborSearch:
             self.ps.ori2cur[original_idx] = I
 
     @ti.kernel
-    def narrow_phase(self, x: ti.template()):
+    def narrow_phase(self, x: ti.template(), neighbor_num: ti.template(), neighbor_ids: ti.template()):
+
         for p_i in range(self.ps.particle_num[None]):
-            self.ps.particle_neighbors_num[p_i] = 0
+            neighbor_num[p_i] = 0
             center_cell = self.pos_to_index(x[p_i])
             for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
                 nbr_cell = self.clamp_cell(center_cell + offset)
@@ -141,9 +142,30 @@ class NeighborSearch:
                 for p_j in range(start, end):
                     # for p_j in range(self.grid_particles_num[ti.max(0, grid_index-1)], self.grid_particles_num[grid_index]):
                     if p_i != p_j and (x[p_i] - x[p_j]).norm() < self.ps.support_radius:
-                        if self.ps.particle_neighbors_num[p_i] < self.ps.cache_size:
-                            self.ps.particle_neighbors[p_i, self.ps.particle_neighbors_num[p_i]] = p_j
-                            self.ps.particle_neighbors_num[p_i] += 1
+                        if neighbor_num[p_i] < self.ps.cache_size:
+                            neighbor_ids[p_i, neighbor_num[p_i]] = p_j
+                            neighbor_num[p_i] += 1
+
+    @ti.kernel
+    def narrow_phase_surface(self, x_s: ti.template(), x: ti.template(), neighbor_num: ti.template(), neighbor_ids: ti.template()):
+
+        for p_i in range(self.ps.surface_vertex_num):
+            neighbor_num[p_i] = 0
+            center_cell = self.pos_to_index(x_s[p_i])
+            for offset in ti.grouped(ti.ndrange(*((-1, 2),) * self.dim)):
+                nbr_cell = self.clamp_cell(center_cell + offset)
+                grid_index = self.flatten_grid_index(nbr_cell)
+                start = 0
+                
+                if grid_index > 0:
+                    start = self.grid_particles_num[grid_index - 1]
+
+                end = self.grid_particles_num[grid_index]
+                for p_j in range(start, end):
+                    if  (x_s[p_i] - x[p_j]).norm() < self.ps.support_radius:
+                        if neighbor_num[p_i] < self.ps.cache_size:
+                            neighbor_ids[p_i, neighbor_num[p_i]] = p_j
+                            neighbor_num[p_i] += 1
 
     @ti.func
     def simulate_collisions(self, p_i, vec):

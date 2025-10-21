@@ -44,7 +44,7 @@ class SimulationData:
         self.particle_num = ti.field(int, shape=())
 
 
-    def allocate(self, particle_max_num, num_objects, num_rigid_bodies, enable_ggui:bool):
+    def allocate(self, particle_max_num, num_objects, num_rigid_bodies, enable_ggui:bool, surface_vertex_capacity: int = 0, surface_face_capacity: int = 0):
         self.particle_max_num = int(particle_max_num)
         self.num_objects = int(max(num_objects, 1))
         self.num_rigid_bodies = int(num_rigid_bodies)
@@ -116,14 +116,30 @@ class SimulationData:
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
         self.cur2ori_buffer = ti.field(dtype=int, shape=self.particle_max_num)
+        self.surface_vertex_num = max(1, int(surface_vertex_capacity) or int(getattr(self, "surface_vertex_num", 100)))
+        self.x_s   = ti.Vector.field(self.dim, dtype=float, shape=self.surface_vertex_num)
+        self.x_0_s = ti.Vector.field(self.dim, dtype=float, shape=self.surface_vertex_num)
+        self.skinning_weight = ti.field(dtype=float, shape= self.surface_vertex_num)
+        self.surface_neighbor_num = ti.field(dtype=int, shape=self.surface_vertex_num)
+        self.surface_neighbor_idx = ti.field(dtype=int, shape=(self.surface_vertex_num, self.cache_size))
 
-        # Special properties
-        method = int(self.cfg.get_cfg("simulationMethod") or 0)
-        if method == 4:
-            self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)
-            self.density_adv  = ti.field(dtype=float, shape=self.particle_max_num)
-            self.dfsph_factor_buffer = ti.field(dtype=float, shape=self.particle_max_num)
-            self.density_adv_buffer  = ti.field(dtype=float, shape=self.particle_max_num)
+        self.surface_face_num = int(surface_face_capacity) if int(surface_face_capacity) > 0 else 0
+        if self.surface_face_num > 0:
+            self.surface_faces = ti.field(dtype=int, shape=3*self.surface_face_num)  # 1D
+            self.surface_face_object_id = ti.field(dtype=int, shape=self.surface_face_num)
+        else:
+            self.surface_faces = ti.field(dtype=int, shape=1)  # dummy
+            self.surface_face_object_id = ti.field(dtype=int, shape=1)
+
+        self.surface_vertex_object_id = ti.field(dtype=int, shape=self.surface_vertex_num)
+
+        # # Special properties
+        # method = int(self.cfg.get_cfg("simulationMethod") or 0)
+        # if method == 4:
+        #     self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)
+        #     self.density_adv  = ti.field(dtype=float, shape=self.particle_max_num)
+        #     self.dfsph_factor_buffer = ti.field(dtype=float, shape=self.particle_max_num)
+        #     self.density_adv_buffer  = ti.field(dtype=float, shape=self.particle_max_num)
 
         if enable_ggui and self.GGUI:
             self.x_vis_buffer     = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
@@ -194,6 +210,7 @@ class SimulationData:
                       new_particles_material: ti.types.ndarray(),
                       new_particles_is_dynamic: ti.types.ndarray(),
                       new_particles_color: ti.types.ndarray()):
+
         for p in range(self.particle_num[None], self.particle_num[None] + new_particles_num):
             v = ti.Vector.zero(float, self.dim)
             x = ti.Vector.zero(float, self.dim)

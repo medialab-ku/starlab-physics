@@ -21,6 +21,7 @@ class VisualizationSettings:
     transparent_objects: list = None
     invisible_objects: list = None
     color_alpha: float = 1.0
+    deformable_mesh_view: bool = False
 
 
 def _title(s: str) -> str:
@@ -172,6 +173,13 @@ class VisualizationEngine:
             self.ps.color_heat_map.from_numpy(original_colors)
             render_colors = self.ps.color_heat_map
 
+        if self.settings.deformable_mesh_view:
+            pos = self.ps.x_vis_buffer.to_numpy()
+            solid_mask = (material_np == self.ps.material_solid)
+            pos[solid_mask] = [1000.0, 1000.0, 1000.0]
+            self.ps.x_vis_buffer.from_numpy(pos)
+
+
         # Cache for export
         self.last_rgba = rgba
         self._N_active = N_active
@@ -185,8 +193,12 @@ class VisualizationEngine:
     def draw(self, scene, canvas, background_color=(0, 0, 0)):
         bg = tuple(c / 255.0 for c in background_color) if max(background_color) > 1 else background_color
         canvas.set_background_color(bg)
-
         scene.particles(self.ps.x_vis_buffer, radius=self.ps.particle_radius, per_vertex_color=self._render_colors)
+
+        if self.settings.deformable_mesh_view:
+            scene.mesh(self.ps.x_s, indices=self.ps.surface_faces, color=(0.99, 0.68, 0.28), two_sided=True)
+            # print(self.ps.surface_faces.to_numpy())
+
         scene.lines(self.box_anchors, indices=self.box_lines_indices, color=(0.99, 0.68, 0.28, 1.0), width=1.0)
         if self.pin_vertices is not None and self.pin_indices is not None:
             scene.lines(self.pin_vertices, indices=self.pin_indices, color=(1.0, 0.2, 0.2, 1.0), width=1.5)
@@ -197,6 +209,10 @@ class VisualizationEngine:
         cur_mode_idx = modes.index(self.settings.color_mode) + 1
         cur_mode_idx = w.slider_int("visualization mode", cur_mode_idx, 1, len(modes))
         self.settings.color_mode = modes[cur_mode_idx - 1]
+
+        gui.text("")
+        self.settings.deformable_mesh_view = w.checkbox("mesh view", self.settings.deformable_mesh_view)
+        self.settings.deformable_mesh_view = bool(self.settings.deformable_mesh_view)
 
         if self.settings.color_mode == ColorMode.heatmap:
             gui.text("Heatmap Mode")
