@@ -77,7 +77,7 @@ class Framework:
 
         self.elasticity.solve(self.alpha, self.YM, self.PR, self.dt)
 
-        # self.pressure.solve(self.dt)
+        self.pressure.solve(self.dt)
 
         self.advect_position(self.dt)
         self.ns.enforce_boundary_3D()

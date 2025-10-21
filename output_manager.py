@@ -76,7 +76,10 @@ class OutputManager:
                     # elif ExportFormat.partio in self.cfg.export_formats:
                     #     self._export_particles_partio(ps, heat)
 
-        if self.cfg.export_mesh_obj and len(getattr(ps, "object_id_rigid_body", [])) > 0:
+        has_rigid = len(getattr(ps, "object_id_rigid_body", [])) > 0
+        has_solid = int(getattr(ps, "surface_face_num", 0) or 0) > 0
+        has_mesh = has_rigid or has_solid
+        if self.cfg.export_mesh_obj and has_mesh and frame_idx > 0:
             self._export_mesh_obj(ps)
 
 
@@ -143,8 +146,36 @@ class OutputManager:
             out_path = os.path.join(self.obj_dir, f"obj_{int(r_body_id)}_{self._cnt_obj:06}.obj")
             mesh_out.export(out_path)
 
-        self._cnt_obj += 1        
+        solid_ids = self._collect_solid_ids(ps)
+        if len(solid_ids) > 0 and getattr(ps, "surface_face_num", 0) > 0:
+            V_all = ps.x_s.to_numpy()
+            F_all = ps.surface_faces.to_numpy()  # 1D (3T,)
 
+            for s_body_id in solid_ids:
+                sb = ps.object_collection.get(s_body_id, None)
+                if sb is None:
+                    continue
+                vs = int(sb.get("surfaceVertexOffset", 0))
+                vn = int(sb.get("surfaceVertexCount", 0))
+                fs_tri = int(sb.get("surfaceFaceOffset", 0))
+                fc_tri = int(sb.get("surfaceFaceCount", 0))
+                if vn <= 0 or fc_tri <= 0:
+                    continue
+                V = V_all[vs:vs+vn]
+                F = F_all[3*fs_tri:3*(fs_tri+fc_tri)].reshape(-1, 3) - vs
+                mesh_out = tm.Trimesh(vertices=V, faces=F, process=False)
+                out_path = os.path.join(self.obj_dir, f"obj_solid_{int(s_body_id)}_{self._cnt_obj:06}.obj")
+                mesh_out.export(out_path)
+
+        self._cnt_obj += 1  
+
+
+    def _collect_solid_ids(self, ps):
+        solid_ids = []
+        for obj_id, obj in ps.object_collection.items():
+            if isinstance(obj, dict) and int(obj.get("surfaceVertexCount", 0)) > 0:
+                solid_ids.append(int(obj_id))
+        return solid_ids
 
     def _rigid_transform_from_particles(self, ps, obj_id: int):
         N = int(ps.particle_num[None])
@@ -194,16 +225,18 @@ class OutputManager:
             if not cfg.export_fluid_particles and not cfg.export_rigid_particles:
                 cfg.export_fluid_particles = True
 
-            cfg.frame_interval = w.slider_int("frame interval", int(cfg.frame_interval), 1, 200)
             cfg.include_heatmap_attributes = w.checkbox("include heatmap attrs", bool(cfg.include_heatmap_attributes))
-            cfg.end_frame = w.slider_int("end frame", int(cfg.end_frame), 0, int(3e4))
 
         # Export mesh (OBJ)
         has_rigid = len(getattr(ps, "object_id_rigid_body", [])) > 0
-        if has_rigid:
+        has_solid = len(self._collect_solid_ids(ps)) > 0
+        has_mesh = has_rigid or has_solid
+        if has_mesh:
             cfg.export_mesh_obj = w.checkbox("Export mesh (OBJ)", bool(cfg.export_mesh_obj))
         else:
             cfg.export_mesh_obj = False
 
+        cfg.frame_interval = w.slider_int("frame interval", int(cfg.frame_interval), 1, 200)
+        cfg.end_frame = w.slider_int("end frame", int(cfg.end_frame), 0, int(3e4))
         self.cfg = cfg
         self._ensure_dirs()

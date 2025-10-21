@@ -330,6 +330,7 @@ class SceneLoader:
         N = int(ps.surface_face_num)
         faces_accum = []
         cur = 0
+        face_cur = 0
 
         for sb in solid_bodies:
             rv = np.asarray(sb.get("restVertices", []), dtype=np.float32)
@@ -337,9 +338,17 @@ class SceneLoader:
             n = rv.shape[0]
 
             if n > 0:
-                vertex_buffer[cur:cur+n] = rv
+                v_start = cur
+                v_count = n
+                sb["surfaceVertexOffset"] = int(v_start)
+                sb["surfaceVertexCount"] = int(v_count)
+                vertex_buffer[v_start:v_start+v_count] = rv
                 if rf.size > 0:
-                    faces_accum.append(rf + cur)
+                    f_count = rf.shape[0]
+                    sb["surfaceFaceOffset"] = int(face_cur)
+                    sb["surfaceFaceCount"] = int(f_count)
+                    faces_accum.append(rf + v_start)
+                    face_cur += f_count
                 cur += n
 
         ps.x_0_s.from_numpy(vertex_buffer)  # initial
