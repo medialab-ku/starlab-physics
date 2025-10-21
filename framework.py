@@ -27,7 +27,8 @@ class Framework:
     def initialize(self):
 
         self.ns.broad_phase()
-        self.ns.narrow_phase(self.ps.x)
+        self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
+        self.ns.narrow_phase(self.ps.x_0_s, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
         self.elasticity.initialize()
 
 
@@ -64,7 +65,8 @@ class Framework:
     def forward(self):
 
         self.ns.broad_phase()
-        self.ns.narrow_phase(self.ps.x)
+        self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
+        self.ns.narrow_phase(self.ps.x_0_s, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
 
         self.apply_gravity(self.dt)
 

@@ -100,7 +100,7 @@ class ParticleRandomizer:
         self.update_positions(self.t)
 
         self.ns.broad_phase()
-        self.ns.narrow_phase(self.ps.x)
+        self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
         self.ns.enforce_boundary_3D()
 
         if self.t >= 1.0:

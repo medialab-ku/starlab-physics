@@ -116,14 +116,20 @@ class SimulationData:
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
         self.cur2ori_buffer = ti.field(dtype=int, shape=self.particle_max_num)
+        self.surface_vertex_num = 100
+        self.x_s   = ti.Vector.field(self.dim, dtype=float, shape=self.surface_vertex_num)
+        self.x_0_s = ti.Vector.field(self.dim, dtype=float, shape=self.surface_vertex_num)
+        self.skinning_weight = ti.field(dtype=float, shape= self.surface_vertex_num)
+        self.surface_neighbor_num = ti.field(dtype=int, shape=self.surface_vertex_num)
+        self.surface_neighbor_idx = ti.field(dtype=int, shape=(self.surface_vertex_num, self.cache_size))
 
-        # Special properties
-        method = int(self.cfg.get_cfg("simulationMethod") or 0)
-        if method == 4:
-            self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)
-            self.density_adv  = ti.field(dtype=float, shape=self.particle_max_num)
-            self.dfsph_factor_buffer = ti.field(dtype=float, shape=self.particle_max_num)
-            self.density_adv_buffer  = ti.field(dtype=float, shape=self.particle_max_num)
+        # # Special properties
+        # method = int(self.cfg.get_cfg("simulationMethod") or 0)
+        # if method == 4:
+        #     self.dfsph_factor = ti.field(dtype=float, shape=self.particle_max_num)
+        #     self.density_adv  = ti.field(dtype=float, shape=self.particle_max_num)
+        #     self.dfsph_factor_buffer = ti.field(dtype=float, shape=self.particle_max_num)
+        #     self.density_adv_buffer  = ti.field(dtype=float, shape=self.particle_max_num)
 
         if enable_ggui and self.GGUI:
             self.x_vis_buffer     = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
@@ -194,6 +200,7 @@ class SimulationData:
                       new_particles_material: ti.types.ndarray(),
                       new_particles_is_dynamic: ti.types.ndarray(),
                       new_particles_color: ti.types.ndarray()):
+
         for p in range(self.particle_num[None], self.particle_num[None] + new_particles_num):
             v = ti.Vector.zero(float, self.dim)
             x = ti.Vector.zero(float, self.dim)

@@ -37,6 +37,7 @@ class Elasticity:
     @ti.kernel
     def initialize(self):
         eps = 1e-12
+
         # set initial neighbours
         for p_i in ti.grouped(self.ps.x):
             p_i0 = self.ps.cur2ori[p_i]
@@ -54,6 +55,7 @@ class Elasticity:
 
             # print(self.ps.solid_neighbors_num[p_i0])
 
+        # compute rest volume
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
@@ -112,7 +114,20 @@ class Elasticity:
                 self.K[p_i0][j] = self.ps.m_V0[p_j] * self.W(r, self.ps.support_radius) / (r*r + eps)
 
 
-    @ti.kernel 
+
+        # for k in ti.grouped(self.ps.x_s):
+        #
+        #     tmp = 0.0
+        #     X_k = self.ps.x_0_s[k]
+        #     for j in range(self.ps.surface_neighbor_num[k]):
+        #         j0 = self.ps.surface_neighbor_idx[k, j]
+        #         p_j = self.ps.ori2cur[j0]
+        #         X_kj = X_k - self.ps.x0[j0]
+        #         tmp += self.ps.m_V0[p_j] * self.W(X_kj,self.ps.support_radius)
+        #
+        #     self.ps.skinning_weight[k] = 1.0 / tmp
+
+    @ti.kernel
     def compute_F(self, x: ti.template()):
 
         for p_i in ti.grouped(self.ps.x):
@@ -409,12 +424,10 @@ class Elasticity:
             Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * (f_i + self.ZE[p_i])
 
 
-        # pass
 
     def solve(self, alpha, YM, PR, dt):
 
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
-        # self.compute_F(self.x_tmp)
         self.compute_P(self.x_tmp, YM, PR)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
         self.compute_gradient(dt)
@@ -424,3 +437,25 @@ class Elasticity:
         self.CG(x=self.a, b=self.grad, alpha=alpha, YM=YM, PR=PR, dt=dt)
         add(self.v_tmp, self.v_tmp, -1.0, self.a)
         self.ps.v.copy_from(self.v_tmp)
+
+
+    @ti.kernel
+    def update_surface_vertex(self):
+
+        for k in ti.grouped(self.ps.x_s):
+            x_k = ti.math.vec3(0.0)
+            X_k = self.ps.x_0_s[k]
+            s_k = self.ps.skinning_weight[k]
+            for j in range(self.ps.surface_neighbor_num[k]):
+                j0 = self.ps.surface_neighbor_idx[k, j]
+                p_j = self.ps.ori2cur[j0]
+                X_kj = X_k - self.ps.x0[j0]
+                x_k += s_k * self.ps.m_V0[p_j] * (self.F[p_j] * X_kj + self.ps.x[p_j]) * self.W(X_kj, self.ps.support_radius)
+
+            self.ps.x_s[k] = x_k
+
+    def apply_mesh_skinning(self):
+
+        self.compute_F(self.ps.x)
+        self.update_surface_vertex()
+
