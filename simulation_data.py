@@ -123,12 +123,16 @@ class SimulationData:
         self.surface_neighbor_num = ti.field(dtype=int, shape=self.surface_vertex_num)
         self.surface_neighbor_idx = ti.field(dtype=int, shape=(self.surface_vertex_num, self.cache_size))
 
-        if int(surface_face_capacity) > 0:
-            self.surface_face_num = int(surface_face_capacity)
-        self.surface_faces = ti.field(dtype=int, shape=(self.surface_face_num, 3))
-        self.surface_faces = ti.field(dtype=int, shape=(self.surface_face_num, 3))  # (Nf, 3)
+        self.surface_face_num = int(surface_face_capacity) if int(surface_face_capacity) > 0 else 0
+        if self.surface_face_num > 0:
+            self.surface_faces = ti.field(dtype=int, shape=3*self.surface_face_num)  # 1D
+            self.surface_face_object_id = ti.field(dtype=int, shape=self.surface_face_num)
+        else:
+            self.surface_faces = ti.field(dtype=int, shape=1)  # dummy
+            self.surface_face_object_id = ti.field(dtype=int, shape=1)
+
         self.surface_vertex_object_id = ti.field(dtype=int, shape=self.surface_vertex_num)
-        self.surface_face_object_id = ti.field(dtype=int, shape=self.surface_face_num)
+
         # # Special properties
         # method = int(self.cfg.get_cfg("simulationMethod") or 0)
         # if method == 4:

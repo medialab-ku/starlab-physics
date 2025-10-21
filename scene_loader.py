@@ -233,7 +233,7 @@ class SceneLoader:
                             np.stack([color for _ in range(num_particles_obj)]))  # color
         
         self._setup_emitter_system(ps, scene_data["emitter"])
-        self.populate_surface_verticies(ps, scene_data["solid_bodies"])
+        self.populate_surface_vertices(ps, scene_data["solid_bodies"])
 
 
     def load_mesh(self, obj, a=1.0):
@@ -324,29 +324,30 @@ class SceneLoader:
 
     #==== Mesh Skinning setup ====
     def populate_surface_vertices(self, ps, solid_bodies):
-        rest_list = []
+        M = int(ps.surface_vertex_num)
+        vertex_buffer = np.zeros((M, self.dim), dtype=np.float32)
+
+        N = int(ps.surface_face_num)
+        faces_accum = []
+        cur = 0
+
         for sb in solid_bodies:
             rv = np.asarray(sb.get("restVertices", []), dtype=np.float32)
-            if rv.size > 0:
-                rest_list.append(rv)
+            rf = np.asarray(sb.get("restFaces", []), dtype=np.int32)
+            n = rv.shape[0]
 
-        if len(rest_list) == 0:
-            buf = np.zeros((int(ps.surface_vertex_num), self.dim), dtype=np.float32)
-            ps.x_0_s.from_numpy(buf)
-            ps.x_s.from_numpy(buf)
-            return
+            if n > 0:
+                vertex_buffer[cur:cur+n] = rv
+                if rf.size > 0:
+                    faces_accum.append(rf + cur)
+                cur += n
 
-        rest_all = np.concatenate(rest_list, axis=0).astype(np.float32)
-        M = int(ps.surface_vertex_num)
-        buf = np.zeros((M, self.dim), dtype=np.float32)
+        ps.x_0_s.from_numpy(vertex_buffer)  # initial
+        ps.x_s.from_numpy(vertex_buffer)    # after deformation
 
-        N = min(M, rest_all.shape[0])
-        if N > 0:
-            buf[:N] = rest_all[:N]
-
-        ps.x_0_s.from_numpy(buf)  # initial
-        ps.x_s.from_numpy(buf)    # after deformation
-
+        if N > 0 and len(faces_accum) > 0:
+            all_faces = np.concatenate(faces_accum, axis=0).astype(np.int32).reshape(-1)
+            ps.surface_faces.from_numpy(all_faces)
 
     #==== Emitter system setup ====
     def reset_emitter_system(self):

@@ -115,17 +115,17 @@ class Elasticity:
 
 
 
-        # for k in ti.grouped(self.ps.x_s):
-        #
-        #     tmp = 0.0
-        #     X_k = self.ps.x_0_s[k]
-        #     for j in range(self.ps.surface_neighbor_num[k]):
-        #         j0 = self.ps.surface_neighbor_idx[k, j]
-        #         p_j = self.ps.ori2cur[j0]
-        #         X_kj = X_k - self.ps.x0[j0]
-        #         tmp += self.ps.m_V0[p_j] * self.W(X_kj,self.ps.support_radius)
-        #
-        #     self.ps.skinning_weight[k] = 1.0 / tmp
+        for k in ti.grouped(self.ps.x_s):
+        
+            tmp = 0.0
+            X_k = self.ps.x_0_s[k]
+            for j in range(self.ps.surface_neighbor_num[k]):
+                j0 = self.ps.surface_neighbor_idx[k, j]
+                p_j = self.ps.ori2cur[j0]
+                X_kj = X_k - self.ps.x0[p_j]
+                tmp += self.ps.m_V0[p_j] * self.W(X_kj.norm(),self.ps.support_radius)
+        
+            self.ps.skinning_weight[k] = 1.0 / tmp
 
     @ti.kernel
     def compute_F(self, x: ti.template()):
@@ -450,7 +450,7 @@ class Elasticity:
                 j0 = self.ps.surface_neighbor_idx[k, j]
                 p_j = self.ps.ori2cur[j0]
                 X_kj = X_k - self.ps.x0[j0]
-                x_k += s_k * self.ps.m_V0[p_j] * (self.F[p_j] * X_kj + self.ps.x[p_j]) * self.W(X_kj, self.ps.support_radius)
+                x_k += s_k * self.ps.m_V0[p_j] * (self.F[p_j] @ X_kj + self.ps.x[p_j]) * self.W(X_kj.norm(), self.ps.support_radius)
 
             self.ps.x_s[k] = x_k
 
