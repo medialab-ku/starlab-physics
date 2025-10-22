@@ -30,7 +30,7 @@ class Framework:
         self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
         self.ns.narrow_phase_surface(self.ps.x_0_s, self.ps.x, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
         self.elasticity.initialize()
-        print(self.ps.surface_faces)
+        # print(self.ps.surface_faces)
 
 
     @ti.kernel

@@ -1,9 +1,5 @@
-import os
 import argparse
 import taichi as ti
-import numpy as np
-import time
-import trimesh as tm
 from config_builder import SimConfig
 from scene_loader import SceneLoader
 from simulation_data import SimulationData
@@ -18,6 +14,7 @@ from output_manager import OutputManager, OutputConfig, ExportFormat
 from cache_system import SimulationCache
 from randomizer import ParticleRandomizer
 from pinning import ParticlePinning
+from animation import AnimationEngine
 
 ti.init(arch=ti.gpu, device_memory_fraction=0.7)
 
@@ -48,8 +45,14 @@ if __name__ == "__main__":
     pin_util = ParticlePinning(ps)
     pin_geom = pin_util.apply(scene_data) # guide lines
 
+    anim = AnimationEngine(ps)
+    anim.build(scene_data, pin_geom)
+
     fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
     fw.initialize()
+
+    anim_time = 0.0
+
     randomizer = ParticleRandomizer(ps, neighbor_search)
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window=True, vsync=False)
@@ -225,6 +228,8 @@ if __name__ == "__main__":
                     print("Randomize completed. Press SPACE to resume physics.")
             else:
                 fw.forward()
+                anim.apply(anim_time, dt_sub)
+                anim_time += dt_sub
 
             fw.dt = dt_frame
 
