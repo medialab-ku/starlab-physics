@@ -125,7 +125,7 @@ class Elasticity:
                 xik0 = self.ps.x0[p_i] - self.ps.x0[p_k]
                 self.LgradW[p_i0, k] = Li @ self.gradW(xik0, self.ps.support_radius)
 
-            # computeK
+            # computeKze
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j  = self.ps.ori2cur[p_j0]
