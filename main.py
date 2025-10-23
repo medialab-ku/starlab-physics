@@ -121,6 +121,9 @@ if __name__ == "__main__":
     def show_options_solver():
         with gui.sub_window("Solver settings", 0., 0., 0.4, 0.4) as w:
             fw.dt = w.slider_float("dt", fw.dt, 0.001, 0.04)
+            fw.alpha = w.slider_float("alpha", fw.alpha, 0.0, 10.0)
+            fw.YM = w.slider_float("YM", fw.YM, 1e6, 10e6)
+            fw.PR = w.slider_float("PR", fw.PR, 0.0, 0.499)
             try:
                 N_active = int(ps.particle_num[None])
                 mats = ps.material.to_numpy()[:N_active]

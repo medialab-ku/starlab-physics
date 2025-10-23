@@ -15,10 +15,10 @@ class Elasticity:
         self.dJdF   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.J      = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.F_tmp  = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
-        self.Q      = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.ps.particle_max_num, 9))
+        self.Q      = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.ps.particle_max_num, 9)) # eigenvectors of volume hessian per paticle
         self.D      = ti.Matrix.field(n=3, m=3, dtype=float, shape=6)
 
-        self.lamb   = ti.field(dtype=float, shape=(self.ps.particle_max_num, 9))
+        self.lamb   = ti.field(dtype=float, shape=(self.ps.particle_max_num, 9)) # eigenvalues of volume hessian per paticle
         self.P      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.K      = ti.Vector.field(n=self.ps.cache_size, dtype=float, shape=self.ps.particle_max_num)
         self.LgradW = ti.Vector.field(3, dtype=float, shape=(self.ps.particle_max_num, self.ps.cache_size))
@@ -135,7 +135,7 @@ class Elasticity:
 
         # D6 ~ D8 in Appendix A
         self.D[0] = ti.math.mat3([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
-        self.D[1] = ti.math.mat3([[0.0, 0.0, 0.1], [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+        self.D[1] = ti.math.mat3([[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
         self.D[2] = ti.math.mat3([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         self.D[3] = ti.math.mat3([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
         self.D[4] = ti.math.mat3([[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
@@ -214,8 +214,8 @@ class Elasticity:
 
             R_i = U @ V.transpose()
             self.dJdF[p_i] = compute_dJdF_3x3(F_i)
-            # self.P[p_i] = 2.0 * mu * (F_i - R_i) + lamb * (self.J[p_i] - 1.0) * self.dJdF[p_i]
-            self.P[p_i] = 2.0 * mu * (F_i - R_i)
+            self.P[p_i] = 2.0 * mu * (F_i - R_i) + lamb * (self.J[p_i] - 1.0) * self.dJdF[p_i]
+            # self.P[p_i] = 2.0 * mu * (F_i - R_i)
 
 
             # volume hessian computation according to Stable Neo Hookean [Smith et al. 2018]
@@ -228,17 +228,33 @@ class Elasticity:
             self.lamb[p_i, 6] = -s0
             self.lamb[p_i, 7] = -s1
             self.lamb[p_i, 8] = -s2
-
-
+            sigv = ti.Vector([s0, s1, s2])
             #Appendix A, Eq.(62)
             for k in range(6):
                 self.Q[p_i, k + 3] = ti.rsqrt(2) *  U @ self.D[k] @ V.transpose()
 
             # Eq(39)~Eq(40)
-            I_C = 0.0
+            I_C = s0 * s0 + s1 * s1 + s2 * s2
+            I_C = ti.max(I_C, 1e-12)
+
+            t = 2.0 * ti.math.sqrt(I_C/3.0)
+            u = (3.0 * self.J[p_i]/I_C) * ti.math.sqrt(3.0/I_C)
+            arg = ti.min(1.0, ti.max(-1.0, u))
+
             for k in range(3):
-                self.lamb[p_i, k] = 0.0 #TODO: fill-in Eq.(33)
+                phi = ti.acos(arg) + 2.0 * ti.math.pi * k
+                lamb_k = t * ti.cos(phi / 3.0)
+                self.lamb[p_i, k] = lamb_k
                 D_k = ti.math.mat3([[s0 * s2 + s1 * self.lamb[p_i, k], 0, 0], [0, s1 * s2 + s0 * self.lamb[p_i, k], 0], [0, 0, self.lamb[p_i, k] ** 2 - s2 ** 2]])
+                # a = sigv[k]
+                # b = sigv[(k + 1) % 3]
+                # c = sigv[(k + 2) % 3]
+
+                # D_k = ti.math.mat3([
+                #     [a * c + b * lamb_k, 0.0, 0.0],
+                #     [0.0, b * c + a * lamb_k, 0.0],
+                #     [0.0, 0.0, lamb_k * lamb_k - c * c],
+                # ])
                 q_k = ti.math.sqrt(double_dot_product(D_k, D_k))
                 self.Q[p_i, k] = (1.0 / q_k) * U @ D_k @ V.transpose()
 
@@ -254,7 +270,8 @@ class Elasticity:
             self.ZE[p] = ti.Vector.zero(float, 3)
         
         mu = YM / (2.0 * (1.0 + PR))
-        
+        lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
+
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
@@ -413,14 +430,15 @@ class Elasticity:
                 continue
 
             dJdF_i = self.dJdF[p_i]
-            # a = double_dot_product(dJdF_i, self.F_tmp[p_i])
-            a = 0.0
+            a = double_dot_product(dJdF_i, self.F_tmp[p_i])
 
             test = ti.math.mat3(0.0)
             # for k in range(9):
-            #     test += self.lamb[p_i, k] * double_dot_product(self.Q[p_i, k], self.F_tmp[p_i]) * self.Q[p_i, k]
+            #     lambJ = self.lamb[p_i, k] * (self.J[p_i] - 1.0)
+            #     lambJ = ti.max(lambJ, 0.0)
+            #     test += lambJ * double_dot_product(self.Q[p_i, k], self.F_tmp[p_i]) * self.Q[p_i, k]
 
-            self.P[p_i] = 2.0 * mu * self.F_tmp[p_i] + lamb * (a * dJdF_i + (self.J[p_i] - 1.0) * test)
+            self.P[p_i] = 2.0 * mu * self.F_tmp[p_i] + lamb * (a * dJdF_i + test)
 
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
@@ -441,7 +459,7 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
-                e_ij = self.F_tmp[p_i] @ xij0 - xij
+                e_ij = self.F[p_i] @ xij0 - xij
                 E_ij = e_ij * K_i[j]
                 sumVs = grad_sum.dot(xij0)
                 ti.atomic_add(self.ZE[p_j], E_ij)
@@ -493,7 +511,6 @@ class Elasticity:
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
         self.compute_gradient(dt)
 
-        # TODO: v +=  M^-1 * (grad)
         self.v_tmp.copy_from(self.ps.v)
         self.CG(x=self.a, b=self.grad, alpha=alpha, YM=YM, PR=PR, dt=dt)
         add(self.v_tmp, self.v_tmp, -1.0, self.a)
