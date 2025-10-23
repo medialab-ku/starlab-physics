@@ -13,7 +13,7 @@ class Elasticity:
         self.L      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.F      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.dJdF   = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
-        self.J      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
+        self.J      = ti.field(dtype=float, shape=self.ps.particle_max_num)
         self.F_tmp  = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.Q      = ti.Matrix.field(n=3, m=3, dtype=float, shape=(self.ps.particle_max_num, 9))
         self.D      = ti.Matrix.field(n=3, m=3, dtype=float, shape=6)
@@ -134,7 +134,7 @@ class Elasticity:
                 self.K[p_i0][j] = self.ps.m_V0[p_j] * self.W(r, self.ps.support_radius) / (r*r + eps)
 
         # D6 ~ D8 in Appendix A
-        self.D[0] = ti.math.mat3([[0.0, 0.0, 0.0], [0.0, 0.0, 0.1], [0.0, -1.0, 0.0]])
+        self.D[0] = ti.math.mat3([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
         self.D[1] = ti.math.mat3([[0.0, 0.0, 0.1], [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
         self.D[2] = ti.math.mat3([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         self.D[3] = ti.math.mat3([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
@@ -214,7 +214,8 @@ class Elasticity:
 
             R_i = U @ V.transpose()
             self.dJdF[p_i] = compute_dJdF_3x3(F_i)
-            self.P[p_i] = 2.0 * mu * (F_i - R_i) + lamb * (self.J[p_i] - 1.0) * self.dJdF[p_i]
+            # self.P[p_i] = 2.0 * mu * (F_i - R_i) + lamb * (self.J[p_i] - 1.0) * self.dJdF[p_i]
+            self.P[p_i] = 2.0 * mu * (F_i - R_i)
 
 
             # volume hessian computation according to Stable Neo Hookean [Smith et al. 2018]
@@ -250,40 +251,44 @@ class Elasticity:
     @ti.kernel
     def compute_ZE(self, alpha: float, YM: float, PR: float, x:ti.template()):
         for p in ti.grouped(self.ZE):
-            self.ZE[p] = ti.math.vec3(0.0)
-
+            self.ZE[p] = ti.Vector.zero(float, 3)
+        
         mu = YM / (2.0 * (1.0 + PR))
-
+        
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
-
             p_i0 = self.ps.cur2ori[p_i]
             F_i = self.F[p_i]
             K_i = self.K[p_i0]
 
+            grad_sum = ti.math.vec3(0.0)
+            for k in range(self.ps.solid_neighbors_num[p_i0]):
+                p_k0 = self.ps.solid_neighbors[p_i0, k]
+                p_k = self.ps.ori2cur[p_k0]
+                grad_sum += self.ps.m_V0[p_k] * self.LgradW[p_i0, k]
+
+            accum = ti.math.mat3(0.0)
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
-
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
                 e_ij = F_i @ xij0 - xij
+                E_ij = e_ij * K_i[j]
+                sumVs = grad_sum.dot(xij0)
+                ti.atomic_add(self.ZE[p_j], E_ij)
+                ti.atomic_add(self.ZE[p_i], -(1.0 + sumVs) * E_ij)
+                accum += E_ij.outer_product(xij0)
+                    
+            for k in range(self.ps.solid_neighbors_num[p_i0]):
+                p_k0 = self.ps.solid_neighbors[p_i0, k]
+                p_k = self.ps.ori2cur[p_k0]
+                ti.atomic_add(self.ZE[p_k], self.ps.m_V0[p_k] * (accum @ self.LgradW[p_i0, k]))
                 
-                sumVs = 0.0
-                for k in range(self.ps.solid_neighbors_num[p_i0]):
-                    p_k0 = self.ps.solid_neighbors[p_i0, k]
-                    p_k = self.ps.ori2cur[p_k0]
-                    g = self.LgradW[p_i0, k]
-                    s = ti.math.dot(g, xij0)
-                    sumVs += self.ps.m_V0[p_k] * s
-                    ti.atomic_add(self.ZE[p_k], self.ps.m_V0[p_k] * s * e_ij * K_i[j])
-
-                ti.atomic_add(self.ZE[p_j],  e_ij * K_i[j])
-                ti.atomic_add(self.ZE[p_i], -(1.0 + sumVs) * e_ij * K_i[j])
-
         for p in ti.grouped(self.ZE):
             self.ZE[p] *= alpha * mu
+
     
     @ti.kernel
     def compute_gradient(self, dt: float):
@@ -294,11 +299,7 @@ class Elasticity:
                 continue
 
             p_i0 = self.ps.cur2ori[p_i]
-            # PL_i = self.P[p_i] @ self.L[p_i0]
-            # PLv_i = self.P_v[p_i] @ self.L[p_i0]
-
             f_i = ti.math.vec3(0.0)
-            # f_ve = ti.math.vec3(0.0)
 
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
@@ -307,13 +308,10 @@ class Elasticity:
                 xji0 = self.ps.x0[p_j] -self.ps.x0[p_i]
                 PL_i = - self.P[p_i] @ self.LgradW[p_i0, j]
                 PL_j = self.P[p_j] @ self.L[p_j0] @ self.gradW(xji0, self.ps.support_radius)
-                # PL_j = self.P[p_j] @ self.L[p_j0]
-                # PLv_j = self.P_v[p_j] @ self.L[p_j0]
 
                 f_i += self.ps.m_V0[p_j] * (PL_i + PL_j)
 
 
-            # self.grad[p_i] = self.ps.m_V0[p_i] * dt * (f_s + f_ve + self.ZE[p_i])
             self.grad[p_i] = self.ps.m_V0[p_i] * dt * (f_i + self.ZE[p_i])
 
     @ti.kernel
@@ -387,13 +385,11 @@ class Elasticity:
     @ti.kernel
     def compute_Ax(self, Ax: ti.template(), x: ti.template(), alpha: float, YM: float, PR: float, dt:float):
 
-
         for p in ti.grouped(self.ZE):
             self.ZE[p] = ti.math.vec3(0.0)
 
         mu = YM / (2.0 * (1.0 + PR))
         lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
-
 
         #step 1 KDx
         for p_i in ti.grouped(self.ps.x):
@@ -402,7 +398,6 @@ class Elasticity:
 
             p_i0 = self.ps.cur2ori[p_i]
             Ds_i = ti.math.mat3(0.0)
-            K_i = self.K[p_i0]
 
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
@@ -417,31 +412,49 @@ class Elasticity:
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-            # #TODO: H^TKHx
-            # e_ij = xji - Ds_i @ self.L[p_i0] @ xji0
-            # sumVs = 0.0
-            # for k in range(self.ps.solid_neighbors_num[p_i0]):
-            #     p_k0 = self.ps.solid_neighbors[p_i0, k]
-            #     p_k = self.ps.ori2cur[p_k0]
-            #     g = self.LgradW[p_i0, k]
-            #     s = ti.math.dot(g, -xji0)
-            #     sumVs += self.ps.m_V0[p_k] * s
-            #     ti.atomic_add(self.ZE[p_k], self.ps.m_V0[p_k] * s * e_ij * K_i[j])
-            #
-            # ti.atomic_add(self.ZE[p_j],  e_ij * K_i[j])
-            # ti.atomic_add(self.ZE[p_i], -(1.0 + sumVs) * e_ij * K_i[j])
-
             dJdF_i = self.dJdF[p_i]
-            a = double_dot_product(dJdF_i, self.F_tmp[p_i])
+            # a = double_dot_product(dJdF_i, self.F_tmp[p_i])
+            a = 0.0
 
             test = ti.math.mat3(0.0)
-            for k in range(9):
-                test += self.lamb[p_i, k] * double_dot_product(self.Q[p_i, k], self.F_tmp[p_i]) * self.Q[p_i, k]
+            # for k in range(9):
+            #     test += self.lamb[p_i, k] * double_dot_product(self.Q[p_i, k], self.F_tmp[p_i]) * self.Q[p_i, k]
 
             self.P[p_i] = 2.0 * mu * self.F_tmp[p_i] + lamb * (a * dJdF_i + (self.J[p_i] - 1.0) * test)
 
-        # for p in ti.grouped(self.ZE):
-        #     self.ZE[p] *= alpha * mu
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_solid:
+                continue
+
+            p_i0 = self.ps.cur2ori[p_i]
+            K_i = self.K[p_i0]
+
+            grad_sum = ti.math.vec3(0.0)
+            for k in range(self.ps.solid_neighbors_num[p_i0]):
+                p_k0 = self.ps.solid_neighbors[p_i0, k]
+                p_k = self.ps.ori2cur[p_k0]
+                grad_sum += self.ps.m_V0[p_k] * self.LgradW[p_i0, k]
+
+            accum = ti.math.mat3(0.0)
+            for j in range(self.ps.solid_neighbors_num[p_i0]):
+                p_j0 = self.ps.solid_neighbors[p_i0, j]
+                p_j = self.ps.ori2cur[p_j0]
+                xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+                xij = x[p_i] - x[p_j]
+                e_ij = self.F_tmp[p_i] @ xij0 - xij
+                E_ij = e_ij * K_i[j]
+                sumVs = grad_sum.dot(xij0)
+                ti.atomic_add(self.ZE[p_j], E_ij)
+                ti.atomic_add(self.ZE[p_i], -(1.0 + sumVs) * E_ij)
+                accum += E_ij.outer_product(xij0)
+                    
+            for k in range(self.ps.solid_neighbors_num[p_i0]):
+                p_k0 = self.ps.solid_neighbors[p_i0, k]
+                p_k = self.ps.ori2cur[p_k0]
+                ti.atomic_add(self.ZE[p_k], self.ps.m_V0[p_k] * (accum @ self.LgradW[p_i0, k]))
+                
+        for p in ti.grouped(self.ZE):
+            self.ZE[p] *= alpha * mu
 
         # step 2 Mx + dt ** 2 * D^TKDx
         for p_i in ti.grouped(self.ps.x):
@@ -461,7 +474,8 @@ class Elasticity:
                 PL_j = self.P[p_j] @ self.L[p_j0] @ self.gradW(xji0, self.ps.support_radius)
 
                 f_i += self.ps.m_V0[p_j] * (PL_i + PL_j)
-            Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * (f_i)
+            Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * (f_i + self.ZE[p_i])
+
 
     @ti.kernel
     def compute_xAx(self, x: ti.template(), alpha: float, YM: float, PR: float, dt: float) -> float:
@@ -469,14 +483,14 @@ class Elasticity:
 
         return 0.0
 
+
     def solve(self, alpha, YM, PR, dt):
 
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
 
         self.compute_F(self.x_tmp)
         self.compute_P(YM, PR)
-
-        # self.compute_ZE(alpha, YM, PR, self.x_tmp)
+        self.compute_ZE(alpha, YM, PR, self.x_tmp)
         self.compute_gradient(dt)
 
         # TODO: v +=  M^-1 * (grad)
