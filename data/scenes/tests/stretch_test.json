@@ -26,13 +26,13 @@
             "translation": [2.5, 1.5, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [6.0, 1.0, 1.0],
+            "scale": [4.0, 2.0, 2.0],
             "velocity": [0.0, 0.0, 0.0],
             "density": 1000.0,
             "color": [0, 100, 250, 1.0],
             "Pin": {
                 "normalized": true,
-                "x_ranges": [[0.0, 0.1], [0.9, 1.0]],
+                "x_ranges": [[0.0, 0.05], [0.95, 1.0]],
                 "y_ranges": []
             },
             "Animation": {
@@ -42,11 +42,8 @@
                     "pivot": "object_restCOM",
                     "channels": {
                       "translation": [
-                        { "t": 0.0, "value": [0.0, 0.0, 0.0] }
-                      ],
-                      "rotation_euler_deg": [
                         { "t": 0.0, "value": [0.0, 0.0, 0.0] },
-                        { "t": 1.5, "value": [360.0, 0.0, 0.0] }
+                        { "t": 1.5, "value": [-1.5, 0.0, 0.0] }
                       ],
                       "scale": [{ "t": 0.0, "value": [1.0, 1.0, 1.0] }]
                     },
@@ -56,9 +53,9 @@
                     "target": { "type": "rigid_range", "rangeId": "pin_x_1" },
                     "pivot": "object_restCOM",
                     "channels": {
-                      "translation": [{ "t": 0.0, "value": [0.0, 0.0, 0.0] }],
-                      "rotation_euler_deg": [
-                        { "t": 0.0, "value": [0.0, 0.0, 0.0] }
+                      "translation": [
+                        { "t": 0.0, "value": [0.0, 0.0, 0.0] },
+                        { "t": 1.5, "value": [1.5, 0.0, 0.0] }
                       ],
                       "scale": [{ "t": 0.0, "value": [1.0, 1.0, 1.0] }]
                     },
