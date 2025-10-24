@@ -326,6 +326,7 @@ class SceneLoader:
     def populate_surface_vertices(self, ps, solid_bodies):
         M = int(ps.surface_vertex_num)
         vertex_buffer = np.zeros((M, self.dim), dtype=np.float32)
+        vertex_object_id = np.full(M, -1, dtype=np.int32)
 
         N = int(ps.surface_face_num)
         faces_accum = []
@@ -343,6 +344,7 @@ class SceneLoader:
                 sb["surfaceVertexOffset"] = int(v_start)
                 sb["surfaceVertexCount"] = int(v_count)
                 vertex_buffer[v_start:v_start+v_count] = rv
+                vertex_object_id[v_start:v_start+v_count] = int(sb["objectId"])
                 if rf.size > 0:
                     f_count = rf.shape[0]
                     sb["surfaceFaceOffset"] = int(face_cur)
@@ -353,6 +355,7 @@ class SceneLoader:
 
         ps.x_0_s.from_numpy(vertex_buffer)  # initial
         ps.x_s.from_numpy(vertex_buffer)    # after deformation
+        ps.surface_vertex_object_id.from_numpy(vertex_object_id)
 
         if N > 0 and len(faces_accum) > 0:
             all_faces = np.concatenate(faces_accum, axis=0).astype(np.int32).reshape(-1)

@@ -19,9 +19,9 @@ class Framework:
         self.adhesion_coeff = self.surface_tension_coeff
         self.time = 0.0
 
-        self.YM = 3e6 # Young Modulus
-        self.PR = 0.35 # Poisson Ratio
-        self.alpha = 1.0 # Zero Energy Mode coefficient
+        self.YM = 2.6e6 # Young Modulus
+        self.PR = 0.0  # Poisson Ratio
+        self.alpha = 0.1 # Zero Energy Mode coefficient
 
 
     def initialize(self):
@@ -45,7 +45,7 @@ class Framework:
             self.ps.v[p_i] += acc * dt
 
 
-    @ti.kernel
+    @ti.kernel 
     def advect_velocity(self, dt: float):
         # Symplectic Euler
         for p_i in ti.grouped(self.ps.x):
@@ -63,6 +63,13 @@ class Framework:
                 self.ps.x[p_i] += dt * self.ps.v[p_i]
 
 
+    @ti.kernel
+    def apply_damping(self, coeff: float):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.is_dynamic[p_i]:
+                self.ps.v[p_i] *= coeff
+
+
     def forward(self):
 
         self.ns.broad_phase()
@@ -77,10 +84,13 @@ class Framework:
 
         self.elasticity.solve(self.alpha, self.YM, self.PR, self.dt)
 
-        # self.pressure.solve(self.dt)
+        self.pressure.solve(self.dt)
 
         self.advect_position(self.dt)
+
         self.ns.enforce_boundary_3D()
+
+        self.apply_damping(0.99)
 
         self.elasticity.update_surface_vertex()
 

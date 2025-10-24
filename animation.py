@@ -2,25 +2,40 @@ import taichi as ti
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 
+
+def _normalize_vec(v: np.ndarray) -> np.ndarray:
+    n = float(np.linalg.norm(v) + 1e-12)
+    return (v / n).astype(np.float32)
+
+def axis_angle_to_matrix(axis: np.ndarray, angle_rad: float) -> np.ndarray:
+    a = _normalize_vec(axis)
+    x, y, z = a
+    c = float(np.cos(angle_rad)); s = float(np.sin(angle_rad)); C = 1.0 - c
+    return np.array([
+        [c + x*x*C,     x*y*C - z*s, x*z*C + y*s],
+        [y*x*C + z*s,   c + y*y*C,   y*z*C - x*s],
+        [z*x*C - y*s,   z*y*C + x*s, c + z*z*C   ],
+    ], dtype=np.float32)
+
 class AnimationTrack:
     def __init__(self, object_id: int, target_type: str, pivot: str,
                  interpolation: str, channels: Dict[str, List[Dict[str, Any]]],
-                 indices: np.ndarray, pivot_rest: np.ndarray):
+                 indices: np.ndarray, pivot_rest: np.ndarray,
+                 rot_axis: np.ndarray):
         self.object_id = int(object_id)
         self.target_type = str(target_type)
         self.pivot = str(pivot)
         self.interp = str(interpolation or "linear")
         self.channels = channels or {}
-        # 주의: 여기의 indices는 “원본 인덱스(original index)”로 취급 (pinning 직후, sort 이전)
         self.indices_np = indices.astype(np.int32)
         self.pivot_rest = pivot_rest.astype(np.float32)
+        self.rot_axis = rot_axis.astype(np.float32)
 
 @ti.data_oriented
 class AnimationEngine:
     def __init__(self, particle_system):
         self.ps = particle_system
         self.tracks: List[AnimationTrack] = []
-        # 트랙별 인덱스 필드(원본 인덱스 저장), 크기
         self.track_idx_fields: List[ti.field] = []
         self.track_sizes: List[int] = []
 
@@ -48,14 +63,14 @@ class AnimationEngine:
                 continue
             cfg = obj_map[obj_id]
 
-            anim_cfg = dict(cfg.get("Animation", {}) or {})  # 소문자 animation
+            anim_cfg = dict(cfg.get("Animation", {}) or {})
             tracks_cfg = list(anim_cfg.get("tracks", []) or [])
             if not tracks_cfg:
                 continue
 
             obj_rest_COM = np.array(cfg.get("restCenterOfMass", [0,0,0]), dtype=np.float32)
             obj_mask = (object_id_np == obj_id) & (material_np == self.ps.material_solid)
-            obj_indices = np.nonzero(obj_mask)[0].astype(np.int32)  # 이 시점의 인덱스=원본 인덱스
+            obj_indices = np.nonzero(obj_mask)[0].astype(np.int32)
 
             for tcfg in tracks_cfg:
                 tgt = dict(tcfg.get("target", {}) or {})
@@ -67,24 +82,43 @@ class AnimationEngine:
                 if t_type not in ("rigid_range", "rigid_body", "solid_body"):
                     continue
 
+                # 회전축: "x"|"y"|"z" 또는 [1,0,0] 형태, 기본은 Y
+                axis_cfg = tcfg.get("rotation_axis", tcfg.get("axis", "y"))
+                if isinstance(axis_cfg, str):
+                    amap = {"x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0], "z": [0.0, 0.0, 1.0]}
+                    rot_axis = np.array(amap.get(axis_cfg.lower(), [0.0, 1.0, 0.0]), dtype=np.float32)
+                else:
+                    rot_axis = np.array(axis_cfg, dtype=np.float32)
+                    if rot_axis.size != 3:
+                        rot_axis = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+
                 if t_type == "rigid_range":
                     rid = str(tgt.get("rangeId", ""))
                     meta = (by_obj_ranges.get(obj_id, {}) or {}).get(rid)
                     if meta is None:
                         continue
-                    idxs = meta["indices"].astype(np.int32)      # 원본 인덱스
-                    pivot_rest = np.array(meta["restCOM"], dtype=np.float32) if pivot == "range_restCOM" else obj_rest_COM
+                    idxs = meta["indices"].astype(np.int32)
+                    if pivot == "range_restCOM":
+                        pivot_rest = np.array(meta["restCOM"], dtype=np.float32)
+                    elif pivot == "world":
+                        pw = np.array(tcfg.get("pivot_world", tcfg.get("pivotWorld", obj_rest_COM)), dtype=np.float32)
+                        pivot_rest = pw
+                    else:
+                        pivot_rest = obj_rest_COM
                 else:
-                    idxs = obj_indices                           # 원본 인덱스(오브젝트 전체)
-                    pivot_rest = obj_rest_COM
+                    idxs = obj_indices
+                    if pivot == "world":
+                        pw = np.array(tcfg.get("pivot_world", tcfg.get("pivotWorld", obj_rest_COM)), dtype=np.float32)
+                        pivot_rest = pw
+                    else:
+                        pivot_rest = obj_rest_COM
 
                 if idxs.size == 0:
                     continue
 
-                track = AnimationTrack(obj_id, t_type, pivot, interp, channels, idxs, pivot_rest)
+                track = AnimationTrack(obj_id, t_type, pivot, interp, channels, idxs, pivot_rest, rot_axis)
                 self.tracks.append(track)
 
-                # 트랙별 인덱스 필드(한번만 업로드 → 이후 커널에서 ori2cur로 매핑)
                 idx_field = ti.field(dtype=int, shape=idxs.size)
                 idx_field.from_numpy(idxs)
                 self.track_idx_fields.append(idx_field)
@@ -103,8 +137,8 @@ class AnimationEngine:
                             dt: float, update_v: ti.i32):
         for k in range(count):
             orig = idxs[k]
-            cur = self.ps.ori2cur[orig]  # 원본→현재 인덱스 매핑(NeighborSearch 정렬 대응)
-            # 안전 범위 체크는 생략 가능
+            cur = self.ps.ori2cur[orig]
+
             X0 = self.ps.x0[cur]
             # (X0 - pivot) ⊙ S
             d0 = (X0[0] - pivot_x) * Sx
@@ -131,9 +165,21 @@ class AnimationEngine:
 
         for i, track in enumerate(self.tracks):
             T = self.sample_channel(track.channels.get("translation"), t, default=np.array([0.0,0.0,0.0], dtype=np.float32))
-            R_euler = self.sample_channel(track.channels.get("rotation_euler_deg"), t, default=np.array([0.0,0.0,0.0], dtype=np.float32))
             S = self.sample_channel(track.channels.get("scale"), t, default=np.array([1.0,1.0,1.0], dtype=np.float32))
-            Rm = self.euler_deg_xyz_to_matrix(R_euler)
+
+            # 1) rotation_angle_deg 가 있으면: 월드축 회전 행렬
+            ang_ch = (track.channels.get("rotation_angle_deg")
+                      or track.channels.get("angle_deg")
+                      or track.channels.get("angle"))
+            if ang_ch is not None:
+                ang_arr = self.sample_channel(ang_ch, t, default=np.array([0.0], dtype=np.float32))
+                ang = float(np.array(ang_arr, dtype=np.float32).reshape(-1)[0])
+                Rm = axis_angle_to_matrix(track.rot_axis, np.deg2rad(ang))
+            else:
+                # 2) 없으면 기존 euler (월드 XYZ 내적)
+                R_euler = self.sample_channel(track.channels.get("rotation_euler_deg"), t, default=np.array([0.0,0.0,0.0], dtype=np.float32))
+                Rm = self.euler_deg_xyz_to_matrix(R_euler)
+
             piv = track.pivot_rest
 
             idxs = self.track_idx_fields[i]

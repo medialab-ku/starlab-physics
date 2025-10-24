@@ -22,13 +22,13 @@
     "SolidBodies" : [
         {
             "objectId": 0,
-            "geometryFile": "./data/models/armadillo_small.obj",
+            "geometryFile": "./data/models/cylinder.obj",
             "translation": [2.5, 1.5, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
-            "scale": [0.5, 0.5, 0.5],
+            "scale": [0.2, 1.0, 0.2],
             "velocity": [0.0, 0.0, 0.0],
-            "density": 500.0,
+            "density": 1000.0,
             "color": [0, 100, 250, 1.0]
         }
     ]

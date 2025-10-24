@@ -147,8 +147,8 @@ class NeighborSearch:
                             neighbor_num[p_i] += 1
 
     @ti.kernel
-    def narrow_phase_surface(self, x_s: ti.template(), x: ti.template(), neighbor_num: ti.template(), neighbor_ids: ti.template()):
-
+    def narrow_phase_surface(self, x_s: ti.template(), x: ti.template(),
+                            neighbor_num: ti.template(), neighbor_ids: ti.template()):
         for p_i in range(self.ps.surface_vertex_num):
             neighbor_num[p_i] = 0
             center_cell = self.pos_to_index(x_s[p_i])
@@ -156,13 +156,13 @@ class NeighborSearch:
                 nbr_cell = self.clamp_cell(center_cell + offset)
                 grid_index = self.flatten_grid_index(nbr_cell)
                 start = 0
-                
                 if grid_index > 0:
                     start = self.grid_particles_num[grid_index - 1]
-
                 end = self.grid_particles_num[grid_index]
                 for p_j in range(start, end):
-                    if  (x_s[p_i] - x[p_j]).norm() < self.ps.support_radius:
+                    if self.ps.object_id[p_j] != self.ps.surface_vertex_object_id[p_i]:
+                        continue
+                    if (x_s[p_i] - x[p_j]).norm() < self.ps.support_radius:
                         if neighbor_num[p_i] < self.ps.cache_size:
                             neighbor_ids[p_i, neighbor_num[p_i]] = p_j
                             neighbor_num[p_i] += 1
