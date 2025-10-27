@@ -25,6 +25,10 @@ class OutputConfig:
     include_heatmap_attributes: bool = True
     end_frame: int = 8000
 
+    export_stats: bool = False
+    stats_dir: str = "log"
+    stats_variant: str = "ours"  # 'ours' | 'iisph' | '2014Bender'
+
 
 class OutputManager:
     def __init__(self, scene_name: str, cfg: OutputConfig,
@@ -42,6 +46,12 @@ class OutputManager:
         self._warned_formats = set()
         self._ensure_dirs()
 
+        self._pressure = None
+        self._elasticity = None
+        self._framework = None
+        self._stats_prefix_cache = None
+
+
     def _ensure_dirs(self):
         if self.cfg.export_particles and ExportFormat.ply in self.cfg.selected_format:
             os.makedirs(self.ply_dir, exist_ok=True)
@@ -58,9 +68,9 @@ class OutputManager:
 
 
     def on_step(self, frame_idx: int, ps, viz_engine):
-        if not self.cfg.export_particles and not self.cfg.export_mesh_obj:
+        if not (self.cfg.export_particles or self.cfg.export_mesh_obj or self.cfg.export_stats):
             return
-
+            
         if frame_idx < 0:
             return
         # if frame_idx % self.cfg.frame_interval != 0:
@@ -90,6 +100,9 @@ class OutputManager:
                 if self._export_mesh_obj(ps, frame_idx):
                     self.last_export_frame_mesh = frame_idx
                     exported_mesh = True
+
+        if self.cfg.export_stats:
+            self._export_stats()
 
 
     def _export_particles_ply(self, ps, export_data, frame_idx: int) -> bool:
@@ -191,6 +204,30 @@ class OutputManager:
         return wrote
 
 
+    def _export_stats(self):
+        if self._pressure is None or self._elasticity is None:
+            return
+        os.makedirs(self.cfg.stats_dir, exist_ok=True)
+        variant = str(self.cfg.stats_variant or "ours")
+        base_prefix = self._stats_prefix_cache or f"{self.scene_name}"
+
+        # 1) Pressure stats
+        stats = self._pressure.get_stats_numpy()
+        for key in ("elapsed_time_ms", "opt_iter", "opt_error", "pcg_iter", "pcg_error", "kinetic_energy"):
+            arr = stats.get(key, None)
+            if arr is None:
+                continue
+            out_path = os.path.join(self.cfg.stats_dir, f"{base_prefix}-{variant}-{key}.npy")
+            np.save(out_path, arr)
+        
+        # 2) Elasticity stats
+        el_prefix = f"{base_prefix}-elas"
+        np.save(os.path.join(self.cfg.stats_dir, f"{el_prefix}-{variant}-elapsed_time_ms.npy"),
+                np.asarray(self._elasticity.stats_elapsed_ms, dtype=np.float64))
+        np.save(os.path.join(self.cfg.stats_dir, f"{el_prefix}-{variant}-pcg_iter.npy"),
+                np.asarray(self._elasticity.stats_pcg_iter, dtype=np.int32))
+
+
     def _collect_solid_ids(self, ps):
         solid_ids = []
         for obj_id, obj in ps.object_collection.items():
@@ -224,9 +261,25 @@ class OutputManager:
         t = c - R @ c0
         return R.astype(np.float32), t.astype(np.float32)
 
+    def attach_stats_sources(self, pressure, elasticity, framework=None):
+        self._pressure = pressure
+        self._elasticity = elasticity
+        self._framework = framework
+        
+        dt0 = float(getattr(framework, "dt", 0.0)) if framework is not None else float(pressure.ps.cfg.get_cfg("timeStepSize"))
+
+        tol = int(getattr(pressure, "tol_opt", 0)) if pressure is not None else 0
+        opt = int(getattr(pressure, "max_iteration_opt", 0)) if pressure is not None else 0
+        cfl_tag = "-cfl" if bool(getattr(pressure, "cfl", False)) else ""
+        self._stats_prefix_cache = f"{self.scene_name}-dt{dt0:.6f}-tol{tol}-opt{opt}{cfl_tag}"
     
     def render_ui(self, w, gui, ps):
         cfg = self.cfg
+
+        cfg.export_stats = w.checkbox("Export stats", bool(cfg.export_stats))
+        if cfg.export_stats:
+            gui.text(f"stats dir: {cfg.stats_dir}")
+            gui.text(f"variant: {cfg.stats_variant}")
 
         # Export particles
         cfg.export_particles = w.checkbox("Export particles", bool(cfg.export_particles))

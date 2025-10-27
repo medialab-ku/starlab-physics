@@ -105,6 +105,7 @@ if __name__ == "__main__":
         end_frame=600,
     )
     output_manager = OutputManager(scene_name, output_cfg)
+    output_manager.attach_stats_sources(pressure, elasticity, fw)
     
     frame_cnt = 0
     # export_ply = output_ply
@@ -212,6 +213,8 @@ if __name__ == "__main__":
                     frame_cnt = frame_restored
                     anim_time = anim_time_restored
                     cnt_ply = 0
+                    pressure.clear_stats()
+                    elasticity.clear_stats()
                     runSim = False
                     fw.initialize()
 

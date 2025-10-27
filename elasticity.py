@@ -45,6 +45,10 @@ class Elasticity:
         self.max_iteration_pcg = 10
         self.tol_pcg           = 4
 
+        self.pcg_last_iter = 0
+        self.stats_elapsed_ms = []
+        self.stats_pcg_iter = []   
+
     @ti.kernel
     def initialize(self):
         eps = 1e-12
@@ -443,6 +447,8 @@ class Elasticity:
                     self.add(p, z, beta, p)
                     rz_old = rz_new
 
+                self.pcg_last_iter = pcg_iter
+
             # Collect PCG iteration count per PCG solve
             # self.pcg_total_iter += pcg_iter
 
@@ -552,6 +558,7 @@ class Elasticity:
 
     def solve(self, alpha, YM, PR, dt):
 
+        t0 = time.perf_counter()
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
 
         self.compute_F(self.x_tmp)
@@ -564,6 +571,10 @@ class Elasticity:
         self.PCG(x=self.a, b=self.grad, alpha=alpha, YM=YM, PR=PR, dt=dt)
         add(self.v_tmp, self.v_tmp, -1.0, self.a)
         self.ps.v.copy_from(self.v_tmp)
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.stats_elapsed_ms.append(float(elapsed_ms))
+        self.stats_pcg_iter.append(int(self.pcg_last_iter))
 
     @ti.kernel
     def update_surface_vertex(self):
@@ -586,3 +597,6 @@ class Elasticity:
         self.compute_F(self.ps.x)
         self.update_surface_vertex()
 
+    def clear_stats(self):
+        self.stats_elapsed_ms.clear()
+        self.stats_pcg_iter.clear()
