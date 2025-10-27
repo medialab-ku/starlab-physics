@@ -35,16 +35,12 @@ class SimulationCache:
         while len(self._cache) > self.max_steps:
             self._cache.pop(0)
 
+
     def _snapshot(self, frame_cnt: int, anim_time: float | None = None):
         try:
             N = int(self.ps.particle_num[None])
-            snap = {
-                "frame": int(frame_cnt),
-                "particle_num": N,
-            }
-
-            # Per-particle arrays (sorted order)
-            field_names = [
+            snap = {"frame": int(frame_cnt), "particle_num": N}
+            particle_fields = [
                 "object_id",
                 "x", "x_old", "x0",
                 "v", "v_adv",
@@ -55,35 +51,39 @@ class SimulationCache:
                 "material", "color", "is_dynamic",
                 "n",
                 "cur2ori", "ori2cur",
-                # 추가
+            ]
+            surface_fields = [
                 "x_s", "x_0_s",
                 "skinning_weight",
                 "surface_neighbor_num", "surface_neighbor_idx",
                 "surface_vertex_object_id",
             ]
             arr = {}
-            for name in field_names:
+            for name in particle_fields:
                 try:
                     arr[name] = getattr(self.ps, name).to_numpy()[:N].copy()
                 except Exception:
-                    # optional or missing fields
+                    pass
+            for name in surface_fields:
+                try:
+                    arr[name] = getattr(self.ps, name).to_numpy().copy()
+                except Exception:
                     pass
             try:
-                if hasattr(self.ps, "dfsph_factor"):
-                    arr["dfsph_factor"] = self.ps.dfsph_factor.to_numpy()[:N].copy()
-                if hasattr(self.ps, "density_adv"):
-                    arr["density_adv"] = self.ps.density_adv.to_numpy()[:N].copy()
+                if getattr(self.ps, "surface_face_num", 0) > 0:
+                    arr["surface_faces"] = self.ps.surface_faces.to_numpy().copy()
+                    arr["surface_face_object_id"] = self.ps.surface_face_object_id.to_numpy().copy()
             except Exception:
                 pass
             snap["arr"] = arr
 
-            # Solver time
+            # solver time
             try:
                 snap["solver_time"] = float(getattr(self.solver, "time", 0.0))
             except Exception:
                 snap["solver_time"] = 0.0
 
-            # Emitter states
+            # emitter states
             if hasattr(self.ps, "emitter_system") and self.ps.emitter_system:
                 e_sys = self.ps.emitter_system
                 e_states = []
@@ -102,17 +102,9 @@ class SimulationCache:
                 snap["emitter_states"] = None
                 snap["emitter_suppress"] = 0
 
-            # Mesh
-            if getattr(self.ps, "surface_face_num", 0) > 0:
-                arr["surface_faces"] = self.ps.surface_faces.to_numpy().copy()
-                arr["surface_face_object_id"] = self.ps.surface_face_object_id.to_numpy().copy()
-            
-            # RNG state
             snap["np_random_state"] = np.random.get_state()
-
             if anim_time is not None:
                 snap["anim_time"] = float(anim_time)
-
             return snap
         except Exception:
             return None
@@ -155,43 +147,58 @@ class SimulationCache:
         try:
             N = int(snap["particle_num"])
             self.ps.particle_num[None] = N
-            # arrays
+
+            particle_fields = {
+                "object_id", "x","x_old","x0","v","v_adv","acceleration",
+                "m_V","m","m_inv","m_V0","density","density0",
+                "pressure","divergence","material","color","is_dynamic",
+                "n","cur2ori","ori2cur",
+            }
+            surface_like = {
+                "x_s","x_0_s","skinning_weight",
+                "surface_neighbor_num","surface_neighbor_idx",
+                "surface_vertex_object_id",
+                "surface_faces","surface_face_object_id",
+            }
+
             if "arr" in snap and isinstance(snap["arr"], dict):
                 for name, val in snap["arr"].items():
-                    buf = getattr(self.ps, name).to_numpy()
-                    buf[:N] = val
-                    getattr(self.ps, name).from_numpy(buf)
+                    try:
+                        buf = getattr(self.ps, name).to_numpy()
+                        if name in surface_like:
+                            # 표면/스키닝/face: 모양이 맞으면 전체 복원
+                            if val.shape == buf.shape:
+                                getattr(self.ps, name).from_numpy(val)
+                            else:
+                                # 모양 불일치 시 건너뜀(안전)
+                                pass
+                        else:
+                            # 파티클 계열: 앞 N만 채움
+                            buf[:N] = val
+                            getattr(self.ps, name).from_numpy(buf)
+                    except Exception:
+                        pass
 
-            # Deactivate tail (>N) to avoid stray active particles in ti.grouped loops
+            # tail 비활성화
             M = int(self.ps.particle_max_num)
             if N < M:
                 def _fill_tail(field_name, fill_value):
-                    buf = getattr(self.ps, field_name).to_numpy()
-                    buf[N:] = fill_value
-                    getattr(self.ps, field_name).from_numpy(buf)
-
-                # Scalars
-                _fill_tail("material", -1)   # mark as non-fluid/solid
+                    try:
+                        buf = getattr(self.ps, field_name).to_numpy()
+                        buf[N:] = fill_value
+                        getattr(self.ps, field_name).from_numpy(buf)
+                    except Exception:
+                        pass
+                _fill_tail("material", -1)
                 _fill_tail("is_dynamic", 0)
                 _fill_tail("object_id", -1)
-                _fill_tail("m_V0", 0.0)
-                _fill_tail("m_V", 0.0)
-                _fill_tail("m", 0.0)
-                _fill_tail("m_inv", 0.0)
-                _fill_tail("density", 0.0)
-                _fill_tail("density0", 0.0)
-                _fill_tail("pressure", 0.0)
-                _fill_tail("divergence", 0.0)
-                # Optional DFSPH fields
-                _fill_tail("dfsph_factor", 0.0)
-                _fill_tail("density_adv", 0.0)
-
-                # Vectors/Matrices
-                _fill_tail("x", 1000.0)
-                _fill_tail("x_old", 1000.0)
-                _fill_tail("x0", 1000.0)
-                _fill_tail("v", 0.0)
-                _fill_tail("v_adv", 0.0)
+                _fill_tail("m_V0", 0.0); _fill_tail("m_V", 0.0)
+                _fill_tail("m", 0.0); _fill_tail("m_inv", 0.0)
+                _fill_tail("density", 0.0); _fill_tail("density0", 0.0)
+                _fill_tail("pressure", 0.0); _fill_tail("divergence", 0.0)
+                _fill_tail("dfsph_factor", 0.0); _fill_tail("density_adv", 0.0)
+                _fill_tail("x", 1000.0); _fill_tail("x_old", 1000.0); _fill_tail("x0", 1000.0)
+                _fill_tail("v", 0.0); _fill_tail("v_adv", 0.0)
                 _fill_tail("acceleration", 0.0)
                 _fill_tail("n", 0.0)
                 _fill_tail("color", 0)
@@ -204,18 +211,20 @@ class SimulationCache:
                 e_sys = self.ps.emitter_system
                 for e, st in zip(e_sys.emitters, snap["emitter_states"]):
                     e.x = st["x"].astype(np.float32)
-                    e.next_emit_time = float(st["next_emit_time"]) 
-                    e.emit_counter = int(st["emit_counter"]) 
+                    e.next_emit_time = float(st["next_emit_time"])
+                    e.emit_counter = int(st["emit_counter"])
                 e_sys.suppress_steps = int(snap.get("emitter_suppress", 0))
 
             # RNG
-            np.random.set_state(snap["np_random_state"]) 
+            np.random.set_state(snap["np_random_state"])
 
+            # 네이버 재구축
             if hasattr(self.solver, "ns"):
                 self.solver.ns.is_cur2ori[None] = True
                 self.solver.ns.broad_phase()
                 self.solver.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
                 self.solver.ns.narrow_phase_surface(self.ps.x_0_s, self.ps.x, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
+
             return True, int(snap.get("frame", 0)), float(snap.get("anim_time", None))
         except Exception:
             return False, None, None

@@ -49,10 +49,12 @@ if __name__ == "__main__":
     anim.build(scene_data, pin_geom)
 
     fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
-    fw.initialize()
 
     anim_time = 0.0
+    anim.apply(anim_time, 0.0)
 
+    fw.initialize()
+    
     randomizer = ParticleRandomizer(ps, neighbor_search)
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window=True, vsync=False)
@@ -185,7 +187,6 @@ if __name__ == "__main__":
                     ps.v_adv.copy_from(ps.v)
                     viz.update_buffers()
                     output_manager.on_step(frame_cnt, ps, viz)
-                    cache.snapshot_baseline(anim_time=anim_time)
 
             if window.event.key == 'b':
                 # Rewind one cached frame
@@ -217,6 +218,7 @@ if __name__ == "__main__":
                     elasticity.clear_stats()
                     runSim = False
                     fw.initialize()
+                    viz.update_buffers()
 
         output_cfg = output_manager.get_config()
         if (output_cfg.export_particles or output_cfg.export_mesh_obj) and frame_cnt > int(output_cfg.end_frame):
