@@ -22,7 +22,7 @@
     "SolidBodies" : [
         {
             "objectId": 0,
-            "geometryFile": "./data/models/cubeH.obj",
+            "geometryFile": "./data/models/cube.obj",
             "translation": [2.5, 1.5, 2.5],
             "rotationAxis": [0, 0, 1],
             "rotationAngle": 0,
