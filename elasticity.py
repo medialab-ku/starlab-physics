@@ -42,7 +42,7 @@ class Elasticity:
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
-        self.max_iteration_pcg = 1000
+        self.max_iteration_pcg = 10
         self.tol_pcg           = 4
 
     @ti.kernel
@@ -391,7 +391,7 @@ class Elasticity:
                 continue
             
             # z[p_i] = self.Aii[p_i] @ r[p_i]
-            z[p_i] = self.ps.m_inv[p_i] * r[p_i]
+            z[p_i] = r[p_i]
 
 
     def PCG(self, x, b, alpha, YM, PR, dt):

@@ -54,11 +54,11 @@ class VisualizationEngine:
 
         self.norm_v = Normalize(vmin=0.0, vmax=1.5, clip=True)
         self.norm_div = Normalize(vmin=0.0, vmax=5.0, clip=True)
-        self.norm_density = Normalize(vmin=-50.0, vmax=50.0, clip=True)
+        self.norm_density = Normalize(vmin=-30.0, vmax=30.0, clip=True)
 
         self.cmap_vel = LinearSegmentedColormap.from_list("heat_vel", ["blue", "white"])
         self.cmap_div = LinearSegmentedColormap.from_list("heat_div", ["blue", "white", "red"])
-        self.cmap_den = LinearSegmentedColormap.from_list("heat_den", ["blue", "white", "red"])
+        self.cmap_den = LinearSegmentedColormap.from_list("heat_den", ["white", "white", "red"])
         
         self.pin_vertices = None
         self.pin_indices = None

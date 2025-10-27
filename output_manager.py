@@ -35,6 +35,8 @@ class OutputManager:
         self.run_dir = os.path.join(root_base, scene_name, self.timestamp)
         self.ply_dir = self.run_dir
         self.obj_dir = os.path.join(self.run_dir, "mesh_obj")
+        self.last_export_frame_particles = -1
+        self.last_export_frame_mesh = -1
         self._cnt_ply = 0
         self._cnt_obj = 0
         self._warned_formats = set()
@@ -58,20 +60,21 @@ class OutputManager:
     def on_step(self, frame_idx: int, ps, viz_engine):
         if not self.cfg.export_particles and not self.cfg.export_mesh_obj:
             return
-        if frame_idx <= 0:
+
+        if frame_idx < 0:
             return
-        if frame_idx % self.cfg.frame_interval != 0:
-            return
+        # if frame_idx % self.cfg.frame_interval != 0:
+        #     return
+
+        exported_particles = False
+        exported_mesh = False
 
         if self.cfg.export_particles:
-            export_data = viz_engine.get_heatmap_attributes() if self.cfg.include_heatmap_attributes else None
-            export_format = self.cfg.selected_format
-            if export_format == ExportFormat.ply:
-                self._export_particles_ply(ps, export_data)
-            else:
-                if export_format not in self._warned_formats:
-                    print(f"[Export] {export_format.value} Not implemented yet")
-                    self._warned_formats.add(export_format)
+            if (self.last_export_frame_particles < 0) or (frame_idx - self.last_export_frame_particles >= int(self.cfg.frame_interval)):
+                export_data = viz_engine.get_heatmap_attributes() if self.cfg.include_heatmap_attributes else None
+                if self._export_particles_ply(ps, export_data, frame_idx):
+                    self.last_export_frame_particles = frame_idx
+                    exported_particles = True
                     # TODO: VTK and Partio are not implemented yet
                     # elif ExportFormat.vtk in self.cfg.export_formats:
                     #     self._export_particles_vtk(ps, heat)
@@ -81,14 +84,18 @@ class OutputManager:
         has_rigid = len(getattr(ps, "object_id_rigid_body", [])) > 0
         has_solid = int(getattr(ps, "surface_face_num", 0) or 0) > 0
         has_mesh = has_rigid or has_solid
-        if self.cfg.export_mesh_obj and has_mesh and frame_idx > 0:
-            self._export_mesh_obj(ps)
+
+        if self.cfg.export_mesh_obj and has_mesh:
+            if (self.last_export_frame_mesh < 0) or (frame_idx - self.last_export_frame_mesh >= int(self.cfg.frame_interval)):
+                if self._export_mesh_obj(ps, frame_idx):
+                    self.last_export_frame_mesh = frame_idx
+                    exported_mesh = True
 
 
-    def _export_particles_ply(self, ps, export_data):
+    def _export_particles_ply(self, ps, export_data, frame_idx: int) -> bool:
         N_active = int(ps.particle_num[None])
         if N_active <= 0:
-            return
+            return False
 
         if export_data is None:
             object_id_np = ps.object_id.to_numpy()[:N_active]
@@ -103,6 +110,7 @@ class OutputManager:
 
         pos_all = ps.x.to_numpy()[:N_active]
 
+        wrote = False
         for obj_id in ps.object_collection:
             mask = (object_id_np == int(obj_id))
             if not np.any(mask):
@@ -127,12 +135,19 @@ class OutputManager:
             writer = ti.tools.PLYWriter(num_vertices=len(pos))
             writer.add_vertex_pos(pos[:, 0], pos[:, 1], pos[:, 2])
             writer.add_vertex_color(colors[:, 0], colors[:, 1], colors[:, 2])
-            writer.export_frame_ascii(self._cnt_ply, prefix)
+            writer.export_frame_ascii(int(self._cnt_ply), prefix)
+            wrote = True
 
-        self._cnt_ply += 1
+        if wrote:
+            self._cnt_ply += 1
+        return wrote
 
 
-    def _export_mesh_obj(self, ps):
+    def _export_mesh_obj(self, ps, frame_idx: int) -> bool:
+        os.makedirs(self.obj_dir, exist_ok=True)
+        wrote = False
+
+        # Rigid bodies
         for r_body_id in ps.object_id_rigid_body:
             rb = ps.object_collection.get(r_body_id, None)
             if rb is None:
@@ -145,14 +160,15 @@ class OutputManager:
             V_tr = V_rest @ Rm.T + tm_vec[None, :]
             F = np.asarray(mesh_rest.faces) if hasattr(mesh_rest, "faces") else None
             mesh_out = tm.Trimesh(vertices=V_tr, faces=F, process=False)
-            out_path = os.path.join(self.obj_dir, f"obj_{int(r_body_id)}_{self._cnt_obj:06}.obj")
+            out_path = os.path.join(self.obj_dir, f"obj_{int(r_body_id)}_{int(frame_idx):06}.obj")
             mesh_out.export(out_path)
+            wrote = True
 
+        # Solids
         solid_ids = self._collect_solid_ids(ps)
         if len(solid_ids) > 0 and getattr(ps, "surface_face_num", 0) > 0:
             V_all = ps.x_s.to_numpy()
-            F_all = ps.surface_faces.to_numpy()  # 1D (3T,)
-
+            F_all = ps.surface_faces.to_numpy()
             for s_body_id in solid_ids:
                 sb = ps.object_collection.get(s_body_id, None)
                 if sb is None:
@@ -166,10 +182,13 @@ class OutputManager:
                 V = V_all[vs:vs+vn]
                 F = F_all[3*fs_tri:3*(fs_tri+fc_tri)].reshape(-1, 3) - vs
                 mesh_out = tm.Trimesh(vertices=V, faces=F, process=False)
-                out_path = os.path.join(self.obj_dir, f"obj_solid_{int(s_body_id)}_{self._cnt_obj:06}.obj")
+                out_path = os.path.join(self.obj_dir, f"obj_solid_{int(s_body_id)}_{int(self._cnt_obj):06}.obj")
                 mesh_out.export(out_path)
+                wrote = True
 
-        self._cnt_obj += 1  
+        if wrote:
+            self._cnt_obj += 1
+        return wrote
 
 
     def _collect_solid_ids(self, ps):

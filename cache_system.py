@@ -55,6 +55,11 @@ class SimulationCache:
                 "material", "color", "is_dynamic",
                 "n",
                 "cur2ori", "ori2cur",
+                # 추가
+                "x_s", "x_0_s",
+                "skinning_weight",
+                "surface_neighbor_num", "surface_neighbor_idx",
+                "surface_vertex_object_id",
             ]
             arr = {}
             for name in field_names:
@@ -97,6 +102,11 @@ class SimulationCache:
                 snap["emitter_states"] = None
                 snap["emitter_suppress"] = 0
 
+            # Mesh
+            if getattr(self.ps, "surface_face_num", 0) > 0:
+                arr["surface_faces"] = self.ps.surface_faces.to_numpy().copy()
+                arr["surface_face_object_id"] = self.ps.surface_face_object_id.to_numpy().copy()
+            
             # RNG state
             snap["np_random_state"] = np.random.get_state()
 
@@ -201,14 +211,11 @@ class SimulationCache:
             # RNG
             np.random.set_state(snap["np_random_state"]) 
 
-            # rebuild grid and neighbors
-            self.ps.initialize_particle_system()
-
             if hasattr(self.solver, "ns"):
                 self.solver.ns.is_cur2ori[None] = True
                 self.solver.ns.broad_phase()
-                self.solver.ns.narrow_phase(self.ps.x)
-
+                self.solver.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
+                self.solver.ns.narrow_phase_surface(self.ps.x_0_s, self.ps.x, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
             return True, int(snap.get("frame", 0)), float(snap.get("anim_time", None))
         except Exception:
             return False, None, None

@@ -102,20 +102,19 @@ if __name__ == "__main__":
         export_mesh_obj=False,
         frame_interval=20,
         include_heatmap_attributes=True,
-        end_frame=8000,
+        end_frame=600,
     )
     output_manager = OutputManager(scene_name, output_cfg)
     
     frame_cnt = 0
     # export_ply = output_ply
-    end_frame = 8000
 
     if pin_geom and pin_geom.get("vertices") is not None:
         viz.set_pin_lines(pin_geom["vertices"], pin_geom["indices"])
 
     # Caching system
     cache = SimulationCache(ps, fw, max_steps=10)
-    cache.snapshot_baseline()
+    cache.snapshot_baseline(anim_time=anim_time)
 
 
     def show_options_solver():
@@ -128,9 +127,12 @@ if __name__ == "__main__":
                 N_active = int(ps.particle_num[None])
                 mats = ps.material.to_numpy()[:N_active]
                 fluid_cnt = int((mats == ps.material_fluid).sum())
+                deform_cnt = int((mats == ps.material_solid).sum())
             except Exception:
                 fluid_cnt = int(ps.fluid_particle_num)
+                deform_cnt = int(ps.solid_particle_num) 
             gui.text(f"# fluid particle: {fluid_cnt}")
+            gui.text(f"# deformable particle: {deform_cnt}") 
             gui.text(f"# boundary particle: {ps.rigid_particle_num}")
             gui.text(f"Current frame: {frame_cnt}")
 
@@ -180,6 +182,9 @@ if __name__ == "__main__":
                 if runSim:
                     ps.x_old.copy_from(ps.x)
                     ps.v_adv.copy_from(ps.v)
+                    viz.update_buffers()
+                    output_manager.on_step(frame_cnt, ps, viz)
+                    cache.snapshot_baseline(anim_time=anim_time)
 
             if window.event.key == 'b':
                 # Rewind one cached frame
@@ -187,6 +192,7 @@ if __name__ == "__main__":
                 result = cache.rewind_one(frame_cnt)
                 if result.get("restored", False):
                     frame_cnt = int(result.get("frame", frame_cnt))
+                    anim_time = float(result.get("anim_time", anim_time) or 0.0)
                     fw.initialize()
                     print(f"rewind: {result.get('rewind_steps', 0)} frames")
 
@@ -199,14 +205,14 @@ if __name__ == "__main__":
             if window.event.key == 'r':
                 print("reset simulation...")
                 ok, _, _ = (False, None, None)
-                ok, _, _ = cache.restore_baseline()
+                ok, frame_restored, anim_time_restored = cache.restore_baseline()
 
                 if ok:
                     # Reset GUI counters and pause
-                    frame_cnt = 0
+                    frame_cnt = frame_restored
+                    anim_time = anim_time_restored
                     cnt_ply = 0
                     runSim = False
-                    loader.reset_emitter_system()
                     fw.initialize()
 
         output_cfg = output_manager.get_config()
@@ -238,7 +244,7 @@ if __name__ == "__main__":
 
             if not expand_mode:
                 frame_cnt += 1
-                cache.push(frame_cnt=frame_cnt)
+                cache.push(frame_cnt=frame_cnt, anim_time=anim_time)
 
         viz.update_buffers()
         output_manager.on_step(frame_cnt, ps, viz)

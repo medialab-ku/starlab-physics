@@ -19,7 +19,7 @@ class Framework:
         self.adhesion_coeff = self.surface_tension_coeff
         self.time = 0.0
 
-        self.YM = 2.6e6 # Young Modulus
+        self.YM = 4e6 # Young Modulus
         self.PR = 0.0  # Poisson Ratio
         self.alpha = 0.1 # Zero Energy Mode coefficient
 
