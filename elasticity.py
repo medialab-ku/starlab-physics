@@ -119,7 +119,7 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 # Dm += xji0.outer_product(xji0)
-                Dm -= self.ps.m_V0[p_j] * self.gradW(xji0, self.ps.support_radius).outer_product(xji0)
+                Dm += self.ps.m_V0[p_j] * self.gradW(xji0, self.ps.support_radius).outer_product(xji0)
             
             # print(f"Dm: {ti.math.determinant(Dm)}")
             self.L[p_i0] = Dm.inverse()
@@ -195,7 +195,7 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 xji = x[p_j] - x[p_i]
-                Ds_i -= self.ps.m_V0[p_j] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
+                Ds_i += self.ps.m_V0[p_j] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
 
             self.F[p_i] = Ds_i @ self.L[p_i0]
             # print(f"F: {self.F[p_i]}")
@@ -242,60 +242,60 @@ class Elasticity:
                 continue
 
             F_i = self.F[p_i]
-            self.J[p_i] = ti.math.determinant(F_i)
+            # self.J[p_i] = ti.math.determinant(F_i)
 
             # F_i = ti.Matrix.identity(float, 3)
             U, sig, V = self.ssvd(F_i)
 
-            s0 = sig[0, 0]
-            s1 = sig[1, 1]
-            s2 = sig[2, 2]
+            # s0 = sig[0, 0]
+            # s1 = sig[1, 1]
+            # s2 = sig[2, 2]
 
             R_i = U @ V.transpose()
-            self.dJdF[p_i] = compute_dJdF_3x3(F_i)
+            # self.dJdF[p_i] = compute_dJdF_3x3(F_i)
             # self.P[p_i] = 2.0 * mu * (F_i - R_i) + lamb * (self.J[p_i] - 1.0) * self.dJdF[p_i]
             self.P[p_i] = 2.0 * mu * (F_i - R_i)
 
-
-            # volume hessian computation according to Stable Neo Hookean [Smith et al. 2018]
-
-            # Eq.(32)
-            self.lamb[p_i, 3] = s0
-            self.lamb[p_i, 4] = s1
-            self.lamb[p_i, 5] = s2
-
-            self.lamb[p_i, 6] = -s0
-            self.lamb[p_i, 7] = -s1
-            self.lamb[p_i, 8] = -s2
-            sigv = ti.Vector([s0, s1, s2])
-            #Appendix A, Eq.(62)
-            for k in range(6):
-                self.Q[p_i, k + 3] = ti.rsqrt(2) *  U @ self.D[k] @ V.transpose()
-
-            # Eq(39)~Eq(40)
-            I_C = s0 * s0 + s1 * s1 + s2 * s2
-            I_C = ti.max(I_C, 1e-12)
-
-            t = 2.0 * ti.math.sqrt(I_C/3.0)
-            u = (3.0 * self.J[p_i]/I_C) * ti.math.sqrt(3.0/I_C)
-            arg = ti.min(1.0, ti.max(-1.0, u))
-
-            for k in range(3):
-                phi = ti.acos(arg) + 2.0 * ti.math.pi * k
-                lamb_k = t * ti.cos(phi / 3.0)
-                self.lamb[p_i, k] = lamb_k
-                D_k = ti.math.mat3([[s0 * s2 + s1 * self.lamb[p_i, k], 0, 0], [0, s1 * s2 + s0 * self.lamb[p_i, k], 0], [0, 0, self.lamb[p_i, k] ** 2 - s2 ** 2]])
-                # a = sigv[k]
-                # b = sigv[(k + 1) % 3]
-                # c = sigv[(k + 2) % 3]
-
-                # D_k = ti.math.mat3([
-                #     [a * c + b * lamb_k, 0.0, 0.0],
-                #     [0.0, b * c + a * lamb_k, 0.0],
-                #     [0.0, 0.0, lamb_k * lamb_k - c * c],
-                # ])
-                q_k = ti.math.sqrt(double_dot_product(D_k, D_k))
-                self.Q[p_i, k] = (1.0 / q_k) * U @ D_k @ V.transpose()
+            #
+            # # volume hessian computation according to Stable Neo Hookean [Smith et al. 2018]
+            #
+            # # Eq.(32)
+            # self.lamb[p_i, 3] = s0
+            # self.lamb[p_i, 4] = s1
+            # self.lamb[p_i, 5] = s2
+            #
+            # self.lamb[p_i, 6] = -s0
+            # self.lamb[p_i, 7] = -s1
+            # self.lamb[p_i, 8] = -s2
+            # sigv = ti.Vector([s0, s1, s2])
+            # #Appendix A, Eq.(62)
+            # for k in range(6):
+            #     self.Q[p_i, k + 3] = ti.rsqrt(2) *  U @ self.D[k] @ V.transpose()
+            #
+            # # Eq(39)~Eq(40)
+            # I_C = s0 * s0 + s1 * s1 + s2 * s2
+            # I_C = ti.max(I_C, 1e-12)
+            #
+            # t = 2.0 * ti.math.sqrt(I_C/3.0)
+            # u = (3.0 * self.J[p_i]/I_C) * ti.math.sqrt(3.0/I_C)
+            # arg = ti.min(1.0, ti.max(-1.0, u))
+            #
+            # for k in range(3):
+            #     phi = ti.acos(arg) + 2.0 * ti.math.pi * k
+            #     lamb_k = t * ti.cos(phi / 3.0)
+            #     self.lamb[p_i, k] = lamb_k
+            #     D_k = ti.math.mat3([[s0 * s2 + s1 * self.lamb[p_i, k], 0, 0], [0, s1 * s2 + s0 * self.lamb[p_i, k], 0], [0, 0, self.lamb[p_i, k] ** 2 - s2 ** 2]])
+            #     # a = sigv[k]
+            #     # b = sigv[(k + 1) % 3]
+            #     # c = sigv[(k + 2) % 3]
+            #
+            #     # D_k = ti.math.mat3([
+            #     #     [a * c + b * lamb_k, 0.0, 0.0],
+            #     #     [0.0, b * c + a * lamb_k, 0.0],
+            #     #     [0.0, 0.0, lamb_k * lamb_k - c * c],
+            #     # ])
+            #     q_k = ti.math.sqrt(double_dot_product(D_k, D_k))
+            #     self.Q[p_i, k] = (1.0 / q_k) * U @ D_k @ V.transpose()
 
 
             # self.P_v[p_i] = ti.Matrix.identity(float, 3)
@@ -313,25 +313,25 @@ class Elasticity:
         for p_i in ti.grouped(self.ps.x):
 
             self.ZE[p_i] = ti.math.vec3(0.0)
-            if self.ps.material[p_i] != self.ps.material_solid:
-                continue
-            p_i0 = self.ps.cur2ori[p_i]
-            F_i = self.F[p_i]
-
-
-            accum = ti.math.mat3(0.0)
-            # (sum_j e_ij * K_ij * Xij0_T)  V_j * Li * gradW
-            for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j = self.ps.ori2cur[p_j0]
-                F_j = self.F[p_i]
-                xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
-                xij = x[p_i] - x[p_j]
-                e_ij = F_i @ xij0 - xij
-                e_ji = F_j @ xij0 - xij
-                E_ij = self.K[p_i0, j] * e_ij
-                ti.atomic_add(self.ZE[p_j], E_ij)
-                self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
+            # if self.ps.material[p_i] != self.ps.material_solid:
+            #     continue
+            # p_i0 = self.ps.cur2ori[p_i]
+            # F_i = self.F[p_i]
+            #
+            #
+            # accum = ti.math.mat3(0.0)
+            # # (sum_j e_ij * K_ij * Xij0_T)  V_j * Li * gradW
+            # for j in range(self.ps.solid_neighbors_num[p_i0]):
+            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
+            #     p_j = self.ps.ori2cur[p_j0]
+            #     F_j = self.F[p_i]
+            #     xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+            #     xij = x[p_i] - x[p_j]
+            #     e_ij = F_i @ xij0 - xij
+            #     e_ji = F_j @ xij0 - xij
+            #     E_ij = self.K[p_i0, j] * e_ij
+            #     ti.atomic_add(self.ZE[p_j], E_ij)
+            #     self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
             #     accum += E_ij.outer_product(xij0)
             #
             #
@@ -359,8 +359,8 @@ class Elasticity:
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
 
-                PL_i = -self.P[p_i] @ self.LigradW[p_i0, j]
-                PL_j = -self.P[p_j] @ self.LjgradW[p_i0, j]
+                PL_i = self.P[p_i] @ self.LigradW[p_i0, j]
+                PL_j = self.P[p_j] @ self.LjgradW[p_i0, j]
 
                 f_i += self.ps.m_V0[p_j] * (PL_i + PL_j)
 
@@ -499,7 +499,7 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
                 xji = x[p_j] - x[p_i]
-                Ds_i -= self.ps.m_V0[p_j] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
+                Ds_i += self.ps.m_V0[p_j] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
 
             self.F_tmp[p_i] = Ds_i @ self.L[p_i0]
 
@@ -520,22 +520,24 @@ class Elasticity:
             self.P[p_i] = 2.0 * mu * self.F_tmp[p_i]
 
         for p_i in ti.grouped(self.ps.x):
+
+            self.ZE[p_i] = ti.math.vec3(0.0)
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-            p_i0 = self.ps.cur2ori[p_i]
-
-            for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j = self.ps.ori2cur[p_j0]
-                # F_j = self.F[p_i]
-                xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
-                xij = x[p_i] - x[p_j]
-                e_ij = self.F_tmp[p_i] @ xij0 - xij
-                e_ji = self.F_tmp[p_j] @ xij0 - xij
-                E_ij = self.K[p_i0, j] * e_ij
-                ti.atomic_add(self.ZE[p_j], E_ij)
-                self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
+            # p_i0 = self.ps.cur2ori[p_i]
+            #
+            # for j in range(self.ps.solid_neighbors_num[p_i0]):
+            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
+            #     p_j = self.ps.ori2cur[p_j0]
+            #     # F_j = self.F[p_i]
+            #     xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+            #     xij = x[p_i] - x[p_j]
+            #     e_ij = self.F_tmp[p_i] @ xij0 - xij
+            #     e_ji = self.F_tmp[p_j] @ xij0 - xij
+            #     E_ij = self.K[p_i0, j] * e_ij
+            #     ti.atomic_add(self.ZE[p_j], E_ij)
+            #     self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
 
             # accum = ti.math.mat3(0.0)
             # for j in range(self.ps.solid_neighbors_num[p_i0]):
@@ -572,8 +574,8 @@ class Elasticity:
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
 
-                PL_i = -self.P[p_i] @ self.LigradW[p_i0, j]
-                PL_j = -self.P[p_j] @ self.LjgradW[p_i0, j]
+                PL_i = self.P[p_i] @ self.LigradW[p_i0, j]
+                PL_j = self.P[p_j] @ self.LjgradW[p_i0, j]
 
                 f_i += self.ps.m_V0[p_j] * (PL_i + PL_j)
             Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * (f_i + self.ZE[p_i])
