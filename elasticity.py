@@ -98,8 +98,8 @@ class Elasticity:
             X_k = self.ps.x_0_s[k]
             for j in range(self.ps.surface_neighbor_num[k]):
                 p_j = self.ps.surface_neighbor_idx[k, j]
-                # if self.ps.object_id[p_j] != self.ps.surface_vertex_object_id[k]:
-                #     continue
+                if self.ps.object_id[p_j] != self.ps.surface_vertex_object_id[k]:
+                    continue
                 p_j0 = self.ps.cur2ori[p_j]
                 X_kj = X_k - self.ps.x0[p_j]
                 tmp += self.ps.m_V0[p_j] * self.W(X_kj.norm(), self.ps.support_radius)
@@ -322,17 +322,17 @@ class Elasticity:
             #
             # accum = ti.math.mat3(0.0)
             # # (sum_j e_ij * K_ij * Xij0_T)  V_j * Li * gradW
-            # for j in range(self.ps.solid_neighbors_num[p_i0]):
-            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
-            #     p_j = self.ps.ori2cur[p_j0]
-            #     F_j = self.F[p_i]
-            #     xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
-            #     xij = x[p_i] - x[p_j]
-            #     e_ij = F_i @ xij0 - xij
-            #     e_ji = F_j @ xij0 - xij
-            #     E_ij = self.K[p_i0, j] * e_ij
-            #     ti.atomic_add(self.ZE[p_j], E_ij)
-            #     self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
+            for j in range(self.ps.solid_neighbors_num[p_i0]):
+                p_j0 = self.ps.solid_neighbors[p_i0, j]
+                p_j = self.ps.ori2cur[p_j0]
+                F_j = self.F[p_i]
+                xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+                xij = x[p_i] - x[p_j]
+                e_ij = F_i @ xij0 - xij
+                e_ji = F_j @ xij0 - xij
+                E_ij = self.K[p_i0, j] * e_ij
+                ti.atomic_add(self.ZE[p_j], E_ij)
+                self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
             #     accum += E_ij.outer_product(xij0)
             #
             #
@@ -523,19 +523,19 @@ class Elasticity:
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-            # p_i0 = self.ps.cur2ori[p_i]
-            #
-            # for j in range(self.ps.solid_neighbors_num[p_i0]):
-            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
-            #     p_j = self.ps.ori2cur[p_j0]
-            #     # F_j = self.F[p_i]
-            #     xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
-            #     xij = x[p_i] - x[p_j]
-            #     e_ij = self.F_tmp[p_i] @ xij0 - xij
-            #     e_ji = self.F_tmp[p_j] @ xij0 - xij
-            #     E_ij = self.K[p_i0, j] * e_ij
-            #     ti.atomic_add(self.ZE[p_j], E_ij)
-            #     self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
+            p_i0 = self.ps.cur2ori[p_i]
+            
+            for j in range(self.ps.solid_neighbors_num[p_i0]):
+                p_j0 = self.ps.solid_neighbors[p_i0, j]
+                p_j = self.ps.ori2cur[p_j0]
+                # F_j = self.F[p_i]
+                xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+                xij = x[p_i] - x[p_j]
+                e_ij = self.F_tmp[p_i] @ xij0 - xij
+                e_ji = self.F_tmp[p_j] @ xij0 - xij
+                E_ij = self.K[p_i0, j] * e_ij
+                ti.atomic_add(self.ZE[p_j], E_ij)
+                self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
 
             # accum = ti.math.mat3(0.0)
             # for j in range(self.ps.solid_neighbors_num[p_i0]):
