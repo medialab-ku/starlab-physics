@@ -1,0 +1,89 @@
+{
+    "Configuration": {
+        "domainStart": [
+            0.0,
+            0.0,
+            0.0
+        ],
+        "domainEnd": [
+            12.0,
+            12.0,
+            12.0
+        ],
+        "particleRadius": 0.08,
+        "gravitation": [
+            0.0,
+            -9.81,
+            0.0
+        ],
+        "timeStepSize": 0.002
+    },
+    "RigidBodies": [
+        {
+            "objectId": 0,
+            "geometryFile": "./data/models/unittest/crack.obj",
+            "translation": [
+                6.0,
+                1.6,
+                6.0
+            ],
+            "rotationAxis": [
+                0,
+                1,
+                0
+            ],
+            "rotationAngle": 0.0,
+            "scale": [
+                1.5,
+                1.5,
+                1.5
+            ],
+            "velocity": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "density": 1000.0,
+            "color": [
+                200,
+                80,
+                80
+            ],
+            "isDynamic": false
+        }
+    ],
+    "SolidBodies": [
+        {
+            "objectId": 1,
+            "geometryFile": "./data/models/unittest/spike.obj",
+            "translation": [
+                6.0,
+                8.8,
+                6.0
+            ],
+            "rotationAxis": [
+                0,
+                0,
+                1.0
+            ],
+            "rotationAngle": 180.0,
+            "scale": [
+                1.5,
+                1.5,
+                1.5
+            ],
+            "velocity": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "density": 1000.0,
+            "color": [
+                80,
+                80,
+                200
+            ],
+            "isDynamic": true
+        }
+    ]
+}

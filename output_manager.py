@@ -295,7 +295,7 @@ class OutputManager:
                 gui.text("Not implemented yet")
 
             cfg.export_fluid_particles = w.checkbox("Fluid", bool(cfg.export_fluid_particles))
-            cfg.export_rigid_particles = w.checkbox("Rigid", bool(cfg.export_rigid_particles))
+            cfg.export_rigid_particles = w.checkbox("Rigid & Solid", bool(cfg.export_rigid_particles))
             if not cfg.export_fluid_particles and not cfg.export_rigid_particles:
                 cfg.export_fluid_particles = True
 

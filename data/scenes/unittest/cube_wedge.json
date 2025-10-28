@@ -1,0 +1,89 @@
+{
+    "Configuration": {
+        "domainStart": [
+            0.0,
+            0.0,
+            0.0
+        ],
+        "domainEnd": [
+            16.0,
+            12.0,
+            16.0
+        ],
+        "particleRadius": 0.08,
+        "gravitation": [
+            0.0,
+            -9.81,
+            0.0
+        ],
+        "timeStepSize": 0.002
+    },
+    "RigidBodies": [
+        {
+            "objectId": 0,
+            "geometryFile": "./data/models/unittest/cube.obj",
+            "translation": [
+                8.0,
+                2.3,
+                8.0
+            ],
+            "rotationAxis": [
+                0,
+                1,
+                0
+            ],
+            "rotationAngle": 0.0,
+            "scale": [
+                4.0,
+                2.0,
+                4.0
+            ],
+            "velocity": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "density": 1000.0,
+            "color": [
+                200,
+                80,
+                80
+            ],
+            "isDynamic": false
+        }
+    ],
+    "SolidBodies": [
+        {
+            "objectId": 1,
+            "geometryFile": "./data/models/unittest/wedge.obj",
+            "translation": [
+                8.0,
+                7.0,
+                8.0
+            ],
+            "rotationAxis": [
+                0,
+                0,
+                1.0
+            ],
+            "rotationAngle": 180.0,
+            "scale": [
+                0.75,
+                0.75,
+                0.75
+            ],
+            "velocity": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "density": 1000.0,
+            "color": [
+                80,
+                80,
+                200
+            ],
+            "isDynamic": true
+        }
+    ]
+}
