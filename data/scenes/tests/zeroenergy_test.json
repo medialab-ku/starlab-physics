@@ -7,7 +7,7 @@
        "numSubstepping": 1,
        "density0": 1000,
        "simulationMethod": 2,
-       "gravitation": [0.0, -9.81, 0.0],
+       "gravitation": [0.0, 0.0, 0.0],
        "timeStepSize": 0.001,
        "stiffness": 50000,
        "exponent": 7,

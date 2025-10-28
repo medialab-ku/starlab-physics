@@ -47,8 +47,8 @@ class Elasticity:
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
-        self.max_iteration_pcg = 10
-        self.tol_pcg           = 4
+        self.max_iteration_pcg = 1000
+        self.tol_pcg           = 12
 
         self.pcg_last_iter = 0
         self.stats_elapsed_ms = []
@@ -166,11 +166,13 @@ class Elasticity:
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+                ViLjgradW = self.ps.m_V0[p_i] * self.VjLjgradW[p_i0, j] / self.ps.m_V0[p_j]
                 # xij = x[p_i] - x[p_j]
                 # e_ij = F_i @ xij0 - xij
                 # E_ij = e_ij * self.K[p_i0, j]
                 self.test1[p_i0, j] = grad_sum.dot(xij0)  # dF_i/dx_i : Xij0
-                self.test2[p_i0, j] = self.ps.m_V0[p_i] * self.VjLjgradW[p_i0, j].dot(xij0)  # dF_j/dx_i : Xij0
+                # self.test2[p_i0, j] = self.ps.m_V0[p_i] * self.VjLjgradW[p_i0, j].dot(xij0)  # dF_j/dx_i : Xij0
+                self.test2[p_i0, j] = - ViLjgradW.dot(xij0)
 
         # D6 ~ D8 in Appendix A
         self.D[0] = ti.math.mat3([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0],  [0.0, -1.0, 0.0]])
@@ -325,13 +327,13 @@ class Elasticity:
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
-                F_j = self.F[p_i]
+                F_j = self.F[p_j]
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
                 e_ij = F_i @ xij0 - xij
-                e_ji = F_j @ xij0 - xij
-                E_ij = self.K[p_i0, j] * e_ij
-                ti.atomic_add(self.ZE[p_j], E_ij)
+                e_ji = xij - F_j @ xij0
+                # E_ij = self.K[p_i0, j] * e_ij
+                # ti.atomic_add(self.ZE[p_j], E_ij)
                 self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
             #     accum += E_ij.outer_product(xij0)
             #
@@ -343,6 +345,7 @@ class Elasticity:
             #
         for p in ti.grouped(self.ZE):
             self.ZE[p] *= alpha * mu
+
 
     
     @ti.kernel
@@ -532,9 +535,9 @@ class Elasticity:
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
                 e_ij = self.F_tmp[p_i] @ xij0 - xij
-                e_ji = self.F_tmp[p_j] @ xij0 - xij
-                E_ij = self.K[p_i0, j] * e_ij
-                ti.atomic_add(self.ZE[p_j], E_ij)
+                e_ji = xij - self.F_tmp[p_j] @ xij0
+                # E_ij = self.K[p_i0, j] * e_ij
+                # ti.atomic_add(self.ZE[p_j], E_ij)
                 self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
 
             # accum = ti.math.mat3(0.0)
@@ -592,6 +595,8 @@ class Elasticity:
         self.compute_F(self.x_tmp)
         self.compute_P(YM, PR)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
+        ze_norm = self.dot(self.ZE, self.ZE)
+        print(f"ZE norm: {ze_norm}")
         self.compute_gradient(dt)
         self.compute_Aii(alpha, YM, PR, dt)
 
