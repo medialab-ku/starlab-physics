@@ -307,16 +307,12 @@ class Elasticity:
     @ti.kernel
     def compute_ZE(self, alpha: float, YM: float, PR: float, x:ti.template()):
 
-
         mu = YM / (2.0 * (1.0 + PR))
-        lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
-
         for p_i in ti.grouped(self.ps.x):
 
             self.ZE[p_i] = ti.math.vec3(0.0)
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
-
 
             p_i0 = self.ps.cur2ori[p_i]
             F_i = self.F[p_i]
@@ -335,17 +331,7 @@ class Elasticity:
                 # E_ij = self.K[p_i0, j] * e_ij
                 # ti.atomic_add(self.ZE[p_j], E_ij)
                 self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
-            #     accum += E_ij.outer_product(xij0)
-            #
-            #
-            # for j in range(self.ps.solid_neighbors_num[p_i0]):
-            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
-            #     p_j = self.ps.ori2cur[p_j0]
-            #     ti.atomic_add(self.ZE[p_j], self.ps.m_V0[p_j] * (accum @ self.LigradW[p_i0, j]))
-            #
-        for p in ti.grouped(self.ZE):
-            self.ZE[p] *= alpha * mu
-
+            self.ZE[p_i] *= alpha * mu
 
     
     @ti.kernel
@@ -534,12 +520,12 @@ class Elasticity:
                 # F_j = self.F[p_i]
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
-                e_ij = self.F_tmp[p_i] @ xij0 - xij
-                e_ji = xij - self.F_tmp[p_j] @ xij0
+                e_ij = self.F[p_i] @ xij0 - xij
+                e_ji = xij - self.F[p_j] @ xij0
                 # E_ij = self.K[p_i0, j] * e_ij
                 # ti.atomic_add(self.ZE[p_j], E_ij)
                 self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
-
+            self.ZE[p_i] *= alpha * mu
             # accum = ti.math.mat3(0.0)
             # for j in range(self.ps.solid_neighbors_num[p_i0]):
             #     p_j0 = self.ps.solid_neighbors[p_i0, j]
@@ -559,8 +545,8 @@ class Elasticity:
             #     p_j = self.ps.ori2cur[p_j0]
             #     ti.atomic_add(self.ZE[p_j], self.ps.m_V0[p_j] * (accum @ self.LigradW[p_i0, j]))
                 
-        for p in ti.grouped(self.ZE):
-            self.ZE[p] *= alpha * mu
+        # for p in ti.grouped(self.ZE):
+        #     self.ZE[p] *= alpha * mu
 
         # step 2 Mx + dt ** 2 * D^TKDx
         for p_i in ti.grouped(self.ps.x):
@@ -595,8 +581,8 @@ class Elasticity:
         self.compute_F(self.x_tmp)
         self.compute_P(YM, PR)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
-        ze_norm = self.dot(self.ZE, self.ZE)
-        print(f"ZE norm: {ze_norm}")
+        # ze_norm = self.dot(self.x_tmp, self.ZE)
+        # print(f"ZE norm: {ze_norm}")
         self.compute_gradient(dt)
         self.compute_Aii(alpha, YM, PR, dt)
 
