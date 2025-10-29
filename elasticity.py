@@ -144,11 +144,11 @@ class Elasticity:
 
             # computeKze
             for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j  = self.ps.ori2cur[p_j0]
+                p_j0  = self.ps.solid_neighbors[p_i0, j]
+                p_j   = self.ps.ori2cur[p_j0]
                 xji0  = self.ps.x0[p_j] - self.ps.x0[p_i]
                 r = xji0.norm()
-                self.K[p_i0, j] = self.ps.m_V0[p_j] * self.W(r, self.ps.support_radius) / (r*r + eps)
+                self.K[p_i0, j] = self.ps.m_V0[p_i] * self.ps.m_V0[p_j] * self.W(r, self.ps.support_radius) / (r*r + eps)
 
         for p_i in ti.grouped(self.ps.x):
 
@@ -303,10 +303,11 @@ class Elasticity:
 
         mu = YM / (2.0 * (1.0 + PR))
         lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
+        for p_i in ti.grouped(self.ps.x):
+            self.ZE[p_i] = ti.math.vec3(0.0)
+
 
         for p_i in ti.grouped(self.ps.x):
-
-            self.ZE[p_i] = ti.math.vec3(0.0)
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
@@ -316,14 +317,45 @@ class Elasticity:
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
-                F_j = self.F[p_j]
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
                 e_ij = F_i @ xij0 - xij
-                e_ji = xij - F_j @ xij0
+                Kij = self.ps.m_V0[p_i] * self.ps.m_V0[p_j] * self.W(xij0.norm(), self.ps.support_radius) / xij0.norm_sqr()
+                sum = 0.0
+                for k in range(self.ps.solid_neighbors_num[p_i0]):
+                    p_k0 = self.ps.solid_neighbors[p_i0, k]
+                    p_k = self.ps.ori2cur[p_k0]
+                    sk = self.VjLigradW[p_i0, k].dot(xij0)
+                    if p_j0 == p_k0:
+                        self.ZE[p_j] += Kij * (sk + 1.0) * e_ij
+                    else:
+                        self.ZE[p_k] += Kij * sk * e_ij
+
+                    sum += sk
+
+                self.ZE[p_i] -= Kij * (sum + 1.0) * e_ij
 
 
-                self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
+                # e_ji = xij - F_j @ xij0
+                #
+                # self.ZE[p_i] -= self.K[p_i0, j] * (1.0 + self.test1[p_i0, j]) * e_ij
+                # self.ZE[p_i] -= self.K[p_i0, j] * (1.0 - self.test2[p_i0, j]) * e_ji
+                #
+                # for k in range(self.ps.solid_neighbors_num[p_j0]):
+                #     p_k0 = self.ps.solid_neighbors[p_j0, k]
+                #     p_k = self.ps.ori2cur[p_k0]
+                #
+                #     if p_k0 == p_i0:
+                #         continue
+                #
+                #     xjk0 = self.ps.x0[p_j] - self.ps.x0[p_k]
+                #     xjk = x[p_j] - x[p_k]
+                #     e_jk = F_j @ xjk0 - xjk
+                #
+                #     #dF_j/dxi
+                #     test3 = (self.ps.m_V0[p_i] * self.L[p_j0] @ self.gradW(-xij0, self.ps.support_radius)).dot(xjk0)
+                #     Kjk = self.W(xjk0.norm(), self.ps.support_radius) * self.ps.m_V0[p_j] * self.ps.m_V0[p_k] / xjk0.dot(xjk0)
+                #     self.ZE[p_i] += Kjk * test3 * e_jk
 
             self.ZE[p_i] *= alpha * mu
 
@@ -348,7 +380,7 @@ class Elasticity:
                 PL_j = -self.P[p_j] @ self.VjLjgradW[p_i0, j]
                 f_i += (PL_i + PL_j)
 
-            self.grad[p_i] = self.ps.m_V0[p_i] * dt * (f_i + self.ZE[p_i])
+            self.grad[p_i] = self.ps.m_V0[p_i] * dt * f_i + dt * self.ZE[p_i]
 
     @ti.kernel
     def dot(self, a: ti.template(), b: ti.template()) -> float:
@@ -509,14 +541,57 @@ class Elasticity:
 
             p_i0 = self.ps.cur2ori[p_i]
             for j in range(self.ps.solid_neighbors_num[p_i0]):
-
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
                 xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
                 xij = x[p_i] - x[p_j]
                 e_ij = self.F_tmp[p_i] @ xij0 - xij
-                e_ji = xij - self.F_tmp[p_j] @ xij0
-                self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
+                Kij = self.ps.m_V0[p_i] * self.ps.m_V0[p_j] * self.W(xij0.norm(), self.ps.support_radius) / xij0.norm_sqr()
+
+                sum = 0.0
+                for k in range(self.ps.solid_neighbors_num[p_i0]):
+                    p_k0 = self.ps.solid_neighbors[p_i0, k]
+                    p_k = self.ps.ori2cur[p_k0]
+                    sk = self.VjLigradW[p_i0, k].dot(xij0)
+                    if p_j0 == p_k0:
+                        self.ZE[p_j] += Kij * (sk + 1.0) * e_ij
+                    else:
+                        self.ZE[p_k] += Kij * sk * e_ij
+
+                    sum += sk
+
+                self.ZE[p_i] -= Kij * (sum + 1.0) * e_ij
+
+            # for j in range(self.ps.solid_neighbors_num[p_i0]):
+            #
+            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
+            #     p_j = self.ps.ori2cur[p_j0]
+            #     xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+            #     xij = x[p_i] - x[p_j]
+            #     e_ij = self.F_tmp[p_i] @ xij0 - xij
+            #
+            #     F_j = self.F_tmp[p_j]
+            #     e_ji = xij - F_j @ xij0
+            #
+            #     self.ZE[p_i] -= self.K[p_i0, j] * (1.0 + self.test1[p_i0, j]) * e_ij
+            #     self.ZE[p_i] -= self.K[p_i0, j] * (1.0 - self.test2[p_i0, j]) * e_ji
+            #
+            #     for k in range(self.ps.solid_neighbors_num[p_j0]):
+            #         p_k0 = self.ps.solid_neighbors[p_j0, k]
+            #         p_k = self.ps.ori2cur[p_k0]
+            #
+            #         if p_k0 == p_i0:
+            #
+            #             continue
+            #
+            #         xjk0 = self.ps.x0[p_j] - self.ps.x0[p_k]
+            #         xjk = x[p_j] - x[p_k]
+            #         e_jk = F_j @ xjk0 - xjk
+            #
+            #         # dF_j/dxi
+            #         test3 = (self.ps.m_V0[p_i] * self.L[p_j0] @ self.gradW(-xij0, self.ps.support_radius)).dot(xjk0)
+            #         Kjk = self.W(xjk0.norm(), self.ps.support_radius) * self.ps.m_V0[p_j] * self.ps.m_V0[p_k] / xjk0.dot(xjk0)
+            #         self.ZE[p_i] += Kjk * test3 * e_jk
 
             self.ZE[p_i] *= alpha * mu
 
@@ -538,7 +613,7 @@ class Elasticity:
                 PL_j = -self.P[p_j] @ self.VjLjgradW[p_i0, j]
                 f_i += (PL_i + PL_j)
 
-            Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * (f_i + self.ZE[p_i])
+            Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * f_i + dt ** 2 * self.ZE[p_i]
 
 
     @ti.kernel
