@@ -16,7 +16,9 @@
             -9.81,
             0.0
         ],
-        "timeStepSize": 0.002
+        "timeStepSize": 0.002,
+        "transparentObjects": [0]
+
     },
     "RigidBodies": [
         {

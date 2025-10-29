@@ -398,7 +398,9 @@ class VisualizationEngine:
         n = self.ps.particle_num[None]
         for i in range(n):
             col = self.ps.color_vis_buffer[i]
-            if use_heatmap == 1:
+
+            apply_heatmap = use_heatmap == 1 and self.ps.is_static_rigid(i) == 0
+            if apply_heatmap:
                 s = self.scalar_norm[i]
                 rgb = ti.Vector([1.0, 1.0, 1.0])
                 if field_mode == 0:
