@@ -21,7 +21,7 @@ class Framework:
 
         self.YM = 4e6 # Young Modulus
         self.PR = 0.0  # Poisson Ratio
-        self.alpha = 0.1 # Zero Energy Mode coefficient
+        self.alpha = 1.0 # Zero Energy Mode coefficient
 
 
     def initialize(self):

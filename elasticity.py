@@ -48,7 +48,7 @@ class Elasticity:
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
         self.max_iteration_pcg = 1000
-        self.tol_pcg           = 12
+        self.tol_pcg           = 4
 
         self.pcg_last_iter = 0
         self.stats_elapsed_ms = []
