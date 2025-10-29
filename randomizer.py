@@ -48,7 +48,7 @@ class ParticleRandomizer:
             ext = self.cube_max[o] - self.cube_min[o]
             max_len = ti.max(ext[0], ti.max(ext[1], ext[2]))
             base = ti.max(max_len, self.ps.support_radius * 2.0)
-            s_raw = 0.5 * base * expand
+            s_raw = base * expand
 
             pad = self.ps.padding
             dx = ti.min(self.ps.domain_size[0] - pad - self.cube_center[o][0], self.cube_center[o][0] - pad)
@@ -78,13 +78,18 @@ class ParticleRandomizer:
             if self.ps.material[p] == self.ps.material_solid:
                 o = self.ps.object_id[p]
                 c = self.cube_center[o]
-                s = self.cube_half[o] * t
-                u = self.rand_unit[p]
-                x = c + u * s
+                half = self.cube_half[o]
+                u = self.rand_unit[p]        # [-1,1]^3
+
+                offset = u * (half * t)
+                x = self.ps.x0[p] + offset
+
                 x[0] = ti.min(self.ps.domain_size[0] - self.ps.padding, ti.max(self.ps.padding, x[0]))
                 x[1] = ti.min(self.ps.domain_size[1] - self.ps.padding, ti.max(self.ps.padding, x[1]))
                 x[2] = ti.min(self.ps.domain_size[2] - self.ps.padding, ti.max(self.ps.padding, x[2]))
+
                 self.ps.x[p] = x
+
 
     def begin(self, expand: float, seed: int = 1337):
         self.compute_cube(expand)
