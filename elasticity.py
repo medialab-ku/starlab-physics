@@ -48,7 +48,7 @@ class Elasticity:
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
         self.max_iteration_pcg = 1000
-        self.tol_pcg           = 12
+        self.tol_pcg           = 4
 
         self.pcg_last_iter = 0
         self.stats_elapsed_ms = []
@@ -321,6 +321,8 @@ class Elasticity:
                 xij = x[p_i] - x[p_j]
                 e_ij = F_i @ xij0 - xij
                 e_ji = xij - F_j @ xij0
+
+
                 self.ZE[p_i] -= self.K[p_i0, j] * ((1.0 + self.test1[p_i0, j]) * e_ij + (1.0 - self.test2[p_i0, j]) * e_ji)
 
             self.ZE[p_i] *= alpha * mu
