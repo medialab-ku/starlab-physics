@@ -49,7 +49,7 @@ class Elasticity:
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
-        self.max_iteration_pcg = 1000
+        self.max_iteration_pcg = 3
         self.tol_pcg           = 3
 
         self.pcg_last_iter = 0
@@ -171,9 +171,12 @@ class Elasticity:
                 sum = 0.0
                 for k in range(self.ps.solid_neighbors_num[p_i0]):
                     self.eij_sk[n, k] = self.VjLigradW[p_i0, k].dot(xij0)
+                    p_k0 = self.ps.solid_neighbors[p_i0, k]
+                    if p_j0 == p_k0:
+                        self.eij_sk[n, k] += 1.0
                     sum += self.eij_sk[n, k]
 
-                self.eij_sk[n, self.ps.solid_neighbors_num[p_i0] + 1] = sum
+                self.eij_sk[n, self.ps.solid_neighbors_num[p_i0] + 1] = sum + 1.0
 
 
 
@@ -242,24 +245,6 @@ class Elasticity:
         # stretch term, volume term
         mu = YM / (2.0 * (1.0 + PR))
         lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
-
-        #compute deformation gradient F
-        # for p_i in ti.grouped(self.ps.x):
-        #     if self.ps.material[p_i] != self.ps.material_solid:
-        #         continue
-        #
-        #     p_i0 = self.ps.cur2ori[p_i]
-        #     Ds_i = ti.math.mat3(0.0)
-        #     # Dm = ti.math.mat3(0.0)
-        #     for j in range(self.ps.solid_neighbors_num[p_i0]):
-        #         p_j0 = self.ps.solid_neighbors[p_i0, j]
-        #         p_j = self.ps.ori2cur[p_j0]
-        #         xji0 = self.ps.x0[p_j] - self.ps.x0[p_i]
-        #         xji = x[p_j] - x[p_i]
-        #         Ds_i -= self.ps.m_V0[p_j] * xji.outer_product(self.gradW(xji0, self.ps.support_radius))
-        #
-        #     self.F[p_i] = Ds_i @ self.L[p_i0]
-
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
@@ -275,8 +260,6 @@ class Elasticity:
             # s2 = sig[2, 2]
 
             R_i = U @ V.transpose()
-            # self.dJdF[p_i] = compute_dJdF_3x3(F_i)
-            # self.P[p_i] = 2.0 * mu * (F_i - R_i) + lamb * (self.J[p_i] - 1.0) * self.dJdF[p_i]
             self.P[p_i] = 2.0 * mu * (F_i - R_i)
 
     @ti.kernel
@@ -284,12 +267,6 @@ class Elasticity:
 
         mu = YM / (2.0 * (1.0 + PR))
         lamb = 2.0 * mu * PR / (1.0 - 2.0 * PR)
-
-
-        for p_i in ti.grouped(self.ps.x):
-            self.ZE[p_i] = ti.math.vec3(0.0)
-            if self.ps.material[p_i] != self.ps.material_solid:
-                continue
 
         for t in range(self.eij_num[0]):
 
@@ -305,19 +282,13 @@ class Elasticity:
             F_i = self.F[p_i]
             Kij_e_ij = alpha * mu * self.K[t] * (F_i @ xij0 - xij)
 
-            # sum = 0.0
             for k in range(self.ps.solid_neighbors_num[p_i0]):
                 p_k0 = self.ps.solid_neighbors[p_i0, k]
                 p_k = self.ps.ori2cur[p_k0]
                 sk = self.eij_sk[t, k]
-                if p_j0 == p_k0:
-                    self.ZE[p_j] += (sk + 1.0) * Kij_e_ij
-                else:
-                    self.ZE[p_k] += sk * Kij_e_ij
+                self.ZE[p_k] += sk * Kij_e_ij
 
-                # sum += sk
-
-            self.ZE[p_i] -= (self.eij_sk[t, self.ps.solid_neighbors_num[p_i0] + 1] + 1.0) * Kij_e_ij
+            self.ZE[p_i] -= self.eij_sk[t, self.ps.solid_neighbors_num[p_i0] + 1] * Kij_e_ij
 
 
             # self.ZE[p_i] *= alpha * mu
@@ -365,8 +336,8 @@ class Elasticity:
 
     @ti.kernel
     def compute_Aii(self, alpha: float,YM: float, PR: float, dt: float):
+
         mu = YM / (2.0 * (1.0 + PR))
-        eps = 1e-12
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
@@ -390,11 +361,11 @@ class Elasticity:
 
     @ti.kernel
     def apply_preconditioner(self, z: ti.template(), r: ti.template()):
+
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
-            
-            # z[p_i] = self.ps.m_inv[p_i] * r[p_i]
+
             z[p_i] = self.invAii[p_i] @ r[p_i]
 
 
@@ -405,22 +376,16 @@ class Elasticity:
             z = self.z_pcg
             p = self.p_pcg
             Ap = self.Ap
-            # Jp = self.dp
 
-            # self.compute_Ax(Ap, x, alpha, YM, PR, dt)
-            # self.add(r, b, -1.0, Ap)
             r.copy_from(b)
             self.apply_preconditioner(z, r)
-
             rz_old = self.dot(r, z)
-            # r_old = self.dot(r, r)
             pcg_iter = 0
-            # if r_old > pow(10, -self.tol_pcg):
             if rz_old > 1e-12:
                 p.copy_from(z)
                 iter = 0
                 for _ in range(self.max_iteration_pcg):
-                    # Ap.fill(0.0)
+
                     self.compute_Ax(Ap, p, alpha, YM, PR, dt)
                     pAp = self.dot(p, Ap)
                     if pAp < 0.0:
@@ -476,9 +441,8 @@ class Elasticity:
             self.F_tmp[p_i] = F_i
 
 
-        for p in ti.grouped(self.ZE):
-            self.ZE[p] = ti.math.vec3(0.0)
-
+        for p_i in ti.grouped(self.ps.x):
+            Ax[p_i] = self.ps.m[p_i] * x[p_i]
 
         for t in range(self.eij_num[0]):
 
@@ -492,20 +456,15 @@ class Elasticity:
             xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
             xij = x[p_i] - x[p_j]
             F_i = self.F[p_i]
-            Kij_e_ij = alpha * mu * self.K[t] * (F_i @ xij0 - xij)
-            # sum = 0.0
+            Kij_e_ij = dt ** 2 * alpha * mu * self.K[t] * (F_i @ xij0 - xij)
+
             for k in range(self.ps.solid_neighbors_num[p_i0]):
                 p_k0 = self.ps.solid_neighbors[p_i0, k]
                 p_k = self.ps.ori2cur[p_k0]
                 sk = self.eij_sk[t, k]
-                if p_j0 == p_k0:
-                    self.ZE[p_j] += (sk + 1.0) * Kij_e_ij
-                else:
-                    self.ZE[p_k] += sk * Kij_e_ij
+                Ax[p_k] += sk * Kij_e_ij
 
-                # sum += sk
-
-            self.ZE[p_i] -= (self.eij_sk[t, self.ps.solid_neighbors_num[p_i0] + 1] + 1.0) * Kij_e_ij
+            Ax[p_i] -= self.eij_sk[t, self.ps.solid_neighbors_num[p_i0] + 1] * Kij_e_ij
 
         # step 2 Mx + dt ** 2 * D^TKDx
         for p_i in ti.grouped(self.ps.x):
@@ -524,13 +483,8 @@ class Elasticity:
                 PL_j = -self.F_tmp[p_j] @ self.VjLjgradW[p_i0, j]
                 f_i += 2.0 * mu * (PL_i + PL_j)
 
-            Ax[p_i] = self.ps.m[p_i] * x[p_i] + self.ps.m_V0[p_i] * dt ** 2 * f_i + dt ** 2 * self.ZE[p_i]
+            Ax[p_i] += self.ps.m_V0[p_i] * dt ** 2 * f_i
 
-
-    @ti.kernel
-    def compute_xAx(self, x: ti.template(), alpha: float, YM: float, PR: float, dt: float) -> float:
-
-        return 0.0
 
     def solve(self, alpha, YM, PR, dt):
 
@@ -543,6 +497,8 @@ class Elasticity:
         self.compute_P(YM, PR)
 
         t0 = time.perf_counter()
+
+        self.ZE.fill(0.0)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         print("zero energy: ", elapsed_ms)

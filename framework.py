@@ -1,5 +1,5 @@
 import taichi as ti
-
+import time
 @ti.data_oriented
 class Framework:
     def __init__(self, particle_system, neighbour_search, pressure, viscosity, surface_tension, elasticity):
@@ -71,9 +71,13 @@ class Framework:
 
     def forward(self):
 
+        t0 = time.perf_counter()
+
         self.ns.broad_phase()
         self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
-        # self.ns.narrow_phase_surface(self.ps.x_0_s, self.ps.x, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print("neighbour search: ", elapsed_ms)
 
         self.apply_gravity(self.dt)
 
