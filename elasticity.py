@@ -217,7 +217,7 @@ class Elasticity:
             self.correct_sampling()
             err = self.a(nu=0.1)
 
-            if err < 1e-5:
+            if err < 1e-2:
                 break
             iter += 1
 
@@ -226,9 +226,7 @@ class Elasticity:
     @ti.kernel
     def a(self, nu: float) -> float:
 
-
         # nu = 0.1
-
         norm_inf = 0.0
 
         for p_i in ti.grouped(self.ps.x):
@@ -257,7 +255,7 @@ class Elasticity:
     def initialize(self):
 
         self.set_initial_neighbors()
-        self.test()
+        # self.test()
         self.set_rest_volume_and_L()
         self.precompute_value()
         self.set_skinning_weight()
