@@ -73,20 +73,27 @@ class ParticlePinning:
 
             x_ranges = self.range_list_to_absolute(pin_cfg.get("x_ranges"), 0, local_size, normalized_pin)
             y_ranges = self.range_list_to_absolute(pin_cfg.get("y_ranges"), 1, local_size, normalized_pin)
+            z_ranges = self.range_list_to_absolute(pin_cfg.get("z_ranges"), 2, local_size, normalized_pin)
 
             eps = 1e-9
-            pin_mask_local = np.zeros(P_local_shift.shape[0], dtype=bool)
+            have_x = len(x_ranges) > 0
+            have_y = len(y_ranges) > 0
+            have_z = len(z_ranges) > 0
+
+            mask_x = np.zeros(P_local_shift.shape[0], dtype=bool) if have_x else None
+            mask_y = np.zeros(P_local_shift.shape[0], dtype=bool) if have_y else None
+            mask_z = np.zeros(P_local_shift.shape[0], dtype=bool) if have_z else None
 
             # x segments
-            if len(x_ranges) > 0:
+            if have_x:
                 xvals = P_local_shift[:, 0]
                 for xi, (lo_a, hi_a) in enumerate(x_ranges):
                     seg_m = (xvals >= lo_a - eps) & (xvals <= hi_a + eps)
                     if np.any(seg_m):
-                        pin_mask_local |= seg_m
+                        mask_x |= seg_m
 
                         sel_idxs_global = idxs_global[seg_m].astype(np.int32)
-                        sel_rest_pos = P_w[seg_m]  # world-rest positions
+                        sel_rest_pos = P_w[seg_m]
                         range_restCOM = sel_rest_pos.mean(axis=0).astype(np.float32)
 
                         ranges_meta.append({
@@ -103,7 +110,6 @@ class ParticlePinning:
                             "local_max": local_max.astype(np.float32),
                         })
 
-                    # guide lines
                     vertices, indices = self.append_plane_lines(
                         vertices, indices, axis_idx=0, t_abs=lo_a,
                         local_min=local_min, local_max=local_max, R=R, COM=COM)
@@ -112,12 +118,12 @@ class ParticlePinning:
                         local_min=local_min, local_max=local_max, R=R, COM=COM)
 
             # y segments
-            if len(y_ranges) > 0:
+            if have_y:
                 yvals = P_local_shift[:, 1]
                 for yi, (lo_a, hi_a) in enumerate(y_ranges):
                     seg_m = (yvals >= lo_a - eps) & (yvals <= hi_a + eps)
                     if np.any(seg_m):
-                        pin_mask_local |= seg_m
+                        mask_y |= seg_m
 
                         sel_idxs_global = idxs_global[seg_m].astype(np.int32)
                         sel_rest_pos = P_w[seg_m]
@@ -137,13 +143,53 @@ class ParticlePinning:
                             "local_max": local_max.astype(np.float32),
                         })
 
-                    # guide lines
                     vertices, indices = self.append_plane_lines(
                         vertices, indices, axis_idx=1, t_abs=lo_a,
                         local_min=local_min, local_max=local_max, R=R, COM=COM)
                     vertices, indices = self.append_plane_lines(
                         vertices, indices, axis_idx=1, t_abs=hi_a,
                         local_min=local_min, local_max=local_max, R=R, COM=COM)
+
+            # z segments
+            if have_z:
+                zvals = P_local_shift[:, 2]
+                for zi, (lo_a, hi_a) in enumerate(z_ranges):
+                    seg_m = (zvals >= lo_a - eps) & (zvals <= hi_a + eps)
+                    if np.any(seg_m):
+                        mask_z |= seg_m
+
+                        sel_idxs_global = idxs_global[seg_m].astype(np.int32)
+                        sel_rest_pos = P_w[seg_m]
+                        range_restCOM = sel_rest_pos.mean(axis=0).astype(np.float32)
+
+                        ranges_meta.append({
+                            "objectId": int(obj_id),
+                            "rangeId": f"pin_z_{zi}",
+                            "axis": "z",
+                            "lo": float(lo_a),
+                            "hi": float(hi_a),
+                            "indices": sel_idxs_global,
+                            "restCOM": range_restCOM,
+                            "R": R.astype(np.float32),
+                            "COM": COM.astype(np.float32),
+                            "local_min": local_min.astype(np.float32),
+                            "local_max": local_max.astype(np.float32),
+                        })
+
+                    vertices, indices = self.append_plane_lines(
+                        vertices, indices, axis_idx=2, t_abs=lo_a,
+                        local_min=local_min, local_max=local_max, R=R, COM=COM)
+                    vertices, indices = self.append_plane_lines(
+                        vertices, indices, axis_idx=2, t_abs=hi_a,
+                        local_min=local_min, local_max=local_max, R=R, COM=COM)
+
+            pin_mask_local = None
+            for m in (mask_x, mask_y, mask_z):
+                if m is None:
+                    continue
+                pin_mask_local = m if pin_mask_local is None else (pin_mask_local & m)
+            if pin_mask_local is None:
+                pin_mask_local = np.zeros(P_local_shift.shape[0], dtype=bool)
 
             if np.any(pin_mask_local):
                 pinned_indices_obj = idxs_global[pin_mask_local]
@@ -177,7 +223,6 @@ class ParticlePinning:
         ls = lx - lm
         t_abs = float(np.clip(t_abs, 0.0, float(ls[axis_idx])))
 
-        # guide rectangle padding
         pr = float(self.ps.particle_radius)
         pad_big = 6.0 * pr
         pad_small = 3.0 * pr
@@ -192,7 +237,7 @@ class ParticlePinning:
                 [t_abs, y1, z1],
                 [t_abs, y1, z0],
             ], dtype=np.float32)
-        else:
+        elif axis_idx == 1:
             # y-plane -> enlarge along x,z
             x0, x1 = -pad_small, float(ls[0]) + pad_small
             z0, z1 = -pad_small, float(ls[2]) + pad_small
@@ -202,9 +247,19 @@ class ParticlePinning:
                 [x1, t_abs, z1],
                 [x0, t_abs, z1],
             ], dtype=np.float32)
+        else:
+            # z-plane -> enlarge along x,y
+            x0, x1 = -pad_small, float(ls[0]) + pad_small
+            y0, y1 = -pad_small, float(ls[1]) + pad_small
+            rect_local = np.array([
+                [x0, y0, t_abs],
+                [x1, y0, t_abs],
+                [x1, y1, t_abs],
+                [x0, y1, t_abs],
+            ], dtype=np.float32)
 
         rect_local_abs = rect_local + lm
-        rect_world = (rect_local_abs @ R.T) + COM  # row-vector
+        rect_world = (rect_local_abs @ R.T) + COM
 
         base = len(vertices)
         vertices.extend([rect_world[0], rect_world[1], rect_world[2], rect_world[3]])
@@ -242,8 +297,9 @@ class ParticlePinning:
     def freeze_particles(self, count: int, idxs: ti.types.ndarray()):
         for k in range(count):
             p = idxs[k]
-            self.ps.is_dynamic[p] = 0
-            for d in ti.static(range(self.ps.dim)):
-                self.ps.v[p][d] = 0.0
-                self.ps.acceleration[p][d] = 0.0
-            self.ps.m_inv[p] = 0.0
+            self.ps.is_pinned[p] = 1
+            # self.ps.is_dynamic[p] = 0
+            # for d in ti.static(range(self.ps.dim)):
+            #     self.ps.v[p][d] = 0.0
+            #     self.ps.acceleration[p][d] = 0.0
+            # self.ps.m_inv[p] = 0.0

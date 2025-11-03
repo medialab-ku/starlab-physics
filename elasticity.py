@@ -12,6 +12,7 @@ class Elasticity:
     def __init__(self, particle_system):
 
         self.ps = particle_system
+        self.k = 1e6
 
         #TODO: allocate F, L for deformable particles only
         self.L      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
@@ -33,7 +34,7 @@ class Elasticity:
         self.VjLigradW = ti.Vector.field(3, dtype=float, shape=(self.ps.particle_max_num, self.ps.cache_size))
         self.VjLjgradW = ti.Vector.field(3, dtype=float, shape=(self.ps.particle_max_num, self.ps.cache_size))
         self.invAii     = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
-
+        self.Aii     = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.ZE     = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.grad   = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.x_tmp  = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
@@ -50,7 +51,8 @@ class Elasticity:
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
         self.max_iteration_pcg = 3
-        self.tol_pcg           = 3
+        self.tol_pcg           = 5
+        self.precondition      = 0
 
         self.pcg_last_iter = 0
         self.stats_elapsed_ms = []
@@ -151,15 +153,13 @@ class Elasticity:
                 self.VjLigradW[p_i0, j] = self.ps.m_V0[p_j] * Li @ self.gradW(xij0, self.ps.support_radius)
                 self.VjLjgradW[p_i0, j] = self.ps.m_V0[p_j] * Lj @ self.gradW(xij0, self.ps.support_radius)
 
-
-
         num = 0
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
             p_i0 = self.ps.cur2ori[p_i]
-            # compute L @ gradW
+
             for j in range(self.ps.solid_neighbors_num[p_i0]):
                 p_j0 = self.ps.solid_neighbors[p_i0, j]
                 p_j = self.ps.ori2cur[p_j0]
@@ -177,8 +177,6 @@ class Elasticity:
                     sum += self.eij_sk[n, k]
 
                 self.eij_sk[n, self.ps.solid_neighbors_num[p_i0] + 1] = sum + 1.0
-
-
 
         self.eij_num[0] = num
 
@@ -223,8 +221,6 @@ class Elasticity:
                 p_j = self.ps.ori2cur[p_j0]
                 xji = x[p_j] - x[p_i]
                 self.F[p_i] += xji.outer_product(self.VjLigradW[p_i0, j])
-
-
 
 
     @ti.func
@@ -293,7 +289,7 @@ class Elasticity:
 
             # self.ZE[p_i] *= alpha * mu
     @ti.kernel
-    def compute_gradient(self, dt: float):
+    def compute_gradient(self, x: ti.template(), dt: float):
         # dtSq = dt ** 2
         for p_i in ti.grouped(self.ps.x):
             self.grad[p_i] = ti.math.vec3(0.0)
@@ -312,6 +308,9 @@ class Elasticity:
                 f_i += (PL_i + PL_j)
 
             self.grad[p_i] = self.ps.m_V0[p_i] * dt * f_i + dt * self.ZE[p_i]
+            if self.ps.is_pinned[p_i]:
+                self.grad[p_i] += dt * self.k * (x[p_i] - self.ps.x0[p_i])
+
 
     @ti.kernel
     def dot(self, a: ti.template(), b: ti.template()) -> float:
@@ -344,20 +343,34 @@ class Elasticity:
 
             p_i0 = self.ps.cur2ori[p_i]
             mI = ti.Matrix.identity(float, 3) * self.ps.m[p_i]   # M_ii
-
+            
+            Aii = mI
+            hh = 0.0
+            g_sum = ti.math.vec3(0.0)
             # Stretch
-            # for j in range(self.ps.solid_neighbors_num[p_i0]):
-            #     p_j0 = self.ps.solid_neighbors[p_i0, j]
-            #     p_j  = self.ps.ori2cur[p_j0]
-            #     g    = self.VjLigradW[p_i0, j]
-            #     Aii   += 2.0 * dt * dt * mu * self.ps.m_V0[p_i] * self.ps.m_V0[p_j] * g.outer_product(g)
+            for j in range(self.ps.solid_neighbors_num[p_i0]):
+                p_j0 = self.ps.solid_neighbors[p_i0, j]
+                p_j  = self.ps.ori2cur[p_j0]
+                g_sum += self.VjLigradW[p_i0, j]
+                h = self.VjLjgradW[p_i0, j]
+                hh += h.dot(h) / self.ps.m_V0[p_j]
 
-            # K_i = 0.0
-            # for j in range(self.ps.solid_neighbors_num[p_i0]):
-            #     K_i += self.K[p_i0][j]
-            # A += dt * dt * (alpha * mu) * K_i * ti.Matrix.identity(float, 3)
+            Aii += 2.0 * dt * dt * mu * self.ps.m_V0[p_i] * (g_sum.dot(g_sum) + self.ps.m_V0[p_i] * hh)
+            self.Aii[p_i] = Aii
 
-            self.invAii[p_i] = (mI).inverse()
+        for t in range(self.eij_num[0]):
+            # Aii += dt * dt * alpha * mu * self.K[t] * ti.Matrix.identity(float, 3)
+            ij = self.eij_pair[t]
+            p_i0, j = ij[0], ij[1]
+            p_i = self.ps.ori2cur[p_i0]
+            if self.ps.material[p_i] != self.ps.material_solid:
+                continue
+
+            s_idx = self.ps.solid_neighbors_num[p_i0] + 1
+            sk = self.eij_sk[t, s_idx]
+            self.Aii[p_i] += dt * dt * alpha * mu * self.K[t] * (sk - 1.0) * (sk - 1.0) * ti.Matrix.identity(float, 3)
+            self.invAii[p_i] = (self.Aii[p_i]).inverse()
+
 
     @ti.kernel
     def apply_preconditioner(self, z: ti.template(), r: ti.template()):
@@ -366,7 +379,12 @@ class Elasticity:
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-            z[p_i] = self.invAii[p_i] @ r[p_i]
+            if self.precondition == 1:
+                z[p_i] = ti.Matrix.identity(float, 3) * self.ps.m_inv[p_i] @ r[p_i]
+            elif self.precondition == 2:
+                z[p_i] = self.invAii[p_i] @ r[p_i]
+            else:
+                z[p_i] = r[p_i]
 
 
     def PCG(self, x, b, alpha, YM, PR, dt):
@@ -403,7 +421,7 @@ class Elasticity:
                     #     print(f"PCG error: {r_new}")
 
                     if r_new < pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
-                        # print("PCG ITER:", iter)
+                        print("PCG ITER:", iter)
                         break
 
                     iter += 1
@@ -416,6 +434,7 @@ class Elasticity:
 
             # Collect PCG iteration count per PCG solve
             # self.pcg_total_iter += pcg_iter
+
 
     @ti.kernel
     def compute_Ax(self, Ax: ti.template(), x: ti.template(), alpha: float, YM: float, PR: float, dt:float):
@@ -485,36 +504,42 @@ class Elasticity:
 
             Ax[p_i] += self.ps.m_V0[p_i] * dt ** 2 * f_i
 
+            if self.ps.is_pinned[p_i]:
+                Ax[p_i] += dt * dt * self.k * x[p_i]
+
 
     def solve(self, alpha, YM, PR, dt):
 
-        t0 = time.perf_counter()
+        # t0 = time.perf_counter()
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
         self.compute_F(self.x_tmp)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        print("deformation gradient: ", elapsed_ms)
+        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        # print("deformation gradient: ", elapsed_ms)
 
         self.compute_P(YM, PR)
 
-        t0 = time.perf_counter()
+        # t0 = time.perf_counter()
 
         self.ZE.fill(0.0)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        print("zero energy: ", elapsed_ms)
-        self.compute_gradient(dt)
+        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        # print("zero energy: ", elapsed_ms)
+        self.compute_gradient(self.x_tmp, dt)
         self.compute_Aii(alpha, YM, PR, dt)
 
-        t0 = time.perf_counter()
+        # t0 = time.perf_counter()
         self.v_tmp.copy_from(self.ps.v)
         self.PCG(x=self.a, b=self.grad, alpha=alpha, YM=YM, PR=PR, dt=dt)
         add(self.v_tmp, self.v_tmp, -1.0, self.a)
         self.ps.v.copy_from(self.v_tmp)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        print("linear solve: ", elapsed_ms)
+        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        # print("linear solve: ", elapsed_ms)
 
-        self.stats_elapsed_ms.append(float(elapsed_ms))
+        # self.stats_elapsed_ms.append(float(elapsed_ms))
         self.stats_pcg_iter.append(int(self.pcg_last_iter))
+
+
+    
 
     @ti.kernel
     def update_surface_vertex(self):
@@ -538,5 +563,5 @@ class Elasticity:
         self.update_surface_vertex()
 
     def clear_stats(self):
-        self.stats_elapsed_ms.clear()
+        # self.stats_elapsed_ms.clear()
         self.stats_pcg_iter.clear()

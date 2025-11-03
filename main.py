@@ -126,6 +126,15 @@ if __name__ == "__main__":
             fw.alpha = w.slider_float("alpha", fw.alpha, 0.0, 10.0)
             fw.YM = w.slider_float("YM", fw.YM, 1e6, 10e6)
             fw.PR = w.slider_float("PR", fw.PR, 0.0, 0.499)
+            elasticity.precondition = w.slider_int("precondition", elasticity.precondition, 0, 2)
+            
+            if elasticity.precondition == 0:
+                gui.text("precondition: none")
+            elif elasticity.precondition == 1:
+                gui.text("precondition: mass")
+            elif elasticity.precondition == 2:
+                gui.text("precondition: Aii")
+
             try:
                 N_active = int(ps.particle_num[None])
                 mats = ps.material.to_numpy()[:N_active]
