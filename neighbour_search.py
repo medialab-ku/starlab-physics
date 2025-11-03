@@ -100,6 +100,7 @@ class NeighborSearch:
             self.ps.material_buffer[new_index]     = self.ps.material[I]
             self.ps.color_buffer[new_index]        = self.ps.color[I]
             self.ps.is_dynamic_buffer[new_index]   = self.ps.is_dynamic[I]
+            self.ps.is_pinned_buffer[new_index] = self.ps.is_pinned[I]
             self.ps.n_buffer[new_index]            = self.ps.n[I]
 
         for I in range(n):
@@ -119,6 +120,7 @@ class NeighborSearch:
             self.ps.material[I]     = self.ps.material_buffer[I]
             self.ps.color[I]        = self.ps.color_buffer[I]
             self.ps.is_dynamic[I]   = self.ps.is_dynamic_buffer[I]
+            self.ps.is_pinned[I] = self.ps.is_pinned_buffer[I]
             self.ps.n[I]            = self.ps.n_buffer[I]
 
         for I in range(n):

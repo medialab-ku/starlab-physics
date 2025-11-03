@@ -165,7 +165,8 @@ class SceneLoader:
                 density=density,
                 color=color,
                 material=1,
-                is_dynamic=1
+                is_dynamic=1,
+                is_pinned=0
             )
 
         for fluid_body in scene_data["fluid_bodies"]:
@@ -184,13 +185,14 @@ class SceneLoader:
                                np.zeros(num_particles_obj, dtype=np.float32), # pressure
                                np.ones(num_particles_obj, dtype=np.int32), # material is fluid
                                np.ones(num_particles_obj, dtype=np.int32), # is_dynamic = 1
+                               np.zeros(num_particles_obj, dtype=np.int32), # is_pinned = 0
                                np.stack([color for _ in range(num_particles_obj)])) # color
 
         for rigid_body in scene_data["rigid_bodies"]:
             obj_id = int(rigid_body["objectId"])
             ps.object_id_rigid_body.add(obj_id)
             is_dynamic = int(bool(rigid_body.get("isDynamic")))
-            is_toggled = bool(rigid_body.get("isToggled", False))
+            is_pinned = int(bool(rigid_body.get("isPinned", False)))
 
             num_particles_obj = rigid_body["particleNum"]
             voxelized_points_np = rigid_body["voxelizedPoints"]
@@ -199,10 +201,6 @@ class SceneLoader:
             density = rigid_body["density"]
             color = np.array(rigid_body["color"], dtype=np.int32)
 
-            if is_dynamic and is_toggled:
-                ps.toggled_rigid_bodies.add(obj_id)
-                ps.toggled_dynamic_velocity[obj_id] = desired
-            
             ps.add_particles(obj_id,
                                 num_particles_obj,
                                 np.array(voxelized_points_np, dtype=np.float32), # position
@@ -211,6 +209,7 @@ class SceneLoader:
                                 np.zeros(num_particles_obj, dtype=np.float32), # pressure
                                 np.zeros(num_particles_obj, dtype=np.int32), # material is solid
                                 is_dynamic * np.ones(num_particles_obj, dtype=np.int32),
+                                np.zeros(num_particles_obj, dtype=np.int32), # is_pinned = 0
                                 np.stack([color for _ in range(num_particles_obj)])) # color
 
         for solid_body in scene_data["solid_bodies"]:
@@ -221,6 +220,7 @@ class SceneLoader:
             density = float(solid_body.get("density", 1000.0))
             color = np.array(solid_body.get("color", [200, 80, 80]), dtype=np.int32)
             is_dynamic = int(bool(solid_body.get("isDynamic", True)))
+            is_pinned = int(bool(solid_body.get("isPinned", False)))
 
             ps.add_particles(obj_id,
                             num_particles_obj,
@@ -230,6 +230,7 @@ class SceneLoader:
                             np.zeros(num_particles_obj, dtype=np.float32),  # pressure
                             (2 * np.ones(num_particles_obj, dtype=np.int32)),  # material = deformable
                             np.ones(num_particles_obj, dtype=np.int32),  # always is_dynamic
+                            np.zeros(num_particles_obj, dtype=np.int32), # is_pinned = 0
                             np.stack([color for _ in range(num_particles_obj)]))  # color
         
         self._setup_emitter_system(ps, scene_data["emitter"])
@@ -291,6 +292,7 @@ class SceneLoader:
                 cube_size,
                 material,
                 is_dynamic,
+                is_pinned,
                 color=(0,0,0),
                 density=None,
                 pressure=None,
@@ -316,10 +318,11 @@ class SceneLoader:
 
         material_arr = np.full_like(np.zeros(num_new_particles, dtype=np.int32), material)
         is_dynamic_arr = np.full_like(np.zeros(num_new_particles, dtype=np.int32), is_dynamic)
+        is_pinned_arr = np.full_like(np.zeros(num_new_particles, dtype=np.int32), is_pinned)
         color_arr = np.stack([np.full_like(np.zeros(num_new_particles, dtype=np.int32), c) for c in color], axis=1)
         density_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float32), density if density is not None else 1000.)
         pressure_arr = np.full_like(np.zeros(num_new_particles, dtype=np.float32), pressure if pressure is not None else 0.)
-        ps.add_particles(object_id, num_new_particles, new_positions, velocity_arr, density_arr, pressure_arr, material_arr, is_dynamic_arr, color_arr)
+        ps.add_particles(object_id, num_new_particles, new_positions, velocity_arr, density_arr, pressure_arr, material_arr, is_dynamic_arr, is_pinned_arr, color_arr)
     
 
     #==== Mesh Skinning setup ====

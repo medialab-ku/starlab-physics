@@ -19,10 +19,6 @@ class Framework:
         self.adhesion_coeff = self.surface_tension_coeff
         self.time = 0.0
 
-        self.YM = 4e6 # Young Modulus
-        self.PR = 0.0  # Poisson Ratio
-        self.alpha = 1.0 # Zero Energy Mode coefficient
-
 
     def initialize(self):
 
@@ -35,7 +31,7 @@ class Framework:
     @ti.kernel
     def apply_gravity(self, dt: float):
         for p_i in ti.grouped(self.ps.x):
-            if self.ps.is_static_rigid(p_i):
+            if not self.ps.is_dynamic[p_i]:
                 self.ps.acceleration[p_i].fill(0.0)
                 continue
 
@@ -75,13 +71,13 @@ class Framework:
 
     def forward(self):
 
-        t0 = time.perf_counter()
+        # t0 = time.perf_counter()
 
         self.ns.broad_phase()
         self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
 
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        print("neighbour search: ", elapsed_ms)
+        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        # print("neighbour search: ", elapsed_ms)
 
         self.apply_gravity(self.dt)
 
@@ -89,7 +85,7 @@ class Framework:
 
         # self.viscosity.solve(self.viscosity_coeff, self.dt)
 
-        self.elasticity.solve(self.alpha, self.YM, self.PR, self.dt)
+        self.elasticity.solve(self.dt)
 
         t0 = time.perf_counter()
         self.pressure.solve(self.dt)
@@ -100,7 +96,7 @@ class Framework:
 
         self.ns.enforce_boundary_3D()
 
-        self.apply_damping(0.99)
+        # self.apply_damping(0.99)
 
         self.elasticity.update_surface_vertex()
 

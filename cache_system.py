@@ -48,7 +48,7 @@ class SimulationCache:
                 "m_V", "m", "m_inv", "m_V0",
                 "density", "density0",
                 "pressure", "divergence",
-                "material", "color", "is_dynamic",
+                "material", "color", "is_dynamic", "is_pinned",
                 "n",
                 "cur2ori", "ori2cur",
             ]
@@ -151,7 +151,7 @@ class SimulationCache:
             particle_fields = {
                 "object_id", "x","x_old","x0","v","v_adv","acceleration",
                 "m_V","m","m_inv","m_V0","density","density0",
-                "pressure","divergence","material","color","is_dynamic",
+                "pressure","divergence","material","color","is_dynamic", "is_pinned",
                 "n","cur2ori","ori2cur",
             }
             surface_like = {
@@ -191,6 +191,7 @@ class SimulationCache:
                         pass
                 _fill_tail("material", -1)
                 _fill_tail("is_dynamic", 0)
+                _fill_tail("is_pinned", 0)
                 _fill_tail("object_id", -1)
                 _fill_tail("m_V0", 0.0); _fill_tail("m_V", 0.0)
                 _fill_tail("m", 0.0); _fill_tail("m_inv", 0.0)

@@ -82,6 +82,7 @@ class SimulationData:
         self.material = ti.field(dtype=int, shape=self.particle_max_num)
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
+        self.is_pinned = ti.field(dtype=int, shape=self.particle_max_num)
         # self.is_solid   = ti.field(dtype=int, shape=self.particle_max_num)
 
         self.cur2ori = ti.field(dtype=int, shape=self.particle_max_num)
@@ -113,6 +114,7 @@ class SimulationData:
         self.material_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.color_buffer = ti.Vector.field(4, dtype=int, shape=self.particle_max_num)
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
+        self.is_pinned_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
         self.cur2ori_buffer = ti.field(dtype=int, shape=self.particle_max_num)
@@ -149,7 +151,7 @@ class SimulationData:
 
     # Helper and util methods
     @ti.func
-    def add_particle(self, p, obj_id, x, v, density, pressure, material, is_dynamic, color):
+    def add_particle(self, p, obj_id, x, v, density, pressure, material, is_dynamic, is_pinned, color):
         self.object_id[p] = obj_id
         self.x[p] = x
         self.x_old[p] = x
@@ -184,6 +186,7 @@ class SimulationData:
                       new_particle_pressure: ti.types.ndarray(),
                       new_particles_material: ti.types.ndarray(),
                       new_particles_is_dynamic: ti.types.ndarray(),
+                      new_particles_is_pinned: ti.types.ndarray(),
                       new_particles_color: ti.types.ndarray()
                       ):
         
@@ -195,6 +198,7 @@ class SimulationData:
                       new_particle_pressure,
                       new_particles_material,
                       new_particles_is_dynamic,
+                      new_particles_is_pinned,
                       new_particles_color
                       )
 
@@ -209,6 +213,7 @@ class SimulationData:
                       new_particle_pressure: ti.types.ndarray(),
                       new_particles_material: ti.types.ndarray(),
                       new_particles_is_dynamic: ti.types.ndarray(),
+                      new_particles_is_pinned: ti.types.ndarray(),
                       new_particles_color: ti.types.ndarray()):
 
         for p in range(self.particle_num[None], self.particle_num[None] + new_particles_num):
@@ -222,6 +227,7 @@ class SimulationData:
                               new_particle_pressure[p - self.particle_num[None]],
                               new_particles_material[p - self.particle_num[None]],
                               new_particles_is_dynamic[p - self.particle_num[None]],
+                              new_particles_is_pinned[p - self.particle_num[None]],
                               ti.Vector([new_particles_color[p - self.particle_num[None], 0],
                                          new_particles_color[p - self.particle_num[None], 1],
                                          new_particles_color[p - self.particle_num[None], 2],
@@ -273,6 +279,7 @@ class SimulationData:
             self.m_inv[p] = 1.0 / (self.m[p] + 1e-12)
             self.material[p] = self.material_fluid
             self.is_dynamic[p] = 1
+            self.is_pinned[p] = 0
             self.color[p] = ti.Vector([color_r, color_g, color_b, 255])
 
 
