@@ -224,6 +224,8 @@ if __name__ == "__main__":
         if (output_cfg.export_particles or output_cfg.export_mesh_obj) and frame_cnt > int(output_cfg.end_frame):
             runSim = False
 
+
+
         if runSim:
             dt_frame = fw.dt
             dt_sub = dt_frame
@@ -241,6 +243,8 @@ if __name__ == "__main__":
                     runSim = False
                     print("Randomize completed. Press SPACE to resume physics.")
             else:
+
+                # fw.test()
                 fw.forward()
                 anim.apply(anim_time, dt_sub)
                 anim_time += dt_sub

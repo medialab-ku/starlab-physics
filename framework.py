@@ -69,6 +69,10 @@ class Framework:
                 self.ps.v[p_i] *= coeff
 
 
+    def test(self):
+        self.elasticity.test()
+
+
     def forward(self):
 
         t0 = time.perf_counter()
@@ -87,7 +91,10 @@ class Framework:
 
         self.elasticity.solve(self.alpha, self.YM, self.PR, self.dt)
 
-        # self.pressure.solve(self.dt)
+        t0 = time.perf_counter()
+        self.pressure.solve(self.dt)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print("pressure: ", elapsed_ms)
 
         self.advect_position(self.dt)
 

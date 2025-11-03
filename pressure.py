@@ -72,7 +72,6 @@ class Pressure:
         self.f = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.Jx = ti.field(dtype=float, shape=self.ps.particle_max_num)
-        self.test = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
         self.var = ti.field(dtype=float, shape=self.ps.particle_max_num)
 
@@ -82,7 +81,6 @@ class Pressure:
         self.z_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
-
 
     # -----------------------------
     # Stats helpers
@@ -164,9 +162,6 @@ class Pressure:
 
                 J_ij = self.ps.m[p_j] * self.ps.fluid_neighbors_values[p_i, j]
                 self.ps.fluid_neighbors_JtJ[p_i, j] = J_ij.outer_product(J_ij)
-
-                # if self.ps.is_dynamic_rigid(p_i) and (self.ps.object_id[p_j] == self.ps.object_id[p_i]):
-                #     continue
                 if self.ps.is_dynamic[p_j]:
                     Aii += J_ij.dot(J_ij) * self.ps.m_inv[p_j]
 
@@ -412,6 +407,82 @@ class Pressure:
             else:
                 self.ps.v[p_i] = ti.math.vec3(0.0)
 
+    @ti.kernel
+    def a_test(self):
+        for p_i in ti.grouped(self.ps.x):
+            if not self.ps.is_dynamic[p_i]:
+                continue
+
+            self.ps.density[p_i] = self.ps.m[p_i] * self.W(0.0, self.ps.support_radius)
+            den = 0.0
+            xi = self.ps.x[p_i]
+
+            self.k[p_i] = 0.0
+
+            J_ii = ti.math.vec3(0.0)
+            for j in range(self.ps.particle_neighbors_num[p_i]):
+                p_j = self.ps.particle_neighbors[p_i, j]
+                # Fluid neighbors
+                xj = self.ps.x[p_j]
+                xij = xi - xj
+                r = xij.norm()
+                den += self.ps.m[p_j] * self.W(r, self.ps.support_radius)
+                J_ij = self.ps.m[p_j] * self.gradW(xij, self.ps.support_radius)
+                self.k[p_i] += J_ij.dot(J_ij)
+                J_ii += J_ij
+
+            self.k[p_i] += J_ii.dot(J_ii)
+            self.ps.density[p_i] = den
+
+    @ti.kernel
+    def b_test(self):
+
+        nu = 0.4
+        beta = 1e-6
+
+        for p_i in ti.grouped(self.ps.x):
+
+            self.dx[p_i] = ti.math.vec3(0.0)
+            dx_p = ti.math.vec3(0.0)
+            dx_c = ti.math.vec3(0.0)
+            if not self.ps.is_dynamic[p_i]:
+                continue
+
+            xi = self.ps.x[p_i]
+            ki = (self.ps.density[p_i] - self.ps.density0[p_i]) / self.k[p_i]
+            for j in range(self.ps.particle_neighbors_num[p_i]):
+                p_j = self.ps.particle_neighbors[p_i, j]
+                xj = self.ps.x[p_j]
+                xij = xi - xj
+                r = xij.norm()
+                kj = (self.ps.density[p_j] - self.ps.density0[p_j]) / self.k[p_j]
+                dx_p += self.ps.m[p_j] * (ki + kj) * self.gradW(xij, self.ps.support_radius)
+                dx_c += (r - self.ps.particle_diameter) * self.W(xij.norm(), self.ps.support_radius) * (xij / r)
+            self.dx[p_i] -= nu * (dx_p + beta * dx_c)
+
+        gamma = 1e-6
+        for k in ti.grouped(self.ps.x_s):
+            xs = self.ps.x_s[k]
+            for i in range(self.ps.surface_neighbor_num[k]):
+                i0 = self.ps.surface_neighbor_idx[k, i]
+                p_i = self.ps.ori2cur[i0]
+                xi = self.ps.x[p_i]
+                xis = xi - xs
+                self.dx[p_i] -= gamma * xis * self.W(xis.norm(), self.ps.support_radius)
+
+        for p_i in ti.grouped(self.ps.x):
+            self.ps.x[p_i] += self.dx[p_i]
+
+
+    def test(self):
+
+        # print("test")
+        self.a_test()
+        self.b_test()
+
+
+
+
 
     def solve(self, dt):
         t_start = time.perf_counter()
@@ -428,12 +499,9 @@ class Pressure:
         Jd = self.Jx
         d = self.dx
         d.copy_from(self.s)
-        # d.fill(0.0)
         c = self.c
         g = self.tmp
-        # P = self.Hii
         p = self.a
-
         opt_iter = 0
         for _ in range(self.max_iteration_opt):
 
@@ -457,7 +525,6 @@ class Pressure:
                 err = self.dot(p, p)
             err_log = self.dot(p, p)
 
-
             self.stats_opt_error.append(float(err_log))
             if self.print_opt_error:
                 print(f"opt error: {err_log}")
@@ -480,8 +547,8 @@ class Pressure:
 
         # Collect optimizer iteration count per outer solve
         self.stats_opt_iter.append(int(opt_iter))
-        if self.print_opt_iter:
-            print(f"opt iter: {opt_iter}")
+        # if self.print_opt_iter:
+        #     print(f"opt iter: {opt_iter}")
 
         # x_n+1
         add(self.ps.x, self.ps.x, 1.0, self.dx)
