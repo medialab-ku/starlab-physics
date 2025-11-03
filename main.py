@@ -123,16 +123,18 @@ if __name__ == "__main__":
     def show_options_solver():
         with gui.sub_window("Solver settings", 0., 0., 0.4, 0.4) as w:
             fw.dt = w.slider_float("dt", fw.dt, 0.001, 0.04)
-            fw.alpha = w.slider_float("alpha", fw.alpha, 0.0, 10.0)
-            fw.YM = w.slider_float("YM", fw.YM, 1e6, 10e6)
-            fw.PR = w.slider_float("PR", fw.PR, 0.0, 0.499)
-            elasticity.precondition = w.slider_int("precondition", elasticity.precondition, 0, 2)
+            elasticity.alpha = w.slider_float("alpha", elasticity.alpha, 0.0, 10.0)
+            elasticity.YM = w.slider_float("YM", elasticity.YM, 1e6, 10e6)
+            elasticity.PR = w.slider_float("PR", elasticity.PR, 0.0, 0.499)
+            elasticity.max_iteration_pcg = w.slider_int("max iteration", elasticity.max_iteration_pcg, 1, 1000)
+            elasticity.tol_pcg = w.slider_int("tol", elasticity.tol_pcg, 1, 15)
+            elasticity.precondition[None] = w.slider_int("precondition", elasticity.precondition[None], 0, 2)
             
-            if elasticity.precondition == 0:
+            if elasticity.precondition[None] == 0:
                 gui.text("precondition: none")
-            elif elasticity.precondition == 1:
+            elif elasticity.precondition[None] == 1:
                 gui.text("precondition: mass")
-            elif elasticity.precondition == 2:
+            elif elasticity.precondition[None] == 2:
                 gui.text("precondition: Aii")
 
             try:

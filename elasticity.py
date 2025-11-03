@@ -13,7 +13,9 @@ class Elasticity:
 
         self.ps = particle_system
         self.k = 1e6
-
+        self.YM = 7e6 # Young Modulus
+        self.PR = 0.0  # Poisson Ratio
+        self.alpha = 0.0 # Zero Energy Mode coefficient
         #TODO: allocate F, L for deformable particles only
         self.L      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.F      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
@@ -50,9 +52,9 @@ class Elasticity:
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
-        self.max_iteration_pcg = 3
-        self.tol_pcg           = 5
-        self.precondition      = 0
+        self.max_iteration_pcg = 1000
+        self.tol_pcg           = 3
+        self.precondition      = ti.field(dtype=ti.i32, shape=())
 
         self.pcg_last_iter = 0
         self.stats_elapsed_ms = []
@@ -355,7 +357,11 @@ class Elasticity:
                 h = self.VjLjgradW[p_i0, j]
                 hh += h.dot(h) / self.ps.m_V0[p_j]
 
-            Aii += 2.0 * dt * dt * mu * self.ps.m_V0[p_i] * (g_sum.dot(g_sum) + self.ps.m_V0[p_i] * hh)
+            Aii += 2.0 * dt * dt * mu * self.ps.m_V0[p_i] * (g_sum.dot(g_sum) + self.ps.m_V0[p_i] * hh) * ti.Matrix.identity(float, 3)
+
+            if self.ps.is_pinned[p_i]:
+                Aii += dt * dt * self.k * ti.Matrix.identity(float, 3)
+
             self.Aii[p_i] = Aii
 
         for t in range(self.eij_num[0]):
@@ -379,9 +385,10 @@ class Elasticity:
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-            if self.precondition == 1:
+            if self.precondition[None] == 1:
                 z[p_i] = ti.Matrix.identity(float, 3) * self.ps.m_inv[p_i] @ r[p_i]
-            elif self.precondition == 2:
+            elif self.precondition[None] == 2:
+                # print("Aii inverse")
                 z[p_i] = self.invAii[p_i] @ r[p_i]
             else:
                 z[p_i] = r[p_i]
@@ -389,48 +396,48 @@ class Elasticity:
 
     def PCG(self, x, b, alpha, YM, PR, dt):
 
-            x.fill(0.0)
-            r = self.r_pcg
-            z = self.z_pcg
-            p = self.p_pcg
-            Ap = self.Ap
+        x.fill(0.0)
+        r = self.r_pcg
+        z = self.z_pcg
+        p = self.p_pcg
+        Ap = self.Ap
 
-            r.copy_from(b)
-            self.apply_preconditioner(z, r)
-            rz_old = self.dot(r, z)
-            pcg_iter = 0
-            if rz_old > 1e-12:
-                p.copy_from(z)
-                iter = 0
-                for _ in range(self.max_iteration_pcg):
+        r.copy_from(b)
+        self.apply_preconditioner(z, r)
+        rz_old = self.dot(r, z)
+        pcg_iter = 0
+        if rz_old > 1e-12:
+            p.copy_from(z)
+            iter = 0
+            for _ in range(self.max_iteration_pcg):
 
-                    self.compute_Ax(Ap, p, alpha, YM, PR, dt)
-                    pAp = self.dot(p, Ap)
-                    if pAp < 0.0:
-                        print("Warning: non-positive definite matrix!")
+                self.compute_Ax(Ap, p, alpha, YM, PR, dt)
+                pAp = self.dot(p, Ap)
+                if pAp < 0.0:
+                    print("Warning: non-positive definite matrix!")
 
-                    alpha = rz_old / pAp
+                alpha = rz_old / pAp
 
-                    self.add(x, x, alpha, p)
-                    self.add(r, r, -alpha, Ap)
-                    self.apply_preconditioner(z, r)
+                self.add(x, x, alpha, p)
+                self.add(r, r, -alpha, Ap)
+                self.apply_preconditioner(z, r)
 
-                    pcg_iter += 1
-                    r_new = self.dot(r, r)
-                    # if self.print_pcg_error:
-                    #     print(f"PCG error: {r_new}")
+                pcg_iter += 1
+                r_new = self.dot(r, r)
+                # if self.print_pcg_error:
+                #     print(f"PCG error: {r_new}")
 
-                    if r_new < pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
-                        print("PCG ITER:", iter)
-                        break
+                if r_new < pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
+                    print("PCG ITER:", iter)
+                    break
 
-                    iter += 1
-                    rz_new = self.dot(r, z)
-                    beta = rz_new / rz_old
-                    self.add(p, z, beta, p)
-                    rz_old = rz_new
+                iter += 1
+                rz_new = self.dot(r, z)
+                beta = rz_new / rz_old
+                self.add(p, z, beta, p)
+                rz_old = rz_new
 
-                self.pcg_last_iter = pcg_iter
+            self.pcg_last_iter = pcg_iter
 
             # Collect PCG iteration count per PCG solve
             # self.pcg_total_iter += pcg_iter
@@ -508,8 +515,11 @@ class Elasticity:
                 Ax[p_i] += dt * dt * self.k * x[p_i]
 
 
-    def solve(self, alpha, YM, PR, dt):
-
+    def solve(self, dt):
+        alpha = self.alpha
+        YM = self.YM
+        PR = self.PR
+        
         # t0 = time.perf_counter()
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
         self.compute_F(self.x_tmp)
