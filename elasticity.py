@@ -12,7 +12,7 @@ class Elasticity:
     def __init__(self, particle_system):
 
         self.ps = particle_system
-        self.k = 1e6
+        self.k_att = 1e6 # attatchment stiffness
         self.YM = 7e6 # Young Modulus
         self.PR = 0.0  # Poisson Ratio
         self.alpha = 0.0 # Zero Energy Mode coefficient
@@ -221,7 +221,7 @@ class Elasticity:
                 break
             iter += 1
 
-        print("iter", iter)
+        print("Sampling Refinement Iterations: ", iter)
 
     @ti.kernel
     def a(self, nu: float) -> float:
@@ -368,7 +368,7 @@ class Elasticity:
 
             self.grad[p_i] = self.ps.m_V0[p_i] * dt * f_i + dt * self.ZE[p_i]
             if self.ps.is_pinned[p_i]:
-                self.grad[p_i] += dt * self.k * (x[p_i] - self.ps.x0[p_i])
+                self.grad[p_i] += dt * self.k_att * (x[p_i] - self.ps.x0[p_i])
 
 
     @ti.kernel
@@ -417,7 +417,7 @@ class Elasticity:
             Aii += 2.0 * dt * dt * mu * self.ps.m_V0[p_i] * (g_sum.dot(g_sum) + self.ps.m_V0[p_i] * hh) * ti.Matrix.identity(float, 3)
 
             if self.ps.is_pinned[p_i]:
-                Aii += dt * dt * self.k * ti.Matrix.identity(float, 3)
+                Aii += dt * dt * self.k_att * ti.Matrix.identity(float, 3)
 
             self.Aii[p_i] = Aii
 
@@ -437,14 +437,14 @@ class Elasticity:
 
     @ti.kernel
     def apply_preconditioner(self, z: ti.template(), r: ti.template()):
-
+        precondition = self.precondition[None]
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue
 
-            if self.precondition[None] == 1:
+            if precondition == 1:
                 z[p_i] = ti.Matrix.identity(float, 3) * self.ps.m_inv[p_i] @ r[p_i]
-            elif self.precondition[None] == 2:
+            elif precondition == 2:
                 # print("Aii inverse")
                 z[p_i] = self.invAii[p_i] @ r[p_i]
             else:
@@ -569,7 +569,7 @@ class Elasticity:
             Ax[p_i] += self.ps.m_V0[p_i] * dt ** 2 * f_i
 
             if self.ps.is_pinned[p_i]:
-                Ax[p_i] += dt * dt * self.k * x[p_i]
+                Ax[p_i] += dt * dt * self.k_att * x[p_i]
 
 
     def solve(self, dt):
