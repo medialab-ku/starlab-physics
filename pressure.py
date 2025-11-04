@@ -503,6 +503,7 @@ class Pressure:
         g = self.tmp
         p = self.a
         opt_iter = 0
+        
         for _ in range(self.max_iteration_opt):
 
             self.compute_J_x(Jd, d)

@@ -7,10 +7,13 @@ from sph_kernel   import *
 from elastic_util import *
 
 @ti.data_oriented
-class Elasticity:
-    def __init__(self, particle_system):
+class UnifiedSolver:
+    def __init__(self, particle_system, elasticity, pressure):
 
         self.ps = particle_system
+        self.elasticity = elasticity
+        self.pressure = pressure
+
         self.k_att = 1e6 # attatchment stiffness
         self.YM = 7e6 # Young Modulus
         self.PR = 0.0  # Poisson Ratio
@@ -170,6 +173,23 @@ class Elasticity:
 
 
     @ti.kernel
+    def compute_density(self):
+        for p_i in ti.grouped(self.ps.x):
+            if not self.ps.is_dynamic[p_i]:
+                continue
+
+            den = 0.0
+            for j in range(self.ps.particle_neighbors_num[p_i]):
+                p_j = self.ps.particle_neighbors[p_i, j]
+                # Fluid neighbors
+                xij = self.ps.x[p_i] - self.ps.x[p_j]
+                den += self.ps.m[p_j] * self.W(xij.norm(), self.ps.support_radius)
+
+            den += self.ps.m[p_i] * self.W(0.0, self.ps.support_radius)
+            self.ps.density[p_i] = den
+
+
+    @ti.kernel
     def set_skinning_weight(self):
 
         for k in ti.grouped(self.ps.x_s):
@@ -196,23 +216,39 @@ class Elasticity:
 
             p_i0 = self.ps.cur2ori[p_i]
             den = self.ps.m[p_i] * self.W(0.0, self.ps.support_radius)
-            xi0 = self.ps.x0[p_i]
+            # xi0 = self.ps.x0[p_i]
             self.k[p_i] = 0.0
 
             J_ii = ti.math.vec3(0.0)
-            for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j = self.ps.ori2cur[p_j0]
-                xj0 = self.ps.x0[p_j]
-                xij0 = xi0 - xj0
-                r0 = xij0.norm()
-                den += self.ps.m[p_j] * self.W(r0, self.ps.support_radius)
-                J_ij = self.ps.m[p_j] * self.gradW(xij0, self.ps.support_radius)
+            for j in range(self.ps.particle_neighbors_num[p_i]):
+                p_j = self.ps.particle_neighbors[p_i, j]
+                # p_j = self.ps.ori2cur[p_j0]
+                xij = self.ps.x[p_i] - self.ps.x[p_j]
+                # rij = xij.norm()
+                den += self.ps.m[p_j] * self.W(xij.norm(), self.ps.support_radius)
+                J_ij = self.ps.m[p_j] * self.gradW(xij, self.ps.support_radius)
                 self.k[p_i] += J_ij.dot(J_ij)
                 J_ii += J_ij
 
             self.k[p_i] += J_ii.dot(J_ii)
             self.ps.density[p_i] = den
+
+    @ti.kernel
+    def update_rest_den(self):
+
+        for p_i in ti.grouped(self.ps.x):
+            p_i0 = self.ps.cur2ori[p_i]
+            den = 0.0
+            for j in range(self.ps.solid_neighbors_num[p_i0]):
+                p_j0 = self.ps.solid_neighbors[p_i0, j]
+                p_j = self.ps.ori2cur[p_j0]
+                xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
+                den += self.ps.m[p_j] * self.W(xij0.norm(), self.ps.support_radius)
+
+            den += self.ps.m[p_i] * self.W(0.0, self.ps.support_radius)
+            # self.ps.density0[p_i] = den
+            self.ps.density0[p_i] = den
+            self.ps.density[p_i] = self.ps.density0[p_i]
 
 
     def test(self):
@@ -230,7 +266,6 @@ class Elasticity:
 
         print("Sampling Refinement Iterations: ", iter)
 
-
     @ti.kernel
     def a(self, nu: float) -> float:
 
@@ -246,28 +281,39 @@ class Elasticity:
             p_i0 = self.ps.cur2ori[p_i]
             xi0 = self.ps.x0[p_i]
             ki = (self.ps.density[p_i] - self.ps.density0[p_i]) / self.k[p_i]
-            for j in range(self.ps.solid_neighbors_num[p_i0]):
-                p_j0 = self.ps.solid_neighbors[p_i0, j]
-                p_j = self.ps.ori2cur[p_j0]
-                xj0 = self.ps.x0[p_j]
-                xij0 = xi0 - xj0
+            for j in range(self.ps.particle_neighbors_num[p_i]):
+                p_j = self.ps.particle_neighbors[p_i, j]
+                # p_j = self.ps.ori2cur[p_j0]
+                xij = self.ps.x[p_i] - self.ps.x[p_j]
+                # rij = xij.norm()
                 kj = (self.ps.density[p_j] - self.ps.density0[p_j]) / self.k[p_j]
-                dx_i -= self.ps.m[p_j] * (ki + kj) * self.gradW(xij0, self.ps.support_radius)
+                dx_i -= self.ps.m[p_j] * (ki + kj) * self.gradW(xij, self.ps.support_radius)
 
             ti.atomic_max(norm_inf, dx_i.norm())
-            self.ps.x0[p_i] += nu * dx_i
+            self.ps.x[p_i] += nu * dx_i
 
         return norm_inf
 
+    @ti.kernel
+    def update_rest_pos(self):
+        for p_i in ti.grouped(self.ps.x):
+            if self.ps.material[p_i] != self.ps.material_solid:
+                continue
+            self.ps.x0[p_i] = self.ps.x[p_i]
+
+
+    def refine_sampling(self):
+        self.set_initial_neighbors()
+        self.test()
+        self.update_rest_pos()
 
     def initialize(self):
-
         self.set_initial_neighbors()
-        # self.test()
         self.set_rest_volume_and_L()
+        self.update_rest_den()
         self.precompute_value()
         self.set_skinning_weight()
-
+        print(f"initial: {self.ps.density[0] - self.ps.density0[0]}")
         
 
         # for i in range(5):
@@ -587,7 +633,9 @@ class Elasticity:
         alpha = self.alpha
         YM = self.YM
         PR = self.PR
-        
+        # print(f"before solve: {self.ps.density[0] - self.ps.density0[0]}")
+        # self.compute_density()
+        print(f"solve: {self.ps.density[0] - self.ps.density0[0]}")
         # print("solve")
         t0 = time.perf_counter()
         add(self.x_tmp, self.ps.x, dt, self.ps.v)

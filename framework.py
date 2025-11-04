@@ -2,7 +2,7 @@ import taichi as ti
 import time
 @ti.data_oriented
 class Framework:
-    def __init__(self, particle_system, neighbour_search, pressure, viscosity, surface_tension, elasticity):
+    def __init__(self, particle_system, neighbour_search, pressure, viscosity, surface_tension, elasticity, unified_solver=None):
         # super().__init__(particle_system)
 
         self.ps = particle_system
@@ -11,7 +11,7 @@ class Framework:
         self.viscosity = viscosity
         self.surface_tension = surface_tension
         self.elasticity = elasticity
-
+        self.unified_solver = unified_solver
         self.dt = self.ps.cfg.get_cfg("timeStepSize")
         self.g = self.ps.cfg.get_cfg("gravitation")  # Gravity
         self.viscosity_coeff = 0.01            # viscosity
@@ -22,11 +22,19 @@ class Framework:
 
     def initialize(self):
 
+        # self.ns.broad_phase()
+        # self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
+
+        # self.unified_solver.refine_sampling()
+
         self.ns.broad_phase()
         self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
         self.ns.narrow_phase_surface(self.ps.x_0_s, self.ps.x, self.ps.surface_neighbor_num, self.ps.surface_neighbor_idx)
-        self.elasticity.initialize()
 
+        if self.unified_solver is not None:
+            self.unified_solver.initialize()
+        else:
+            self.elasticity.initialize()
 
     @ti.kernel
     def apply_gravity(self, dt: float):
@@ -72,7 +80,7 @@ class Framework:
     def forward(self):
 
         # t0 = time.perf_counter()
-
+        
         self.ns.broad_phase()
         self.ns.narrow_phase(self.ps.x, self.ps.particle_neighbors_num, self.ps.particle_neighbors)
 
@@ -82,21 +90,27 @@ class Framework:
         self.apply_gravity(self.dt)
 
         # self.surface_tension.solve(self.surface_tension_coeff, self.adhesion_coeff, self.dt)
-
         # self.viscosity.solve(self.viscosity_coeff, self.dt)
 
-        self.elasticity.solve(self.dt)
-
-        t0 = time.perf_counter()
-        self.pressure.solve(self.dt)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        print("pressure: ", elapsed_ms)
+        if self.unified_solver is not None:
+            self.unified_solver.solve(self.dt)
+            # self.pressure.solve(self.dt)
+            
+        else:
+            self.elasticity.solve(self.dt)
+            # t0 = time.perf_counter()
+            self.pressure.solve(self.dt)
+            # elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            # print("pressure: ", elapsed_ms)
 
         self.advect_position(self.dt)
 
         self.ns.enforce_boundary_3D()
 
-        self.apply_damping(0.8)
+        # self.apply_damping(0.9)
 
-        self.elasticity.update_surface_vertex()
+        if self.unified_solver is not None:
+            self.unified_solver.update_surface_vertex()
+        else:
+            self.elasticity.update_surface_vertex()
 

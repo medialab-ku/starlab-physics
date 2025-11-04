@@ -212,21 +212,22 @@ class OutputManager:
         base_prefix = self._stats_prefix_cache or f"{self.scene_name}"
 
         # 1) Pressure stats
-        stats = self._pressure.get_stats_numpy()
+        stats_p = self._pressure.get_stats_numpy()
         for key in ("elapsed_time_ms", "opt_iter", "opt_error", "pcg_iter", "pcg_error", "kinetic_energy"):
-            arr = stats.get(key, None)
+            arr = stats_p.get(key, None)
             if arr is None:
                 continue
-            out_path = os.path.join(self.cfg.stats_dir, f"{base_prefix}-{variant}-{key}.npy")
+            out_path = os.path.join(self.cfg.stats_dir, f"{base_prefix}-press-{variant}-{key}.npy")
             np.save(out_path, arr)
         
         # 2) Elasticity stats
-        el_prefix = f"{base_prefix}-elas"
-        np.save(os.path.join(self.cfg.stats_dir, f"{el_prefix}-{variant}-elapsed_time_ms.npy"),
-                np.asarray(self._elasticity.stats_elapsed_ms, dtype=np.float64))
-        np.save(os.path.join(self.cfg.stats_dir, f"{el_prefix}-{variant}-pcg_iter.npy"),
-                np.asarray(self._elasticity.stats_pcg_iter, dtype=np.int32))
-
+        stats_e = self._elasticity.get_stats_numpy()
+        for key in ("elapsed_time_ms", "pcg_iter", "stretch_energy"):
+            arr = stats_e.get(key, None)
+            if arr is None:
+                continue
+            out_path = os.path.join(self.cfg.stats_dir, f"{base_prefix}-elas-{variant}-{key}.npy")
+            np.save(out_path, arr)
 
     def _collect_solid_ids(self, ps):
         solid_ids = []
