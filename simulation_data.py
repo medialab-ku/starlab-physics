@@ -83,6 +83,7 @@ class SimulationData:
         self.color = ti.Vector.field(4, dtype=int, shape=self.particle_max_num) # RGBA
         self.is_dynamic = ti.field(dtype=int, shape=self.particle_max_num)
         self.is_pinned = ti.field(dtype=int, shape=self.particle_max_num)
+        self.is_kinematic = ti.field(dtype=int, shape=self.particle_max_num)
         # self.is_solid   = ti.field(dtype=int, shape=self.particle_max_num)
 
         self.cur2ori = ti.field(dtype=int, shape=self.particle_max_num)
@@ -115,6 +116,7 @@ class SimulationData:
         self.color_buffer = ti.Vector.field(4, dtype=int, shape=self.particle_max_num)
         self.is_dynamic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.is_pinned_buffer = ti.field(dtype=int, shape=self.particle_max_num)
+        self.is_kinematic_buffer = ti.field(dtype=int, shape=self.particle_max_num)
         self.n_buffer = ti.Vector.field(self.dim, dtype=float, shape=self.particle_max_num)
 
         self.cur2ori_buffer = ti.field(dtype=int, shape=self.particle_max_num)

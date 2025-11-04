@@ -12,7 +12,7 @@ from elasticity import Elasticity
 from visualization import VisualizationEngine, VisualizationSettings, ColorMode, HeatmapField
 from output_manager import OutputManager, OutputConfig, ExportFormat
 from cache_system import SimulationCache
-from randomizer import ParticleRandomizer
+from randomizer import CubeRandomizer
 from pinning import ParticlePinning
 from animation import AnimationEngine
 
@@ -42,6 +42,21 @@ if __name__ == "__main__":
     viscosity = Viscosity(ps)
     surface_tension = SurfaceTension(ps)
     elasticity = Elasticity(ps)
+    ympr = config.get_cfg("YM PR alpha")
+
+    if ympr is not None and len(ympr) >= 3:
+        elasticity.YM = float(ympr[0])
+        elasticity.PR = float(ympr[1])
+        elasticity.alpha = float(ympr[2])
+
+    pcg_max = config.get_cfg("max_iter")
+    if pcg_max is not None:
+        elasticity.max_iteration_pcg = int(pcg_max)
+
+    pcg_tol = config.get_cfg("tol")
+    if pcg_tol is not None:
+        elasticity.tol_pcg = int(pcg_tol)
+
     pin_util = ParticlePinning(ps)
     pin_geom = pin_util.apply(scene_data) # guide lines
 
@@ -55,7 +70,7 @@ if __name__ == "__main__":
 
     fw.initialize()
     
-    randomizer = ParticleRandomizer(ps, neighbor_search)
+    randomizer = CubeRandomizer(ps)
 
     window = ti.ui.Window('SPH', (1024, 1024), show_window=True, vsync=False)
     gui = window.get_gui()
@@ -104,7 +119,7 @@ if __name__ == "__main__":
         export_mesh_obj=False,
         frame_interval=20,
         include_heatmap_attributes=True,
-        end_frame=600,
+        end_frame=1000,
     )
     output_manager = OutputManager(scene_name, output_cfg)
     output_manager.attach_stats_sources(pressure, elasticity, fw)
@@ -119,6 +134,8 @@ if __name__ == "__main__":
     cache = SimulationCache(ps, fw, max_steps=10)
     cache.snapshot_baseline(anim_time=anim_time)
 
+    end_frame_limit = config.get_cfg("endFrame")
+    end_frame_limit = int(end_frame_limit) if end_frame_limit is not None else None
 
     def show_options_solver():
         with gui.sub_window("Solver settings", 0., 0., 0.4, 0.4) as w:
@@ -171,8 +188,7 @@ if __name__ == "__main__":
     cnt_obj = 0
     runSim = False
     expand_mode = False
-    expand_factor = 4.0
-    rand_step_alpha = 0.01
+    expand_factor = 1.0
     random_seed = 1337
 
     while window.running:
@@ -189,8 +205,8 @@ if __name__ == "__main__":
 
         if window.get_event(ti.ui.PRESS):
             if window.event.key == ' ':
-                if expand_mode:
-                    expand_mode = False
+                expand_mode = False
+
                 # Toggle run state
                 runSim = not runSim
                 if runSim:
@@ -211,8 +227,10 @@ if __name__ == "__main__":
 
             if window.event.key == 'p':
                 expand_mode = True
-                randomizer.begin(expand=expand_factor, seed=random_seed)
-                runSim = True
+                # runSim = False
+                # runSim = True
+                randomizer.run(expand=expand_factor, seed=random_seed)
+                elasticity.apply_mesh_skinning()
                 print("Randomize...")
 
             if window.event.key == 'r':
@@ -235,7 +253,8 @@ if __name__ == "__main__":
         if (output_cfg.export_particles or output_cfg.export_mesh_obj) and frame_cnt > int(output_cfg.end_frame):
             runSim = False
 
-
+        if end_frame_limit is not None and frame_cnt >= end_frame_limit:
+            runSim = False
 
         if runSim:
             dt_frame = fw.dt
@@ -248,16 +267,16 @@ if __name__ == "__main__":
             fw.dt = dt_sub
 
             if expand_mode:
-                randomizer.step(alpha=rand_step_alpha)
-                if not randomizer.active:
-                    expand_mode = False
-                    runSim = False
-                    print("Randomize completed. Press SPACE to resume physics.")
+                # randomizer.step(alpha=rand_step_alpha)
+                # if not randomizer.active:
+                # runSim = False
+                expand_mode = False
+                print("Randomize completed. Press SPACE to resume physics.")
             else:
-
                 # fw.test()
-                fw.forward()
                 anim.apply(anim_time, dt_sub)
+                fw.forward()
+                anim.clear_kinematic()
                 anim_time += dt_sub
 
             fw.dt = dt_frame
@@ -267,7 +286,7 @@ if __name__ == "__main__":
                 cache.push(frame_cnt=frame_cnt, anim_time=anim_time)
 
         viz.update_buffers()
-        output_manager.on_step(frame_cnt, ps, viz)
+        output_manager.on_step(frame_cnt, ps, viz, force=expand_mode)
 
         if ps.dim == 2:
             canvas.set_background_color(background_color)

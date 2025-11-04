@@ -67,7 +67,7 @@ class OutputManager:
         self._ensure_dirs()
 
 
-    def on_step(self, frame_idx: int, ps, viz_engine):
+    def on_step(self, frame_idx: int, ps, viz_engine, force: bool = False):
         if not (self.cfg.export_particles or self.cfg.export_mesh_obj or self.cfg.export_stats):
             return
             
@@ -80,7 +80,7 @@ class OutputManager:
         exported_mesh = False
 
         if self.cfg.export_particles:
-            if (self.last_export_frame_particles < 0) or (frame_idx - self.last_export_frame_particles >= int(self.cfg.frame_interval)):
+            if force or (self.last_export_frame_particles < 0) or (frame_idx - self.last_export_frame_particles >= int(self.cfg.frame_interval)):
                 export_data = viz_engine.get_heatmap_attributes() if self.cfg.include_heatmap_attributes else None
                 if self._export_particles_ply(ps, export_data, frame_idx):
                     self.last_export_frame_particles = frame_idx
@@ -96,7 +96,7 @@ class OutputManager:
         has_mesh = has_rigid or has_solid
 
         if self.cfg.export_mesh_obj and has_mesh:
-            if (self.last_export_frame_mesh < 0) or (frame_idx - self.last_export_frame_mesh >= int(self.cfg.frame_interval)):
+            if force or (self.last_export_frame_mesh < 0) or (frame_idx - self.last_export_frame_mesh >= int(self.cfg.frame_interval)):
                 if self._export_mesh_obj(ps, frame_idx):
                     self.last_export_frame_mesh = frame_idx
                     exported_mesh = True

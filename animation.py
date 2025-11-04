@@ -138,6 +138,8 @@ class AnimationEngine:
         for k in range(count):
             orig = idxs[k]
             cur = self.ps.ori2cur[orig]
+            self.ps.is_kinematic[cur] = 1
+            self.ps.is_dynamic[cur] = 0
 
             X0 = self.ps.x0[cur]
             # (X0 - pivot) ⊙ S
@@ -240,3 +242,9 @@ class AnimationEngine:
                        [0, 0, 1]], dtype=np.float32)
         # R = Rz * Ry * Rx (intrinsic XYZ)
         return (Rz @ Ry @ Rx).astype(np.float32)
+
+    @ti.kernel
+    def clear_kinematic(self):
+        for p in range(self.ps.particle_num[None]):
+            self.ps.is_kinematic[p] = 0
+            self.ps.is_dynamic[p] = 1

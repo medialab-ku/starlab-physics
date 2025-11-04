@@ -15,7 +15,7 @@ class Elasticity:
         self.k_att = 1e6 # attatchment stiffness
         self.YM = 7e6 # Young Modulus
         self.PR = 0.0  # Poisson Ratio
-        self.alpha = 0.0 # Zero Energy Mode coefficient
+        self.alpha = 1.0 # Zero Energy Mode coefficient
         #TODO: allocate F, L for deformable particles only
         self.L      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
         self.F      = ti.Matrix.field(n=3, m=3, dtype=float, shape=self.ps.particle_max_num)
@@ -51,8 +51,8 @@ class Elasticity:
         self.r_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
         self.p_pcg = ti.Vector.field(n=3, dtype=float, shape=self.ps.particle_max_num)
 
-        self.max_iteration_pcg = 1000
-        self.tol_pcg           = 3
+        self.max_iteration_pcg = 100
+        self.tol_pcg           = 5
         self.precondition      = ti.field(dtype=ti.i32, shape=())
 
         self.pcg_last_iter = 0
@@ -365,7 +365,7 @@ class Elasticity:
                 f_i += (PL_i + PL_j)
 
             self.grad[p_i] = self.ps.m_V0[p_i] * dt * f_i + dt * self.ZE[p_i]
-            if self.ps.is_pinned[p_i]:
+            if self.ps.is_pinned[p_i] and not self.ps.is_kinematic[p_i]:
                 self.grad[p_i] += dt * self.k_att * (x[p_i] - self.ps.x0[p_i])
 
 
@@ -414,7 +414,7 @@ class Elasticity:
 
             Aii += 2.0 * dt * dt * mu * self.ps.m_V0[p_i] * (g_sum.dot(g_sum) + self.ps.m_V0[p_i] * hh) * ti.Matrix.identity(float, 3)
 
-            if self.ps.is_pinned[p_i]:
+            if self.ps.is_pinned[p_i] and not self.ps.is_kinematic[p_i]:
                 Aii += dt * dt * self.k_att * ti.Matrix.identity(float, 3)
 
             self.Aii[p_i] = Aii
@@ -483,7 +483,7 @@ class Elasticity:
                 #     print(f"PCG error: {r_new}")
 
                 if r_new < pow(10, -self.tol_pcg) or pcg_iter >= self.max_iteration_pcg:
-                    print("PCG ITER:", iter)
+                    # print("PCG ITER:", iter)
                     break
 
                 iter += 1
@@ -493,7 +493,6 @@ class Elasticity:
                 rz_old = rz_new
 
             self.pcg_last_iter = pcg_iter
-
             # Collect PCG iteration count per PCG solve
             # self.pcg_total_iter += pcg_iter
 
@@ -536,7 +535,7 @@ class Elasticity:
 
             xij0 = self.ps.x0[p_i] - self.ps.x0[p_j]
             xij = x[p_i] - x[p_j]
-            F_i = self.F[p_i]
+            F_i = self.F_tmp[p_i]
             Kij_e_ij = dt ** 2 * alpha * mu * self.K[t] * (F_i @ xij0 - xij)
 
             for k in range(self.ps.solid_neighbors_num[p_i0]):
@@ -566,7 +565,7 @@ class Elasticity:
 
             Ax[p_i] += self.ps.m_V0[p_i] * dt ** 2 * f_i
 
-            if self.ps.is_pinned[p_i]:
+            if self.ps.is_pinned[p_i] and not self.ps.is_kinematic[p_i]:
                 Ax[p_i] += dt * dt * self.k_att * x[p_i]
 
 
@@ -575,30 +574,31 @@ class Elasticity:
         YM = self.YM
         PR = self.PR
         
-        # t0 = time.perf_counter()
+        # print("solve")
+        t0 = time.perf_counter()
         add(self.x_tmp, self.ps.x, dt, self.ps.v)
         self.compute_F(self.x_tmp)
-        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        # print("deformation gradient: ", elapsed_ms)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print("deformation gradient: ", elapsed_ms)
 
         self.compute_P(YM, PR)
 
-        # t0 = time.perf_counter()
+        t0 = time.perf_counter()
 
         self.ZE.fill(0.0)
         self.compute_ZE(alpha, YM, PR, self.x_tmp)
-        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        # print("zero energy: ", elapsed_ms)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print("zero energy: ", elapsed_ms)
         self.compute_gradient(self.x_tmp, dt)
         self.compute_Aii(alpha, YM, PR, dt)
 
-        # t0 = time.perf_counter()
+        t0 = time.perf_counter()
         self.v_tmp.copy_from(self.ps.v)
         self.PCG(x=self.dv, b=self.grad, alpha=alpha, YM=YM, PR=PR, dt=dt)
         add(self.v_tmp, self.v_tmp, -1.0, self.dv)
         self.ps.v.copy_from(self.v_tmp)
-        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        # print("linear solve: ", elapsed_ms)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print("linear solve: ", elapsed_ms)
 
         # self.stats_elapsed_ms.append(float(elapsed_ms))
         self.stats_pcg_iter.append(int(self.pcg_last_iter))

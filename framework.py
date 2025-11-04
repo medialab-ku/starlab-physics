@@ -31,7 +31,7 @@ class Framework:
     @ti.kernel
     def apply_gravity(self, dt: float):
         for p_i in ti.grouped(self.ps.x):
-            if not self.ps.is_dynamic[p_i]:
+            if self.ps.is_kinematic[p_i] or not self.ps.is_dynamic[p_i]:
                 self.ps.acceleration[p_i].fill(0.0)
                 continue
 
@@ -87,16 +87,16 @@ class Framework:
 
         self.elasticity.solve(self.dt)
 
-        # t0 = time.perf_counter()
-        # self.pressure.solve(self.dt)
-        # elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        # print("pressure: ", elapsed_ms)
+        t0 = time.perf_counter()
+        self.pressure.solve(self.dt)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print("pressure: ", elapsed_ms)
 
         self.advect_position(self.dt)
 
         self.ns.enforce_boundary_3D()
 
-        # self.apply_damping(0.99)
+        self.apply_damping(0.8)
 
         self.elasticity.update_surface_vertex()
 
