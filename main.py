@@ -1,4 +1,7 @@
 import argparse
+import os
+import time
+import numpy as np
 import taichi as ti
 from config_builder import SimConfig
 from scene_loader import SceneLoader
@@ -190,6 +193,7 @@ if __name__ == "__main__":
     cnt_obj = 0
     runSim = False
     expand_mode = False
+    elapsed_time_written = False
     expand_factor = 1.0
     random_seed = 1337
 
@@ -258,6 +262,17 @@ if __name__ == "__main__":
         if end_frame_limit is not None and frame_cnt >= end_frame_limit:
             runSim = False
 
+        # Test
+        if (end_frame_limit is not None) and (frame_cnt >= end_frame_limit) and (not runSim) and (not elapsed_time_written):
+            os.makedirs("log", exist_ok=True)
+            out_txt = os.path.join("log", f"{scene_name}_elapsed_time.txt")
+            with open(out_txt, "w") as f:
+                for i, ms in enumerate(elasticity.stats_elapsed_ms):
+                    f.write(f"frame{i:04d}: {round(float(ms), 4):.4f}\n")
+            print(f"Elapsed time written to {out_txt}")
+            print(f"Average elapsed time: {np.mean(elasticity.stats_elapsed_ms):.4f} ms")
+            elapsed_time_written = True
+
         if runSim:
             dt_frame = fw.dt
             dt_sub = dt_frame
@@ -277,7 +292,10 @@ if __name__ == "__main__":
             else:
                 # fw.test()
                 anim.apply(anim_time, dt_sub)
+                t0 = time.perf_counter()
                 fw.forward()
+                elpased_ms_frame = (time.perf_counter() - t0) * 1000.0
+                elasticity.stats_elapsed_ms.append(float(elpased_ms_frame))
                 anim.clear_kinematic()
                 anim_time += dt_sub
 

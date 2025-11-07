@@ -99,7 +99,7 @@ class Framework:
         else:
             self.elasticity.solve(self.dt)
             # t0 = time.perf_counter()
-            self.pressure.solve(self.dt)
+            # self.pressure.solve(self.dt)
             # elapsed_ms = (time.perf_counter() - t0) * 1000.0
             # print("pressure: ", elapsed_ms)
 
