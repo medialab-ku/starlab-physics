@@ -16,7 +16,12 @@
         "exportPly": false,
         "exportObj": false,
         "transparentObjects": [],
-        "alpha": 0.2
+        "alpha": 0.2,
+        "endFrame": 500,
+        "max_iter": 5,
+        "tol": 5,
+        "elasticityParams": [7e6, 0.0, 1.0]
+
     },
 
     "SolidBodies" : [

@@ -52,7 +52,7 @@ class Elasticity:
 
         self.max_iteration_pcg = 100
         self.tol_pcg           = 5
-        self.precondition      = ti.field(dtype=ti.i32, shape=())
+        self.precondition      = 2
 
         self.pcg_last_iter = 0
         self.stretch_energy = 0.0
@@ -449,7 +449,7 @@ class Elasticity:
 
     @ti.kernel
     def apply_preconditioner(self, z: ti.template(), r: ti.template()):
-        precondition = self.precondition[None]
+        precondition = self.precondition
         for p_i in ti.grouped(self.ps.x):
             if self.ps.material[p_i] != self.ps.material_solid:
                 continue

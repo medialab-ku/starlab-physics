@@ -47,17 +47,17 @@ if __name__ == "__main__":
     ympr = config.get_cfg("YM PR alpha")
 
     if ympr is not None and len(ympr) >= 3:
-        us.YM = float(ympr[0])
-        us.PR = float(ympr[1])
-        us.alpha = float(ympr[2])
+        elasticity.YM = float(ympr[0])
+        elasticity.PR = float(ympr[1])
+        elasticity.alpha = float(ympr[2])
 
     pcg_max = config.get_cfg("max_iter")
     if pcg_max is not None:
-        us.max_iteration_pcg = int(pcg_max)
+        elasticity.max_iteration_pcg = int(pcg_max)
 
     pcg_tol = config.get_cfg("tol")
     if pcg_tol is not None:
-        us.tol_pcg = int(pcg_tol)
+        elasticity.tol_pcg = int(pcg_tol)
 
     pin_util = ParticlePinning(ps)
     pin_geom = pin_util.apply(scene_data) # guide lines
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     anim = AnimationEngine(ps)
     anim.build(scene_data, pin_geom)
 
-    fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity, us)
+    fw = Framework(ps, neighbor_search, pressure, viscosity, surface_tension, elasticity)
 
     anim_time = 0.0
     anim.apply(anim_time, 0.0)
@@ -142,20 +142,20 @@ if __name__ == "__main__":
     def show_options_solver():
         with gui.sub_window("Solver settings", 0., 0., 0.4, 0.4) as w:
             fw.dt = w.slider_float("dt", fw.dt, 0.001, 0.04)
-            us.alpha = w.slider_float("alpha", us.alpha, 0.0, 10.0)
-            us.YM = w.slider_float("YM", us.YM, 1e6, 10e6)
-            us.PR = w.slider_float("PR", us.PR, 0.0, 0.499)
-            us.max_iteration_pcg = w.slider_int("max iteration", us.max_iteration_pcg, 1, 1000)
-            us.tol_pcg = w.slider_int("tol", us.tol_pcg, 1, 15)
-            us.precondition[None] = w.slider_int("precondition", us.precondition[None], 0, 2)
-            
-            if us.precondition[None] == 0:
-                gui.text("precondition: none")
-            elif us.precondition[None] == 1:
-                gui.text("precondition: mass")
-            elif us.precondition[None] == 2:
-                gui.text("precondition: Aii")
+            elasticity.alpha = w.slider_float("alpha", elasticity.alpha, 0.0, 10.0)
+            elasticity.YM = w.slider_float("YM", elasticity.YM, 1e6, 10e6)
+            elasticity.PR = w.slider_float("PR", elasticity.PR, 0.0, 0.499)
+            elasticity.max_iteration_pcg = w.slider_int("max iteration", elasticity.max_iteration_pcg, 1, 1000)
+            elasticity.tol_pcg = w.slider_int("tol", elasticity.tol_pcg, 1, 15)
+            elasticity.precondition = w.slider_int("precondition", elasticity.precondition, 0, 2)
 
+            if elasticity.precondition == 0:
+                gui.text("precondition: none")
+            elif elasticity.precondition == 1:
+                gui.text("precondition: mass")
+            elif elasticity.precondition == 2:
+                gui.text("precondition: Aii")
+            
             try:
                 N_active = int(ps.particle_num[None])
                 mats = ps.material.to_numpy()[:N_active]
